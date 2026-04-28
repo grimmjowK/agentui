@@ -24,6 +24,7 @@ interface UseSlashCommandsOptions {
   setInput: Dispatch<SetStateAction<string>>;
   textareaRef: RefObject<HTMLTextAreaElement>;
   onExecuteCommand: (command: SlashCommand, rawInput?: string) => void | Promise<void>;
+  onSelectCommand?: (command: SlashCommand) => void;
 }
 
 type ProviderSkill = {
@@ -142,6 +143,7 @@ export function useSlashCommands({
   setInput,
   textareaRef,
   onExecuteCommand,
+  onSelectCommand,
 }: UseSlashCommandsOptions) {
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const [filteredCommands, setFilteredCommands] = useState<SlashCommand[]>([]);

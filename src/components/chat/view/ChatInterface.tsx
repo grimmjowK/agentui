@@ -171,6 +171,8 @@ function ChatInterface({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
+    pendingCommand,
+    clearPendingCommand,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -410,6 +412,8 @@ function ChatInterface({
           })}
           isTextareaExpanded={isTextareaExpanded}
           sendByCtrlEnter={sendByCtrlEnter}
+          pendingCommand={pendingCommand}
+          onClearPendingCommand={clearPendingCommand}
         />
       </div>
 

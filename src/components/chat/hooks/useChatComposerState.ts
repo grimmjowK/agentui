@@ -146,6 +146,8 @@ export function useChatComposerState({
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
   const [thinkingMode, setThinkingMode] = useState('none');
 
+  const [pendingCommand, setPendingCommand] = useState<SlashCommand | null>(null);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputHighlightRef = useRef<HTMLDivElement>(null);
   const handleSubmitRef = useRef<
@@ -153,6 +155,8 @@ export function useChatComposerState({
   >(null);
   const inputValueRef = useRef(input);
   const selectedProjectId = selectedProject?.projectId;
+  const displayTextOverrideRef = useRef<string | null>(null);
+  const pendingCommandAppendedTextRef = useRef<string>('');
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -255,8 +259,15 @@ export function useChatComposerState({
     }
 
     const commandContent = content || '';
-    setInput(commandContent);
-    inputValueRef.current = commandContent;
+    // Append the user's original text so the AI has the full context even when
+    // the template has no $ARGUMENTS placeholder.
+    const appendedText = pendingCommandAppendedTextRef.current;
+    pendingCommandAppendedTextRef.current = '';
+    const finalContent = appendedText
+      ? `${commandContent}\n\n${appendedText}`
+      : commandContent;
+    setInput(finalContent);
+    inputValueRef.current = finalContent;
 
     // Defer submit to next tick so the command text is reflected in UI before dispatching.
     setTimeout(() => {
@@ -347,6 +358,12 @@ export function useChatComposerState({
     ],
   );
 
+  const handleSelectCommand = useCallback((command: SlashCommand) => {
+    setPendingCommand(command);
+    setInput('');
+    inputValueRef.current = '';
+  }, []);
+
   const {
     slashCommands,
     slashCommandsCount,
@@ -367,6 +384,7 @@ export function useChatComposerState({
     setInput,
     textareaRef,
     onExecuteCommand: executeCommand,
+    onSelectCommand: handleSelectCommand,
   });
 
   const {
@@ -468,6 +486,30 @@ export function useChatComposerState({
     ) => {
       event.preventDefault();
       const currentInput = inputValueRef.current;
+
+      // Handle pending command chip: execute command with appended text
+      if (pendingCommand && !isLoading && selectedProject) {
+        const appendedText = currentInput.trim();
+        const rawInput = appendedText
+          ? `${pendingCommand.name} ${appendedText}`
+          : pendingCommand.name;
+        displayTextOverrideRef.current = appendedText || pendingCommand.name;
+        pendingCommandAppendedTextRef.current = appendedText;
+        setPendingCommand(null);
+        setInput('');
+        inputValueRef.current = '';
+        setAttachedImages([]);
+        setUploadingImages(new Map());
+        setImageErrors(new Map());
+        resetCommandMenuState();
+        setIsTextareaExpanded(false);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+        executeCommand(pendingCommand, rawInput);
+        return;
+      }
+
       if (!currentInput.trim() || isLoading || !selectedProject) {
         return;
       }
@@ -537,10 +579,11 @@ export function useChatComposerState({
 
       const userMessage: ChatMessage = {
         type: 'user',
-        content: currentInput,
+        content: displayTextOverrideRef.current ?? currentInput,
         images: uploadedImages as any,
         timestamp: new Date(),
       };
+      displayTextOverrideRef.current = null;
 
       addMessage(userMessage);
       setIsLoading(true); // Processing banner starts
@@ -703,6 +746,7 @@ export function useChatComposerState({
       setIsUserScrolledUp,
       slashCommands,
       thinkingMode,
+      pendingCommand,
     ],
   );
 
@@ -839,6 +883,13 @@ export function useChatComposerState({
     },
     [setCursorPosition, syncInputOverlayScroll],
   );
+
+  const clearPendingCommand = useCallback(() => {
+    setPendingCommand(null);
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, []);
 
   const handleClearInput = useCallback(() => {
     setInput('');
@@ -980,5 +1031,7 @@ export function useChatComposerState({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
+    pendingCommand,
+    clearPendingCommand,
   };
 }

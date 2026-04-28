@@ -15,6 +15,8 @@ router.delete('/sessions/:sessionId', async (req, res) => {
 
         await sessionManager.deleteSession(sessionId);
         sessionsDb.deleteSessionById(sessionId);
+
+
         res.json({ success: true });
     } catch (error) {
         console.error(`Error deleting Gemini session ${req.params.sessionId}:`, error);
