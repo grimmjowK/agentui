@@ -106,6 +106,7 @@
   "gemini": {
     "permissionMode": "Gemini Permission Mode",
     "description": "Control how Gemini CLI handles operation approvals.",
+    "headlessNotice": "Gemini CLI runs in headless mode — all tools (including shell commands) execute automatically regardless of the permission mode selected below. These settings only affect UI display behavior.",
     "modes": {
       "default": {
         "title": "Standard (Ask for Approval)",

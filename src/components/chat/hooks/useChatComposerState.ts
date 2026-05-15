@@ -158,6 +158,15 @@ export function useChatComposerState({
   const displayTextOverrideRef = useRef<string | null>(null);
   const pendingCommandAppendedTextRef = useRef<string>('');
 
+  // 从已有会话导航到新会话时，同步清除输入框内容，
+  // 防止旧会话的草稿文本残留
+  const prevSessionIdForInputRef = useRef(selectedSession?.id);
+  if (prevSessionIdForInputRef.current && !selectedSession) {
+    setInput('');
+    inputValueRef.current = '';
+  }
+  prevSessionIdForInputRef.current = selectedSession?.id;
+
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
       const { action, data } = result;
@@ -957,8 +966,11 @@ export function useChatComposerState({
       }
 
       validIds.forEach((requestId) => {
+        const responseType = provider === 'gemini'
+          ? 'gemini-permission-response'
+          : 'claude-permission-response';
         sendMessage({
-          type: 'claude-permission-response',
+          type: responseType,
           requestId,
           allow: Boolean(decision?.allow),
           updatedInput: decision?.updatedInput,

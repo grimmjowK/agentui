@@ -207,7 +207,7 @@ function ChatInterface({
   });
 
   // On WebSocket reconnect, re-fetch the current session's messages from the server
-  // so missed streaming events are shown. Also reset isLoading.
+  // so missed streaming events are shown. Also re-check session status to fix stuck loading.
   const handleWebSocketReconnect = useCallback(async () => {
     if (!selectedProject || !selectedSession) return;
     const providerVal = (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
@@ -219,7 +219,11 @@ function ChatInterface({
     });
     setIsLoading(false);
     setCanAbortSession(false);
-  }, [selectedProject, selectedSession, sessionStore, setIsLoading, setCanAbortSession]);
+    onSessionNotProcessing?.(selectedSession.id);
+    // Re-check actual session status from backend — if still processing,
+    // the response will set isLoading back to true
+    sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: selectedSession.__provider || providerVal });
+  }, [selectedProject, selectedSession, sessionStore, setIsLoading, setCanAbortSession, onSessionNotProcessing, sendMessage]);
 
   useChatRealtimeHandlers({
     latestMessage,
@@ -268,6 +272,17 @@ function ChatInterface({
       resetStreamingState();
     };
   }, [resetStreamingState]);
+
+  // Safety net: if isLoading stays true for too long without any WebSocket
+  // activity, re-check session status. This catches missed `complete` events.
+  useEffect(() => {
+    if (!isLoading || !selectedSession || !selectedProject) return;
+    const timer = setTimeout(() => {
+      const providerVal = (selectedSession.__provider || localStorage.getItem('selected-provider')) || 'claude';
+      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: providerVal });
+    }, 30_000);
+    return () => clearTimeout(timer);
+  }, [isLoading, latestMessage, selectedSession, selectedProject, sendMessage]);
 
   const permissionContextValue = useMemo(() => ({
     pendingPermissionRequests,

@@ -243,8 +243,8 @@ export function useChatRealtimeHandlers({
           setPendingPermissionRequests((prev) =>
             prev.map((r) => (r.sessionId ? r : { ...r, sessionId: newSessionId })),
           );
+          onNavigateToSession?.(newSessionId);
         }
-        onNavigateToSession?.(newSessionId);
         break;
       }
 

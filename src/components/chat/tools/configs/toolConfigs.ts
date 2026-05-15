@@ -524,6 +524,215 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   },
 
   // ============================================================================
+  // GEMINI CLI 工具名别名 — 复用已有显示配置
+  // ============================================================================
+
+  run_shell_command: {
+    input: {
+      type: 'one-line',
+      icon: 'terminal',
+      getValue: (input) => input.command,
+      action: 'copy',
+      style: 'terminal',
+      wrapText: true,
+      colorScheme: {
+        primary: 'text-green-400 font-mono',
+        secondary: 'text-gray-400',
+        background: '',
+        border: 'border-green-500 dark:border-green-400',
+        icon: 'text-green-500 dark:text-green-400'
+      }
+    },
+    result: {
+      hideOnSuccess: true,
+      type: 'special'
+    }
+  },
+
+  read_file: {
+    input: {
+      type: 'one-line',
+      label: 'Read',
+      getValue: (input) => input.file_path || '',
+      action: 'open-file',
+      colorScheme: {
+        primary: 'text-gray-700 dark:text-gray-300',
+        background: '',
+        border: 'border-gray-300 dark:border-gray-600',
+        icon: 'text-gray-500 dark:text-gray-400'
+      }
+    },
+    result: {
+      hidden: true
+    }
+  },
+
+  write_file: {
+    input: {
+      type: 'collapsible',
+      title: (input) => {
+        const filename = input.file_path?.split('/').pop() || input.file_path || 'file';
+        return `${filename}`;
+      },
+      defaultOpen: false,
+      contentType: 'diff',
+      actionButton: 'none',
+      getContentProps: (input) => ({
+        oldContent: '',
+        newContent: input.content,
+        filePath: input.file_path,
+        badge: 'New',
+        badgeColor: 'green'
+      })
+    },
+    result: {
+      hideOnSuccess: true
+    }
+  },
+
+  replace: {
+    input: {
+      type: 'collapsible',
+      title: (input) => {
+        const filename = input.file_path?.split('/').pop() || input.file_path || 'file';
+        return `${filename}`;
+      },
+      defaultOpen: false,
+      contentType: 'diff',
+      actionButton: 'none',
+      getContentProps: (input) => ({
+        oldContent: input.old_string,
+        newContent: input.new_string,
+        filePath: input.file_path,
+        badge: 'Edit',
+        badgeColor: 'gray'
+      })
+    },
+    result: {
+      hideOnSuccess: true
+    }
+  },
+
+  grep_search: {
+    input: {
+      type: 'one-line',
+      label: 'Grep',
+      getValue: (input) => input.pattern || input.query || '',
+      getSecondary: (input) => input.path ? `in ${input.path}` : undefined,
+      action: 'jump-to-results',
+      colorScheme: {
+        primary: 'text-gray-700 dark:text-gray-300',
+        secondary: 'text-gray-500 dark:text-gray-400',
+        background: '',
+        border: 'border-gray-400 dark:border-gray-500',
+        icon: 'text-gray-500 dark:text-gray-400'
+      }
+    },
+    result: {
+      type: 'collapsible',
+      defaultOpen: false,
+      title: (result) => {
+        const toolData = result.toolUseResult || {};
+        const count = toolData.numFiles || toolData.filenames?.length || 0;
+        return `Found ${count} ${count === 1 ? 'file' : 'files'}`;
+      },
+      contentType: 'file-list',
+      getContentProps: (result) => {
+        const toolData = result.toolUseResult || {};
+        return {
+          files: toolData.filenames || []
+        };
+      }
+    }
+  },
+
+  write_todos: {
+    input: {
+      type: 'collapsible',
+      title: 'Updating todo list',
+      defaultOpen: false,
+      contentType: 'todo-list',
+      getContentProps: (input) => ({
+        todos: input.todos
+      })
+    },
+    result: {
+      type: 'collapsible',
+      contentType: 'success-message',
+      getMessage: () => 'Todo list updated'
+    }
+  },
+
+  invoke_agent: {
+    input: {
+      type: 'collapsible',
+      title: (input) => {
+        const agentName = input.agent_name || 'Agent';
+        const description = input.prompt?.slice(0, 60) || 'Running task';
+        return `Subagent / ${agentName}: ${description}`;
+      },
+      defaultOpen: false,
+      contentType: 'markdown',
+      getContentProps: (input) => ({
+        content: input.prompt || ''
+      }),
+      colorScheme: {
+        border: 'border-purple-500 dark:border-purple-400',
+        icon: 'text-purple-500 dark:text-purple-400'
+      }
+    },
+    result: {
+      type: 'collapsible',
+      title: 'Subagent result',
+      defaultOpen: false,
+      contentType: 'markdown',
+      getContentProps: (result) => ({
+        content: String(result?.content || result || 'No response')
+      })
+    }
+  },
+
+  list_directory: {
+    input: {
+      type: 'one-line',
+      label: 'List',
+      getValue: (input) => input.path || input.directory || '.',
+      action: 'none',
+      colorScheme: {
+        primary: 'text-gray-700 dark:text-gray-300',
+        background: '',
+        border: 'border-gray-300 dark:border-gray-600',
+        icon: 'text-gray-500 dark:text-gray-400'
+      }
+    },
+    result: {
+      type: 'collapsible',
+      defaultOpen: false,
+      title: 'Directory listing',
+      contentType: 'text',
+      getContentProps: (result) => ({
+        content: String(result?.content || ''),
+        format: 'plain'
+      })
+    }
+  },
+
+  enter_plan_mode: {
+    input: {
+      type: 'plan',
+      title: 'Implementation plan',
+      defaultOpen: true,
+      contentType: 'markdown',
+      getContentProps: (input) => ({
+        content: input.plan?.replace(/\\n/g, '\n') || input.plan || input.content || ''
+      })
+    },
+    result: {
+      hidden: true
+    }
+  },
+
+  // ============================================================================
   // DEFAULT FALLBACK
   // ============================================================================
 

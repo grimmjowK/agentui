@@ -644,6 +644,7 @@ export function useProjectsState({
       setActiveTab('chat');
       setNewSessionTrigger((previous) => previous + 1);
       navigate('/');
+      sessionStorage.removeItem('pendingSessionId');
 
       if (isMobile) {
         setSidebarOpen(false);
