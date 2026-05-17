@@ -1,5 +1,7 @@
 import express, { type Request, type Response } from 'express';
 
+import multer from 'multer';
+
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';

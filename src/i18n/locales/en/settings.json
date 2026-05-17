@@ -4,6 +4,7 @@
     "account": "Account",
     "permissions": "Permissions",
     "mcpServers": "MCP Servers",
+    "skills": "Skills",
     "appearance": "Appearance"
   },
   "account": {
@@ -325,6 +326,9 @@
       }
     },
     "connectionStatus": "Connection Status",
+    "enable": "Enable",
+    "disable": "Disable",
+    "lastEnabledTooltip": "At least one agent must be enabled",
     "login": {
       "title": "Login",
       "reAuthenticate": "Re-authenticate",
@@ -444,6 +448,52 @@
       "title": "About Codex MCP",
       "description": "Codex supports stdio-based MCP servers. You can add servers that extend Codex's capabilities with additional tools and resources."
     }
+  },
+  "skills": {
+    "title": "Skills",
+    "description": "Skills are Markdown files that extend agent capabilities with custom instructions and knowledge.",
+    "unsupported": "Skills are not supported for this agent.",
+    "addButton": "New Skill",
+    "uploadButton": "Upload",
+    "empty": "No skills configured",
+    "emptyHint": "Create a new skill or upload .md/.zip files to get started.",
+    "scope": {
+      "user": "User (Global)",
+      "project": "Project"
+    },
+    "scopeGroup": {
+      "user": "User Skills",
+      "project": "Project Skills"
+    },
+    "editor": {
+      "titleCreate": "Create Skill",
+      "titleEdit": "Edit Skill",
+      "name": "Skill Name",
+      "namePlaceholder": "e.g., code-review-guidelines",
+      "scope": "Scope",
+      "content": "Content (Markdown)",
+      "contentPlaceholder": "Write your skill content in Markdown...",
+      "save": "Save",
+      "saving": "Saving...",
+      "cancel": "Cancel",
+      "nameRequired": "Skill name is required"
+    },
+    "upload": {
+      "title": "Upload Skill Files",
+      "selectFile": "Select File",
+      "dragHint": "Choose a .md or .zip file",
+      "scope": "Target Scope",
+      "upload": "Upload",
+      "uploading": "Uploading...",
+      "cancel": "Cancel",
+      "invalidType": "Only .md and .zip files are supported",
+      "successCount": "Imported {{count}} skill(s)"
+    },
+    "actions": {
+      "edit": "Edit skill",
+      "delete": "Delete skill"
+    },
+    "confirmDelete": "Are you sure you want to delete skill \"{{name}}\"?"
   },
   "pluginSettings": {
     "title": "Plugins",

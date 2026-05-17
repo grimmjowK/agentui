@@ -3,6 +3,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 
 import { useServerPlatform } from "../../../../hooks/useServerPlatform";
+import { useAgentToggle } from "../../../../hooks/useAgentToggle";
 import SessionProviderLogo from "../../../llm-logo-provider/SessionProviderLogo";
 import {
   CLAUDE_MODELS,
@@ -110,19 +111,29 @@ export default function ProviderSelectionEmptyState({
 }: ProviderSelectionEmptyStateProps) {
   const { t } = useTranslation("chat");
   const { isWindowsServer } = useServerPlatform();
+  const { enabledAgents, loaded: agentToggleLoaded } = useAgentToggle();
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const visibleProviderGroups = useMemo(
-    () => (isWindowsServer ? PROVIDER_GROUPS.filter((p) => p.id !== "cursor") : PROVIDER_GROUPS),
-    [isWindowsServer],
+    () =>
+      PROVIDER_GROUPS.filter((p) => {
+        if (isWindowsServer && p.id === "cursor") return false;
+        if (!enabledAgents[p.id]) return false;
+        return true;
+      }),
+    [isWindowsServer, enabledAgents],
   );
 
   useEffect(() => {
-    if (isWindowsServer && provider === "cursor") {
-      setProvider("claude");
-      localStorage.setItem("selected-provider", "claude");
+    if (!agentToggleLoaded) return;
+    if (!enabledAgents[provider]) {
+      const firstEnabled = visibleProviderGroups[0];
+      if (firstEnabled) {
+        setProvider(firstEnabled.id);
+        localStorage.setItem("selected-provider", firstEnabled.id);
+      }
     }
-  }, [isWindowsServer, provider, setProvider]);
+  }, [agentToggleLoaded, enabledAgents, provider, setProvider, visibleProviderGroups]);
 
   const nextTaskPrompt = t("tasks.nextTaskPrompt", {
     defaultValue: "Start the next task",

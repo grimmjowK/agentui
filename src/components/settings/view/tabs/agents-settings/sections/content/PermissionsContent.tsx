@@ -587,7 +587,7 @@ type GeminiPermissionsProps = {
 
 // Gemini Permissions
 function GeminiPermissions({ permissionMode, onPermissionModeChange }: Omit<GeminiPermissionsProps, 'agent'>) {
-  const { t } = useTranslation(['settings', 'chat']);
+  const { t } = useTranslation('chat');
   return (
     <div className="space-y-6">
       {/* Headless 模式提示 */}
@@ -595,7 +595,7 @@ function GeminiPermissions({ permissionMode, onPermissionModeChange }: Omit<Gemi
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
           <div className="text-sm text-amber-800 dark:text-amber-200">
-            {t('gemini.headlessNotice', { ns: 'chat' })}
+            {t('gemini.headlessNotice')}
           </div>
         </div>
       </div>
