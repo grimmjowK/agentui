@@ -721,7 +721,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const isResumeFailure = sessionId && error.message && (
       error.message.includes('exited with code 1') ||
       error.message.includes('session not found') ||
-      error.message.includes('invalid session')
+      error.message.includes('invalid session') ||
+      error.message.includes('No conversation found')
     );
 
     if (isResumeFailure) {

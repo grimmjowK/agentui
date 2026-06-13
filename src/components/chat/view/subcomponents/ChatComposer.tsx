@@ -11,8 +11,9 @@ import type {
   SetStateAction,
   TouchEvent,
 } from 'react';
-import { ImageIcon, MessageSquareIcon, XIcon, ArrowDownIcon } from 'lucide-react';
+import { ImageIcon, MessageSquareIcon, XIcon, ArrowDownIcon, WifiOffIcon } from 'lucide-react';
 import type { PendingPermissionRequest, PermissionMode, Provider } from '../../types/types';
+import { useWebSocket } from '../../../../contexts/WebSocketContext';
 import CommandMenu from './CommandMenu';
 import CommandChip from './CommandChip';
 import ClaudeStatus from './ClaudeStatus';
@@ -84,6 +85,7 @@ interface ChatComposerProps {
   onCommandSelect: (command: SlashCommand, index: number, isHover: boolean) => void;
   onCloseCommandMenu: () => void;
   isCommandMenuOpen: boolean;
+  submenuMode?: string | null;
   frequentCommands: SlashCommand[];
   getRootProps: (...args: unknown[]) => Record<string, unknown>;
   getInputProps: (...args: unknown[]) => Record<string, unknown>;
@@ -141,6 +143,7 @@ export default function ChatComposer({
   onCommandSelect,
   onCloseCommandMenu,
   isCommandMenuOpen,
+  submenuMode,
   frequentCommands,
   getRootProps,
   getInputProps,
@@ -163,6 +166,7 @@ export default function ChatComposer({
   onClearPendingCommand,
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
+  const { isConnected } = useWebSocket();
   const textareaRect = textareaRef.current?.getBoundingClientRect();
   const commandMenuPosition = {
     top: textareaRect ? Math.max(16, textareaRect.top - 316) : 0,
@@ -247,6 +251,7 @@ export default function ChatComposer({
           position={commandMenuPosition}
           isOpen={isCommandMenuOpen}
           frequentCommands={frequentCommands}
+          submenuMode={submenuMode}
         />
 
         <PromptInput
@@ -399,6 +404,12 @@ export default function ChatComposer({
           </PromptInputTools>
 
           <div className="flex items-center gap-2">
+            {!isConnected && (
+              <div className="flex items-center gap-1 text-xs text-amber-500/80" title="WebSocket 连接断开，正在重连...">
+                <WifiOffIcon className="h-3 w-3" />
+                <span className="hidden sm:inline">重连中...</span>
+              </div>
+            )}
             <div
               className={`hidden text-xs text-muted-foreground/50 transition-opacity duration-200 lg:block ${
                 input.trim() ? 'opacity-0' : 'opacity-100'

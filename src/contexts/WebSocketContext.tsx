@@ -2,9 +2,15 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from '../components/auth/context/AuthContext';
 import { IS_PLATFORM } from '../constants/config';
 
+// 1006 = abnormal close (network error or server rejected handshake)
+// consecutive failures at this code → auth problem, back off
+const AUTH_FAILURE_CLOSE_CODE = 1006;
+const MAX_AUTH_RETRIES = 3;
+const RECONNECT_DELAY_MS = 3000;
+
 type WebSocketContextType = {
   ws: WebSocket | null;
-  sendMessage: (message: any) => void;
+  sendMessage: (message: any) => boolean;
   latestMessage: any | null;
   isConnected: boolean;
 };
@@ -28,16 +34,19 @@ const buildWebSocketUrl = (token: string | null) => {
 
 const useWebSocketProviderState = (): WebSocketContextType => {
   const wsRef = useRef<WebSocket | null>(null);
-  const unmountedRef = useRef(false); // Track if component is unmounted
-  const hasConnectedRef = useRef(false); // Track if we've ever connected (to detect reconnects)
+  const unmountedRef = useRef(false);
+  const hasConnectedRef = useRef(false);
+  const consecutiveFailuresRef = useRef(0);
   const [latestMessage, setLatestMessage] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { token } = useAuth();
 
   useEffect(() => {
+    unmountedRef.current = false;
+    consecutiveFailuresRef.current = 0;
     connect();
-    
+
     return () => {
       unmountedRef.current = true;
       if (reconnectTimeoutRef.current) {
@@ -45,25 +54,27 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       }
       if (wsRef.current) {
         wsRef.current.close();
+        wsRef.current = null;
       }
     };
   }, [token]); // everytime token changes, we reconnect
 
   const connect = useCallback(() => {
-    if (unmountedRef.current) return; // Prevent connection if unmounted
+    if (unmountedRef.current) return;
     try {
-      // Construct WebSocket URL
       const wsUrl = buildWebSocketUrl(token);
+      if (!wsUrl) {
+        console.warn('No authentication token found for WebSocket connection');
+        return;
+      }
 
-      if (!wsUrl) return console.warn('No authentication token found for WebSocket connection');
-      
       const websocket = new WebSocket(wsUrl);
 
       websocket.onopen = () => {
+        consecutiveFailuresRef.current = 0;
         setIsConnected(true);
         wsRef.current = websocket;
         if (hasConnectedRef.current) {
-          // This is a reconnect — signal so components can catch up on missed messages
           setLatestMessage({ type: 'websocket-reconnected', timestamp: Date.now() });
         }
         hasConnectedRef.current = true;
@@ -78,15 +89,35 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         }
       };
 
-      websocket.onclose = () => {
+      websocket.onclose = (event) => {
         setIsConnected(false);
         wsRef.current = null;
-        
-        // Attempt to reconnect after 3 seconds
+
+        if (unmountedRef.current) return;
+
+        // When the server rejects the handshake (auth failure), the browser
+        // always delivers code 1006. After MAX_AUTH_RETRIES consecutive 1006s
+        // without a successful open in between, stop retrying so we don't loop.
+        if (event.code === AUTH_FAILURE_CLOSE_CODE) {
+          consecutiveFailuresRef.current += 1;
+          if (consecutiveFailuresRef.current >= MAX_AUTH_RETRIES) {
+            console.warn(
+              `WebSocket: ${consecutiveFailuresRef.current} consecutive connection failures — pausing reconnect. Check server status or re-login.`
+            );
+            // Still try once more after a longer delay in case it's a server restart
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (unmountedRef.current) return;
+              consecutiveFailuresRef.current = 0;
+              connect();
+            }, RECONNECT_DELAY_MS * 5);
+            return;
+          }
+        }
+
         reconnectTimeoutRef.current = setTimeout(() => {
-          if (unmountedRef.current) return; // Prevent reconnection if unmounted
+          if (unmountedRef.current) return;
           connect();
-        }, 3000);
+        }, RECONNECT_DELAY_MS);
       };
 
       websocket.onerror = (error) => {
@@ -96,14 +127,16 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     } catch (error) {
       console.error('Error creating WebSocket connection:', error);
     }
-  }, [token]); // everytime token changes, we reconnect
+  }, [token]);
 
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = useCallback((message: any): boolean => {
     const socket = wsRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(message));
+      return true;
     } else {
       console.warn('WebSocket not connected');
+      return false;
     }
   }, []);
 
@@ -120,7 +153,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
 
 export const WebSocketProvider = ({ children }: { children: React.ReactNode }) => {
   const webSocketData = useWebSocketProviderState();
-  
+
   return (
     <WebSocketContext.Provider value={webSocketData}>
       {children}

@@ -42,13 +42,18 @@ interface UseChatComposerStateArgs {
   claudeModel: string;
   codexModel: string;
   geminiModel: string;
+  setClaudeModel: (model: string) => void;
+  setCursorModel: (model: string) => void;
+  setCodexModel: (model: string) => void;
+  setGeminiModel: (model: string) => void;
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
-  sendMessage: (message: unknown) => void;
+  sendMessage: (message: unknown) => boolean;
   sendByCtrlEnter?: boolean;
   onSessionActive?: (sessionId?: string | null) => void;
   onSessionProcessing?: (sessionId?: string | null) => void;
+  onSessionNotProcessing?: (sessionId?: string | null) => void;
   onInputFocusChange?: (focused: boolean) => void;
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
@@ -111,6 +116,10 @@ export function useChatComposerState({
   claudeModel,
   codexModel,
   geminiModel,
+  setClaudeModel,
+  setCursorModel,
+  setCodexModel,
+  setGeminiModel,
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -118,6 +127,7 @@ export function useChatComposerState({
   sendByCtrlEnter,
   onSessionActive,
   onSessionProcessing,
+  onSessionNotProcessing,
   onInputFocusChange,
   onFileOpen,
   onShowSettings,
@@ -167,6 +177,29 @@ export function useChatComposerState({
   }
   prevSessionIdForInputRef.current = selectedSession?.id;
 
+  const handleModelSwitch = useCallback((modelValue: string) => {
+    if (provider === 'claude') {
+      setClaudeModel(modelValue);
+      localStorage.setItem('claude-model', modelValue);
+    } else if (provider === 'cursor') {
+      setCursorModel(modelValue);
+      localStorage.setItem('cursor-model', modelValue);
+    } else if (provider === 'codex') {
+      setCodexModel(modelValue);
+      localStorage.setItem('codex-model', modelValue);
+    } else if (provider === 'gemini') {
+      setGeminiModel(modelValue);
+      localStorage.setItem('gemini-model', modelValue);
+    }
+    setInput('');
+    inputValueRef.current = '';
+    addMessage({
+      type: 'assistant',
+      content: `Model switched to: **${modelValue}**`,
+      timestamp: Date.now(),
+    });
+  }, [provider, setClaudeModel, setCursorModel, setCodexModel, setGeminiModel, addMessage]);
+
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
       const { action, data } = result;
@@ -183,13 +216,22 @@ export function useChatComposerState({
           });
           break;
 
-        case 'model':
-          addMessage({
-            type: 'assistant',
-            content: `**Current Model**: ${data.current.model}\n\n**Available Models**:\n\nClaude: ${data.available.claude.join(', ')}\n\nCursor: ${data.available.cursor.join(', ')}`,
-            timestamp: Date.now(),
-          });
+        case 'model': {
+          if (data.message && data.message.startsWith('Switching to model:')) {
+            const targetModel = data.message.replace('Switching to model: ', '').trim();
+            handleModelSwitch(targetModel);
+          } else {
+            const p = data.current.provider || 'claude';
+            const providerModels = data.available[p] || [];
+            const modelContent = `**Current Model**: ${data.current.model}\n\n**Available Models** (${p}):\n${providerModels.join(', ')}`;
+            addMessage({
+              type: 'assistant',
+              content: modelContent,
+              timestamp: Date.now(),
+            });
+          }
           break;
+        }
 
         case 'cost': {
           const costMessage = `**Token Usage**: ${data.tokenUsage.used.toLocaleString()} / ${data.tokenUsage.total.toLocaleString()} (${data.tokenUsage.percentage}%)\n\n**Estimated Cost**:\n- Input: $${data.cost.input}\n- Output: $${data.cost.output}\n- **Total**: $${data.cost.total}\n\n**Model**: ${data.model}`;
@@ -247,7 +289,7 @@ export function useChatComposerState({
           console.warn('Unknown built-in command action:', action);
       }
     },
-    [onFileOpen, onShowSettings, addMessage, clearMessages, rewindMessages],
+    [onFileOpen, onShowSettings, addMessage, clearMessages, rewindMessages, handleModelSwitch],
   );
 
   const handleCustomCommand = useCallback(async (result: CommandExecutionResult) => {
@@ -317,6 +359,7 @@ export function useChatComposerState({
           body: JSON.stringify({
             commandName: command.name,
             commandPath: command.path,
+            commandType: command.type,
             args,
             context,
           }),
@@ -373,6 +416,11 @@ export function useChatComposerState({
     inputValueRef.current = '';
   }, []);
 
+  const currentModel = provider === 'claude' ? claudeModel
+    : provider === 'cursor' ? cursorModel
+    : provider === 'codex' ? codexModel
+    : geminiModel;
+
   const {
     slashCommands,
     slashCommandsCount,
@@ -381,6 +429,7 @@ export function useChatComposerState({
     commandQuery,
     showCommandMenu,
     selectedCommandIndex,
+    submenuMode,
     resetCommandMenuState,
     handleCommandSelect,
     handleToggleCommandMenu,
@@ -394,6 +443,9 @@ export function useChatComposerState({
     textareaRef,
     onExecuteCommand: executeCommand,
     onSelectCommand: handleSelectCommand,
+    onModelSwitch: handleModelSwitch,
+    provider,
+    currentModel,
   });
 
   const {
@@ -649,8 +701,9 @@ export function useChatComposerState({
       const resolvedProjectPath = selectedProject.fullPath || selectedProject.path || '';
       const sessionSummary = getNotificationSessionSummary(selectedSession, currentInput);
 
+      let sent = false;
       if (provider === 'cursor') {
-        sendMessage({
+        sent = sendMessage({
           type: 'cursor-command',
           command: messageContent,
           sessionId: effectiveSessionId,
@@ -666,7 +719,7 @@ export function useChatComposerState({
           },
         });
       } else if (provider === 'codex') {
-        sendMessage({
+        sent = sendMessage({
           type: 'codex-command',
           command: messageContent,
           sessionId: effectiveSessionId,
@@ -681,7 +734,7 @@ export function useChatComposerState({
           },
         });
       } else if (provider === 'gemini') {
-        sendMessage({
+        sent = sendMessage({
           type: 'gemini-command',
           command: messageContent,
           sessionId: effectiveSessionId,
@@ -697,7 +750,7 @@ export function useChatComposerState({
           },
         });
       } else {
-        sendMessage({
+        sent = sendMessage({
           type: 'claude-command',
           command: messageContent,
           options: {
@@ -712,6 +765,21 @@ export function useChatComposerState({
             images: uploadedImages,
           },
         });
+      }
+
+      if (!sent) {
+        setIsLoading(false);
+        setCanAbortSession(false);
+        setClaudeStatus(null);
+        if (effectiveSessionId && !isTemporarySessionId(effectiveSessionId)) {
+          onSessionNotProcessing?.(effectiveSessionId);
+        }
+        addMessage({
+          type: 'error',
+          content: '网络连接已断开，请稍后重试',
+          timestamp: new Date(),
+        });
+        return;
       }
 
       setInput('');
@@ -741,6 +809,7 @@ export function useChatComposerState({
       isLoading,
       onSessionActive,
       onSessionProcessing,
+      onSessionNotProcessing,
       pendingViewSessionRef,
       permissionMode,
       provider,
@@ -1014,6 +1083,7 @@ export function useChatComposerState({
     commandQuery,
     showCommandMenu,
     selectedCommandIndex,
+    submenuMode,
     resetCommandMenuState,
     handleCommandSelect,
     handleToggleCommandMenu,

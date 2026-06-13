@@ -156,6 +156,7 @@ Usage:
 Commands:
   start          Start the CloudCLI server (default)
   sandbox        Manage Docker sandbox environments
+  desktop        Create a desktop shortcut for one-click launch
   status         Show configuration and data locations
   update         Update to the latest version
   help           Show this help information
@@ -594,6 +595,84 @@ async function sandboxCommand(args) {
     }
 }
 
+// ── Desktop shortcut command ───────────────────────────────
+
+async function desktopCommand() {
+    const platform = process.platform;
+    const desktopDir = path.join(os.homedir(), 'Desktop');
+    const port = process.env.SERVER_PORT || '3001';
+
+    if (!fs.existsSync(desktopDir)) {
+        console.error(`\n${c.error('❌')} 未找到桌面目录: ${c.dim(desktopDir)}\n`);
+        process.exit(1);
+    }
+
+    let shortcutPath;
+
+    if (platform === 'darwin') {
+        shortcutPath = path.join(desktopDir, 'CloudCLI.command');
+        const script = [
+            '#!/bin/bash',
+            `# CloudCLI Desktop Launcher v${packageJson.version}`,
+            `PORT=${port}`,
+            'cloudcli start --port $PORT &',
+            'SERVER_PID=$!',
+            'sleep 2',
+            'open "http://localhost:$PORT"',
+            'wait $SERVER_PID',
+            '',
+        ].join('\n');
+        fs.writeFileSync(shortcutPath, script, { mode: 0o755 });
+
+    } else if (platform === 'linux') {
+        // 复制图标到 ~/.cloudcli/
+        const iconDir = path.join(os.homedir(), '.cloudcli');
+        if (!fs.existsSync(iconDir)) {
+            fs.mkdirSync(iconDir, { recursive: true });
+        }
+        const iconSrc = path.join(APP_ROOT, 'public', 'logo-256.png');
+        const iconDest = path.join(iconDir, 'logo-256.png');
+        if (fs.existsSync(iconSrc)) {
+            fs.copyFileSync(iconSrc, iconDest);
+        }
+
+        shortcutPath = path.join(desktopDir, 'CloudCLI.desktop');
+        const desktop = [
+            '[Desktop Entry]',
+            'Type=Application',
+            'Name=CloudCLI',
+            'Comment=CloudCLI UI - AI Coding Assistant',
+            `Icon=${iconDest}`,
+            `Exec=bash -c "cloudcli start --port ${port} & sleep 2 && xdg-open http://localhost:${port}"`,
+            'Terminal=true',
+            'Categories=Development;',
+            '',
+        ].join('\n');
+        fs.writeFileSync(shortcutPath, desktop, { mode: 0o755 });
+
+    } else if (platform === 'win32') {
+        shortcutPath = path.join(desktopDir, 'CloudCLI.bat');
+        const bat = [
+            '@echo off',
+            `title CloudCLI v${packageJson.version}`,
+            `start "" cloudcli start --port ${port}`,
+            'timeout /t 2 >nul',
+            `start http://localhost:${port}`,
+            '',
+        ].join('\r\n');
+        fs.writeFileSync(shortcutPath, bat);
+
+    } else {
+        console.error(`\n${c.error('❌')} 不支持的平台: ${platform}\n`);
+        process.exit(1);
+    }
+
+    console.log(`\n${c.ok('✔')} ${c.bright('桌面快捷方式已创建!')}`);
+    console.log(`  ${c.info('→')} ${c.dim(shortcutPath)}`);
+    console.log(`\n${c.tip('[TIP]')} 双击该文件即可启动 CloudCLI 并自动打开浏览器`);
+    console.log(`       服务地址: ${c.bright(`http://localhost:${port}`)}\n`);
+}
+
 // ── Server ──────────────────────────────────────────────────
 
 // Start the server
@@ -657,6 +736,9 @@ async function main() {
             break;
         case 'sandbox':
             await sandboxCommand(remainingArgs || []);
+            break;
+        case 'desktop':
+            await desktopCommand();
             break;
         case 'status':
         case 'info':

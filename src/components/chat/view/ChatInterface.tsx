@@ -142,6 +142,7 @@ function ChatInterface({
     commandQuery,
     showCommandMenu,
     selectedCommandIndex,
+    submenuMode,
     resetCommandMenuState,
     handleCommandSelect,
     handleToggleCommandMenu,
@@ -184,6 +185,10 @@ function ChatInterface({
     claudeModel,
     codexModel,
     geminiModel,
+    setClaudeModel,
+    setCursorModel,
+    setCodexModel,
+    setGeminiModel,
     isLoading,
     canAbortSession,
     tokenBudget,
@@ -191,6 +196,7 @@ function ChatInterface({
     sendByCtrlEnter,
     onSessionActive,
     onSessionProcessing,
+    onSessionNotProcessing,
     onInputFocusChange,
     onFileOpen,
     onShowSettings,
@@ -400,6 +406,7 @@ function ChatInterface({
           onCommandSelect={handleCommandSelect}
           onCloseCommandMenu={resetCommandMenuState}
           isCommandMenuOpen={showCommandMenu}
+          submenuMode={submenuMode}
           frequentCommands={commandQuery ? [] : frequentCommands}
           getRootProps={getRootProps as (...args: unknown[]) => Record<string, unknown>}
           getInputProps={getInputProps as (...args: unknown[]) => Record<string, unknown>}

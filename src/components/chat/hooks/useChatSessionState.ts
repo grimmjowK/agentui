@@ -21,7 +21,7 @@ interface UseChatSessionStateArgs {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
   ws: WebSocket | null;
-  sendMessage: (message: unknown) => void;
+  sendMessage: (message: unknown) => boolean;
   autoScrollToBottom?: boolean;
   externalMessageUpdate?: number;
   newSessionTrigger?: number;
@@ -460,10 +460,8 @@ export function useChatSessionState({
       sessionStorage.setItem('cursorSessionId', selectedSession.id);
     }
 
-    // Check session status
-    if (ws) {
-      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider });
-    }
+    // Check session status — sendMessage returns false if WS is not yet connected
+    sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider });
 
     lastLoadedSessionKeyRef.current = sessionKey;
 

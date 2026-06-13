@@ -53,7 +53,10 @@ self.addEventListener('fetch', event => {
 
   // Everything else — network-first
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
+    fetch(event.request).catch(async () => {
+      const cached = await caches.match(event.request);
+      return cached || new Response('Network error', { status: 503 });
+    })
   );
 });
 
