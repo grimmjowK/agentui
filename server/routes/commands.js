@@ -7,6 +7,7 @@ import express from 'express';
 import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS } from '../../shared/modelConstants.js';
 import { parseFrontMatter } from '../shared/frontmatter.js';
 import { findAppRoot, getModuleDir } from '../utils/runtime-paths.js';
+import { providerSkillsService } from '../modules/providers/services/skills.service.js';
 
 const __dirname = getModuleDir(import.meta.url);
 // This route reads the top-level package.json for the status command, so it needs the real
@@ -409,7 +410,7 @@ Custom commands can be created in:
  */
 router.post('/list', async (req, res) => {
   try {
-    const { projectPath } = req.body;
+    const { projectPath, provider = 'claude' } = req.body;
     const allCommands = [...builtInCommands];
 
     // Scan project-level commands (.claude/commands/)
@@ -433,16 +434,37 @@ router.post('/list', async (req, res) => {
     );
     allCommands.push(...userCommands);
 
+    // Load skills for the current provider, reusing the providers skills service.
+    // Unsupported providers (cursor/codex) throw, so degrade to an empty list.
+    let skills = [];
+    try {
+      const skillItems = await providerSkillsService.listSkills(provider, projectPath);
+      skills = skillItems.map((skill) => {
+        const { data: frontmatter } = parseFrontmatter(skill.content || '');
+        return {
+          name: `/${skill.name}`,
+          description: frontmatter.description || '',
+          namespace: 'skill',
+          metadata: { type: 'skill', scope: skill.scope }
+        };
+      });
+    } catch (err) {
+      // Provider does not support skills (cursor/codex) or skills dir unreadable.
+      skills = [];
+    }
+
     // Separate built-in and custom commands
     const customCommands = allCommands.filter(cmd => cmd.namespace !== 'builtin');
 
     // Sort commands alphabetically by name
     customCommands.sort((a, b) => a.name.localeCompare(b.name));
+    skills.sort((a, b) => a.name.localeCompare(b.name));
 
     res.json({
       builtIn: builtInCommands,
       custom: customCommands,
-      count: allCommands.length
+      skills,
+      count: allCommands.length + skills.length
     });
   } catch (error) {
     console.error('Error listing commands:', error);
@@ -461,7 +483,7 @@ router.post('/list', async (req, res) => {
  */
 router.post('/execute', async (req, res) => {
   try {
-    const { commandName, commandPath, args = [], context = {} } = req.body;
+    const { commandName, commandPath, commandType, args = [], context = {} } = req.body;
 
     if (!commandName) {
       return res.status(400).json({
@@ -482,6 +504,45 @@ router.post('/execute', async (req, res) => {
         console.error(`Error executing built-in command ${commandName}:`, error);
         return res.status(500).json({
           error: 'Command execution failed',
+          message: error.message,
+          command: commandName
+        });
+      }
+    }
+
+    // Handle skill commands
+    if (commandType === 'skill') {
+      try {
+        const provider = context.provider || 'claude';
+        const skillName = commandName.replace(/^\//, '');
+        const allSkills = await providerSkillsService.listSkills(provider, context.projectPath);
+        const skill = allSkills.find((s) => s.name === skillName);
+        if (!skill) {
+          return res.status(404).json({
+            error: 'Skill not found',
+            message: `Skill "${skillName}" not found`
+          });
+        }
+        const { content: skillContent } = parseFrontmatter(skill.content || '');
+        let processedContent = skillContent;
+        const argsString = args.join(' ');
+        processedContent = processedContent.replace(/\$ARGUMENTS/g, argsString);
+        args.forEach((arg, index) => {
+          const placeholder = `$${index + 1}`;
+          processedContent = processedContent.replace(new RegExp(`\\${placeholder}\\b`, 'g'), arg);
+        });
+        return res.json({
+          type: 'custom',
+          command: commandName,
+          content: processedContent,
+          metadata: { type: 'skill', scope: skill.scope },
+          hasFileIncludes: processedContent.includes('@'),
+          hasBashCommands: processedContent.includes('!')
+        });
+      } catch (error) {
+        console.error(`Error executing skill ${commandName}:`, error);
+        return res.status(500).json({
+          error: 'Skill execution failed',
           message: error.message,
           command: commandName
         });

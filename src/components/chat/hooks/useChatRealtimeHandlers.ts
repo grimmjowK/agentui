@@ -243,8 +243,8 @@ export function useChatRealtimeHandlers({
           setPendingPermissionRequests((prev) =>
             prev.map((r) => (r.sessionId ? r : { ...r, sessionId: newSessionId })),
           );
+          onNavigateToSession?.(newSessionId);
         }
-        onNavigateToSession?.(newSessionId);
         break;
       }
 
@@ -335,6 +335,15 @@ export function useChatRealtimeHandlers({
         setClaudeStatus(null);
         onSessionInactive?.(sid);
         onSessionNotProcessing?.(sid);
+
+        // Handle session resume failure - clear the invalid session
+        if (msg.code === 'SESSION_RESUME_FAILED' && sid) {
+          console.log(`[Chat] Session resume failed for ${sid}, clearing session state`);
+          // Clear current session ID so user can start fresh
+          setCurrentSessionId(null);
+          // Clear any pending session data
+          sessionStorage.removeItem('pendingSessionId');
+        }
         break;
       }
 

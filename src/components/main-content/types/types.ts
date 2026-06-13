@@ -40,7 +40,7 @@ export type MainContentProps = {
   activeTab: AppTab;
   setActiveTab: Dispatch<SetStateAction<AppTab>>;
   ws: WebSocket | null;
-  sendMessage: (message: unknown) => void;
+  sendMessage: (message: unknown) => boolean;
   latestMessage: unknown;
   isMobile: boolean;
   onMenuClick: () => void;

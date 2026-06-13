@@ -11,9 +11,11 @@ import type {
   SetStateAction,
   TouchEvent,
 } from 'react';
-import { ImageIcon, MessageSquareIcon, XIcon, ArrowDownIcon } from 'lucide-react';
+import { ImageIcon, MessageSquareIcon, XIcon, ArrowDownIcon, WifiOffIcon } from 'lucide-react';
 import type { PendingPermissionRequest, PermissionMode, Provider } from '../../types/types';
+import { useWebSocket } from '../../../../contexts/WebSocketContext';
 import CommandMenu from './CommandMenu';
+import CommandChip from './CommandChip';
 import ClaudeStatus from './ClaudeStatus';
 import ImageAttachment from './ImageAttachment';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
@@ -83,6 +85,7 @@ interface ChatComposerProps {
   onCommandSelect: (command: SlashCommand, index: number, isHover: boolean) => void;
   onCloseCommandMenu: () => void;
   isCommandMenuOpen: boolean;
+  submenuMode?: string | null;
   frequentCommands: SlashCommand[];
   getRootProps: (...args: unknown[]) => Record<string, unknown>;
   getInputProps: (...args: unknown[]) => Record<string, unknown>;
@@ -101,6 +104,8 @@ interface ChatComposerProps {
   placeholder: string;
   isTextareaExpanded: boolean;
   sendByCtrlEnter?: boolean;
+  pendingCommand?: SlashCommand | null;
+  onClearPendingCommand?: () => void;
 }
 
 export default function ChatComposer({
@@ -138,6 +143,7 @@ export default function ChatComposer({
   onCommandSelect,
   onCloseCommandMenu,
   isCommandMenuOpen,
+  submenuMode,
   frequentCommands,
   getRootProps,
   getInputProps,
@@ -156,8 +162,11 @@ export default function ChatComposer({
   placeholder,
   isTextareaExpanded,
   sendByCtrlEnter,
+  pendingCommand,
+  onClearPendingCommand,
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
+  const { isConnected } = useWebSocket();
   const textareaRect = textareaRef.current?.getBoundingClientRect();
   const commandMenuPosition = {
     top: textareaRect ? Math.max(16, textareaRect.top - 316) : 0,
@@ -242,6 +251,7 @@ export default function ChatComposer({
           position={commandMenuPosition}
           isOpen={isCommandMenuOpen}
           frequentCommands={frequentCommands}
+          submenuMode={submenuMode}
         />
 
         <PromptInput
@@ -266,27 +276,17 @@ export default function ChatComposer({
             </div>
           )}
 
-          {attachedImages.length > 0 && (
-            <PromptInputHeader>
-              <div className="rounded-xl bg-muted/40 p-2">
-                <div className="flex flex-wrap gap-2">
-                  {attachedImages.map((file, index) => (
-                    <ImageAttachment
-                      key={index}
-                      file={file}
-                      onRemove={() => onRemoveImage(index)}
-                      uploadProgress={uploadingImages.get(file.name)}
-                      error={imageErrors.get(file.name)}
-                    />
-                  ))}
-                </div>
-              </div>
-            </PromptInputHeader>
-          )}
-
           <input {...getInputProps()} />
 
           <PromptInputBody>
+            {pendingCommand && (
+              <div className="px-3 pt-2.5">
+                <CommandChip
+                  commandName={pendingCommand.name}
+                  onDismiss={() => onClearPendingCommand?.()}
+                />
+              </div>
+            )}
             <div ref={inputHighlightRef} aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl">
               <div className="chat-input-placeholder block w-full whitespace-pre-wrap break-words px-4 py-2 text-sm leading-6 text-transparent">
                 {renderInputWithMentions(input)}
@@ -298,7 +298,20 @@ export default function ChatComposer({
               value={input}
               onChange={onInputChange}
               onClick={onTextareaClick}
-              onKeyDown={onTextareaKeyDown}
+              onKeyDown={(event) => {
+                // Backspace with empty input removes the pending command chip
+                if (
+                  event.key === 'Backspace' &&
+                  pendingCommand &&
+                  !input &&
+                  event.currentTarget.selectionStart === 0
+                ) {
+                  event.preventDefault();
+                  onClearPendingCommand?.();
+                  return;
+                }
+                onTextareaKeyDown(event);
+              }}
               onPaste={onTextareaPaste}
               onScroll={(event) => onTextareaScrollSync(event.target as HTMLTextAreaElement)}
               onFocus={() => onInputFocusChange?.(true)}
@@ -391,6 +404,12 @@ export default function ChatComposer({
           </PromptInputTools>
 
           <div className="flex items-center gap-2">
+            {!isConnected && (
+              <div className="flex items-center gap-1 text-xs text-amber-500/80" title="WebSocket 连接断开，正在重连...">
+                <WifiOffIcon className="h-3 w-3" />
+                <span className="hidden sm:inline">重连中...</span>
+              </div>
+            )}
             <div
               className={`hidden text-xs text-muted-foreground/50 transition-opacity duration-200 lg:block ${
                 input.trim() ? 'opacity-0' : 'opacity-100'
@@ -399,7 +418,7 @@ export default function ChatComposer({
               {sendByCtrlEnter ? t('input.hintText.ctrlEnter') : t('input.hintText.enter')}
             </div>
             <PromptInputSubmit
-              disabled={!input.trim() || isLoading}
+              disabled={(!input.trim() && !pendingCommand) || isLoading}
               className="h-10 w-10 sm:h-10 sm:w-10"
               onMouseDown={(event) => {
                 event.preventDefault();

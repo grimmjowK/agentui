@@ -1,6 +1,7 @@
 import type { AgentCategoryContentSectionProps } from '../types';
 import type { McpProject } from '../../../../../mcp/types';
 import { McpServers } from '../../../../../mcp';
+import { SkillsContent } from '../../../../../skills';
 
 import AccountContent from './content/AccountContent';
 import PermissionsContent from './content/PermissionsContent';
@@ -15,6 +16,8 @@ export default function AgentCategoryContentSection({
   onCursorPermissionsChange,
   codexPermissionMode,
   onCodexPermissionModeChange,
+  geminiPermissionMode,
+  onGeminiPermissionModeChange,
   projects,
 }: AgentCategoryContentSectionProps) {
   return (
@@ -71,6 +74,14 @@ export default function AgentCategoryContentSection({
         />
       )}
 
+      {selectedCategory === 'permissions' && selectedAgent === 'gemini' && (
+        <PermissionsContent
+          agent="gemini"
+          permissionMode={geminiPermissionMode}
+          onPermissionModeChange={onGeminiPermissionModeChange}
+        />
+      )}
+
       {selectedCategory === 'mcp' && (
         // SettingsProject.name is populated from the DB projectId by
         // normalizeProjectForSettings, so we can map it straight through.
@@ -82,6 +93,13 @@ export default function AgentCategoryContentSection({
             fullPath: project.fullPath,
             path: project.path,
           }))}
+        />
+      )}
+
+      {selectedCategory === 'skills' && (
+        <SkillsContent
+          selectedProvider={selectedAgent}
+          currentProjects={projects}
         />
       )}
     </div>

@@ -42,13 +42,18 @@ interface UseChatComposerStateArgs {
   claudeModel: string;
   codexModel: string;
   geminiModel: string;
+  setClaudeModel: (model: string) => void;
+  setCursorModel: (model: string) => void;
+  setCodexModel: (model: string) => void;
+  setGeminiModel: (model: string) => void;
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
-  sendMessage: (message: unknown) => void;
+  sendMessage: (message: unknown) => boolean;
   sendByCtrlEnter?: boolean;
   onSessionActive?: (sessionId?: string | null) => void;
   onSessionProcessing?: (sessionId?: string | null) => void;
+  onSessionNotProcessing?: (sessionId?: string | null) => void;
   onInputFocusChange?: (focused: boolean) => void;
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
@@ -111,6 +116,10 @@ export function useChatComposerState({
   claudeModel,
   codexModel,
   geminiModel,
+  setClaudeModel,
+  setCursorModel,
+  setCodexModel,
+  setGeminiModel,
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -118,6 +127,7 @@ export function useChatComposerState({
   sendByCtrlEnter,
   onSessionActive,
   onSessionProcessing,
+  onSessionNotProcessing,
   onInputFocusChange,
   onFileOpen,
   onShowSettings,
@@ -146,6 +156,8 @@ export function useChatComposerState({
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
   const [thinkingMode, setThinkingMode] = useState('none');
 
+  const [pendingCommand, setPendingCommand] = useState<SlashCommand | null>(null);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputHighlightRef = useRef<HTMLDivElement>(null);
   const handleSubmitRef = useRef<
@@ -153,6 +165,40 @@ export function useChatComposerState({
   >(null);
   const inputValueRef = useRef(input);
   const selectedProjectId = selectedProject?.projectId;
+  const displayTextOverrideRef = useRef<string | null>(null);
+  const pendingCommandAppendedTextRef = useRef<string>('');
+
+  // 从已有会话导航到新会话时，同步清除输入框内容，
+  // 防止旧会话的草稿文本残留
+  const prevSessionIdForInputRef = useRef(selectedSession?.id);
+  if (prevSessionIdForInputRef.current && !selectedSession) {
+    setInput('');
+    inputValueRef.current = '';
+  }
+  prevSessionIdForInputRef.current = selectedSession?.id;
+
+  const handleModelSwitch = useCallback((modelValue: string) => {
+    if (provider === 'claude') {
+      setClaudeModel(modelValue);
+      localStorage.setItem('claude-model', modelValue);
+    } else if (provider === 'cursor') {
+      setCursorModel(modelValue);
+      localStorage.setItem('cursor-model', modelValue);
+    } else if (provider === 'codex') {
+      setCodexModel(modelValue);
+      localStorage.setItem('codex-model', modelValue);
+    } else if (provider === 'gemini') {
+      setGeminiModel(modelValue);
+      localStorage.setItem('gemini-model', modelValue);
+    }
+    setInput('');
+    inputValueRef.current = '';
+    addMessage({
+      type: 'assistant',
+      content: `Model switched to: **${modelValue}**`,
+      timestamp: Date.now(),
+    });
+  }, [provider, setClaudeModel, setCursorModel, setCodexModel, setGeminiModel, addMessage]);
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -170,13 +216,22 @@ export function useChatComposerState({
           });
           break;
 
-        case 'model':
-          addMessage({
-            type: 'assistant',
-            content: `**Current Model**: ${data.current.model}\n\n**Available Models**:\n\nClaude: ${data.available.claude.join(', ')}\n\nCursor: ${data.available.cursor.join(', ')}`,
-            timestamp: Date.now(),
-          });
+        case 'model': {
+          if (data.message && data.message.startsWith('Switching to model:')) {
+            const targetModel = data.message.replace('Switching to model: ', '').trim();
+            handleModelSwitch(targetModel);
+          } else {
+            const p = data.current.provider || 'claude';
+            const providerModels = data.available[p] || [];
+            const modelContent = `**Current Model**: ${data.current.model}\n\n**Available Models** (${p}):\n${providerModels.join(', ')}`;
+            addMessage({
+              type: 'assistant',
+              content: modelContent,
+              timestamp: Date.now(),
+            });
+          }
           break;
+        }
 
         case 'cost': {
           const costMessage = `**Token Usage**: ${data.tokenUsage.used.toLocaleString()} / ${data.tokenUsage.total.toLocaleString()} (${data.tokenUsage.percentage}%)\n\n**Estimated Cost**:\n- Input: $${data.cost.input}\n- Output: $${data.cost.output}\n- **Total**: $${data.cost.total}\n\n**Model**: ${data.model}`;
@@ -234,7 +289,7 @@ export function useChatComposerState({
           console.warn('Unknown built-in command action:', action);
       }
     },
-    [onFileOpen, onShowSettings, addMessage, clearMessages, rewindMessages],
+    [onFileOpen, onShowSettings, addMessage, clearMessages, rewindMessages, handleModelSwitch],
   );
 
   const handleCustomCommand = useCallback(async (result: CommandExecutionResult) => {
@@ -255,8 +310,15 @@ export function useChatComposerState({
     }
 
     const commandContent = content || '';
-    setInput(commandContent);
-    inputValueRef.current = commandContent;
+    // Append the user's original text so the AI has the full context even when
+    // the template has no $ARGUMENTS placeholder.
+    const appendedText = pendingCommandAppendedTextRef.current;
+    pendingCommandAppendedTextRef.current = '';
+    const finalContent = appendedText
+      ? `${commandContent}\n\n${appendedText}`
+      : commandContent;
+    setInput(finalContent);
+    inputValueRef.current = finalContent;
 
     // Defer submit to next tick so the command text is reflected in UI before dispatching.
     setTimeout(() => {
@@ -297,6 +359,7 @@ export function useChatComposerState({
           body: JSON.stringify({
             commandName: command.name,
             commandPath: command.path,
+            commandType: command.type,
             args,
             context,
           }),
@@ -347,6 +410,17 @@ export function useChatComposerState({
     ],
   );
 
+  const handleSelectCommand = useCallback((command: SlashCommand) => {
+    setPendingCommand(command);
+    setInput('');
+    inputValueRef.current = '';
+  }, []);
+
+  const currentModel = provider === 'claude' ? claudeModel
+    : provider === 'cursor' ? cursorModel
+    : provider === 'codex' ? codexModel
+    : geminiModel;
+
   const {
     slashCommands,
     slashCommandsCount,
@@ -355,6 +429,7 @@ export function useChatComposerState({
     commandQuery,
     showCommandMenu,
     selectedCommandIndex,
+    submenuMode,
     resetCommandMenuState,
     handleCommandSelect,
     handleToggleCommandMenu,
@@ -367,6 +442,10 @@ export function useChatComposerState({
     setInput,
     textareaRef,
     onExecuteCommand: executeCommand,
+    onSelectCommand: handleSelectCommand,
+    onModelSwitch: handleModelSwitch,
+    provider,
+    currentModel,
   });
 
   const {
@@ -468,6 +547,30 @@ export function useChatComposerState({
     ) => {
       event.preventDefault();
       const currentInput = inputValueRef.current;
+
+      // Handle pending command chip: execute command with appended text
+      if (pendingCommand && !isLoading && selectedProject) {
+        const appendedText = currentInput.trim();
+        const rawInput = appendedText
+          ? `${pendingCommand.name} ${appendedText}`
+          : pendingCommand.name;
+        displayTextOverrideRef.current = appendedText || pendingCommand.name;
+        pendingCommandAppendedTextRef.current = appendedText;
+        setPendingCommand(null);
+        setInput('');
+        inputValueRef.current = '';
+        setAttachedImages([]);
+        setUploadingImages(new Map());
+        setImageErrors(new Map());
+        resetCommandMenuState();
+        setIsTextareaExpanded(false);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+        executeCommand(pendingCommand, rawInput);
+        return;
+      }
+
       if (!currentInput.trim() || isLoading || !selectedProject) {
         return;
       }
@@ -537,10 +640,11 @@ export function useChatComposerState({
 
       const userMessage: ChatMessage = {
         type: 'user',
-        content: currentInput,
+        content: displayTextOverrideRef.current ?? currentInput,
         images: uploadedImages as any,
         timestamp: new Date(),
       };
+      displayTextOverrideRef.current = null;
 
       addMessage(userMessage);
       setIsLoading(true); // Processing banner starts
@@ -597,8 +701,9 @@ export function useChatComposerState({
       const resolvedProjectPath = selectedProject.fullPath || selectedProject.path || '';
       const sessionSummary = getNotificationSessionSummary(selectedSession, currentInput);
 
+      let sent = false;
       if (provider === 'cursor') {
-        sendMessage({
+        sent = sendMessage({
           type: 'cursor-command',
           command: messageContent,
           sessionId: effectiveSessionId,
@@ -614,7 +719,7 @@ export function useChatComposerState({
           },
         });
       } else if (provider === 'codex') {
-        sendMessage({
+        sent = sendMessage({
           type: 'codex-command',
           command: messageContent,
           sessionId: effectiveSessionId,
@@ -629,7 +734,7 @@ export function useChatComposerState({
           },
         });
       } else if (provider === 'gemini') {
-        sendMessage({
+        sent = sendMessage({
           type: 'gemini-command',
           command: messageContent,
           sessionId: effectiveSessionId,
@@ -645,7 +750,7 @@ export function useChatComposerState({
           },
         });
       } else {
-        sendMessage({
+        sent = sendMessage({
           type: 'claude-command',
           command: messageContent,
           options: {
@@ -660,6 +765,21 @@ export function useChatComposerState({
             images: uploadedImages,
           },
         });
+      }
+
+      if (!sent) {
+        setIsLoading(false);
+        setCanAbortSession(false);
+        setClaudeStatus(null);
+        if (effectiveSessionId && !isTemporarySessionId(effectiveSessionId)) {
+          onSessionNotProcessing?.(effectiveSessionId);
+        }
+        addMessage({
+          type: 'error',
+          content: '网络连接已断开，请稍后重试',
+          timestamp: new Date(),
+        });
+        return;
       }
 
       setInput('');
@@ -689,6 +809,7 @@ export function useChatComposerState({
       isLoading,
       onSessionActive,
       onSessionProcessing,
+      onSessionNotProcessing,
       pendingViewSessionRef,
       permissionMode,
       provider,
@@ -703,6 +824,7 @@ export function useChatComposerState({
       setIsUserScrolledUp,
       slashCommands,
       thinkingMode,
+      pendingCommand,
     ],
   );
 
@@ -840,6 +962,13 @@ export function useChatComposerState({
     [setCursorPosition, syncInputOverlayScroll],
   );
 
+  const clearPendingCommand = useCallback(() => {
+    setPendingCommand(null);
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, []);
+
   const handleClearInput = useCallback(() => {
     setInput('');
     inputValueRef.current = '';
@@ -906,8 +1035,11 @@ export function useChatComposerState({
       }
 
       validIds.forEach((requestId) => {
+        const responseType = provider === 'gemini'
+          ? 'gemini-permission-response'
+          : 'claude-permission-response';
         sendMessage({
-          type: 'claude-permission-response',
+          type: responseType,
           requestId,
           allow: Boolean(decision?.allow),
           updatedInput: decision?.updatedInput,
@@ -951,6 +1083,7 @@ export function useChatComposerState({
     commandQuery,
     showCommandMenu,
     selectedCommandIndex,
+    submenuMode,
     resetCommandMenuState,
     handleCommandSelect,
     handleToggleCommandMenu,
@@ -980,5 +1113,7 @@ export function useChatComposerState({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
+    pendingCommand,
+    clearPendingCommand,
   };
 }

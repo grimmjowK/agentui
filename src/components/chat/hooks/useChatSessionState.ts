@@ -21,7 +21,7 @@ interface UseChatSessionStateArgs {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
   ws: WebSocket | null;
-  sendMessage: (message: unknown) => void;
+  sendMessage: (message: unknown) => boolean;
   autoScrollToBottom?: boolean;
   externalMessageUpdate?: number;
   newSessionTrigger?: number;
@@ -211,6 +211,14 @@ export function useChatSessionState({
   /* ---------------------------------------------------------------- */
   /*  Derive chatMessages from the store                              */
   /* ---------------------------------------------------------------- */
+
+  // 从已有会话导航到新会话时，同步清除 currentSessionId，
+  // 防止旧消息在渲染周期中闪现（effect 异步清理存在一帧延迟）
+  const prevSelectedSessionIdRef = useRef(selectedSession?.id);
+  if (prevSelectedSessionIdRef.current && !selectedSession && currentSessionId) {
+    setCurrentSessionId(null);
+  }
+  prevSelectedSessionIdRef.current = selectedSession?.id;
 
   const activeSessionId = selectedSession?.id || currentSessionId || null;
   const [pendingUserMessage, setPendingUserMessage] = useState<ChatMessage | null>(null);
@@ -403,6 +411,7 @@ export function useChatSessionState({
       setIsLoading(false);
       setCurrentSessionId(null);
       sessionStorage.removeItem('cursorSessionId');
+      sessionStorage.removeItem('pendingSessionId');
       messagesOffsetRef.current = 0;
       setHasMoreMessages(false);
       setTotalMessages(0);
@@ -451,10 +460,8 @@ export function useChatSessionState({
       sessionStorage.setItem('cursorSessionId', selectedSession.id);
     }
 
-    // Check session status
-    if (ws) {
-      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider });
-    }
+    // Check session status — sendMessage returns false if WS is not yet connected
+    sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider });
 
     lastLoadedSessionKeyRef.current = sessionKey;
 
@@ -687,6 +694,8 @@ export function useChatSessionState({
     return () => container.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
+  // Sync isLoading with processingSessions
+  const prevProcessingRef = useRef(false);
   useEffect(() => {
     const activeViewSessionId = selectedSession?.id || currentSessionId;
     if (!activeViewSessionId || !processingSessions) return;
@@ -694,7 +703,13 @@ export function useChatSessionState({
     if (shouldBeProcessing && !isLoading) {
       setIsLoading(true);
       setCanAbortSession(true);
+    } else if (!shouldBeProcessing && prevProcessingRef.current && isLoading) {
+      // Session was just removed from processingSessions but isLoading is
+      // still true — this happens after WebSocket reconnect cleanup
+      setIsLoading(false);
+      setCanAbortSession(false);
     }
+    prevProcessingRef.current = shouldBeProcessing;
   }, [currentSessionId, isLoading, processingSessions, selectedSession?.id]);
 
   // "Load all" overlay

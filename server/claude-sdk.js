@@ -717,14 +717,36 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Clean up temporary image files on error
     await cleanupTempFiles(tempImagePaths, tempDir);
 
-    // Check if Claude CLI is installed for a clearer error message
-    const installed = await providerAuthService.isProviderInstalled('claude');
-    const errorContent = !installed
-      ? 'Claude Code is not installed. Please install it first: https://docs.anthropic.com/en/docs/claude-code'
-      : error.message;
+    // Check if this is a session resume failure (exit code 1 during resume)
+    const isResumeFailure = sessionId && error.message && (
+      error.message.includes('exited with code 1') ||
+      error.message.includes('session not found') ||
+      error.message.includes('invalid session') ||
+      error.message.includes('No conversation found')
+    );
 
-    // Send error to WebSocket
-    ws.send(createNormalizedMessage({ kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+    if (isResumeFailure) {
+      console.log(`[SDK] Session resume failed for ${sessionId}, notifying client to start new session`);
+      // Send specific error for session resume failure so frontend can handle it
+      ws.send(createNormalizedMessage({
+        kind: 'error',
+        content: `Session "${sessionId}" has expired or is no longer available. Please start a new conversation.`,
+        code: 'SESSION_RESUME_FAILED',
+        sessionId: sessionId,
+        provider: 'claude'
+      }));
+    } else {
+      // Check if Claude CLI is installed for a clearer error message
+      const installed = await providerAuthService.isProviderInstalled('claude');
+      const errorContent = !installed
+        ? 'Claude Code is not installed. Please install it first: https://docs.anthropic.com/en/docs/claude-code'
+        : error.message;
+
+      // Send error to WebSocket
+      ws.send(createNormalizedMessage({ kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+    }
+
+
     notifyRunFailed({
       userId: ws?.userId || null,
       provider: 'claude',

@@ -3,6 +3,8 @@ import { apiKeysDb, credentialsDb, notificationPreferencesDb, pushSubscriptionsD
 import { getPublicKey } from '../services/vapid-keys.js';
 import { createNotificationEvent, notifyUserIfEnabled } from '../services/notification-orchestrator.js';
 
+const VALID_PROVIDERS = ['claude', 'cursor', 'codex', 'gemini'];
+
 const router = express.Router();
 
 // ===============================
@@ -280,6 +282,44 @@ router.get('/server-env', async (req, res) => {
   } catch (error) {
     console.error('Error reading server environment:', error);
     res.status(500).json({ error: 'Failed to read server environment' });
+  }
+});
+
+// ===============================
+// Agent Toggle (Enable/Disable)
+// ===============================
+
+router.get('/agent-toggle', async (req, res) => {
+  try {
+    const result = {};
+    for (const provider of VALID_PROVIDERS) {
+      const value = appConfigDb.get(`agent_enabled_${provider}`);
+      result[provider] = value !== 'false';
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching agent toggle:', error);
+    res.status(500).json({ error: 'Failed to fetch agent toggle' });
+  }
+});
+
+router.put('/agent-toggle', async (req, res) => {
+  try {
+    const body = req.body || {};
+    for (const [provider, enabled] of Object.entries(body)) {
+      if (VALID_PROVIDERS.includes(provider) && typeof enabled === 'boolean') {
+        appConfigDb.set(`agent_enabled_${provider}`, String(enabled));
+      }
+    }
+    const result = {};
+    for (const provider of VALID_PROVIDERS) {
+      const value = appConfigDb.get(`agent_enabled_${provider}`);
+      result[provider] = value !== 'false';
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating agent toggle:', error);
+    res.status(500).json({ error: 'Failed to update agent toggle' });
   }
 });
 

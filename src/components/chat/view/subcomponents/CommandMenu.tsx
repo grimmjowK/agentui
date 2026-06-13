@@ -17,7 +17,7 @@ type CommandMenuCommand = {
   namespace?: string;
   path?: string;
   type?: string;
-  metadata?: { type?: string; [key: string]: unknown };
+  metadata?: { type?: string; isCurrent?: boolean; [key: string]: unknown };
   [key: string]: unknown;
 };
 
@@ -29,6 +29,7 @@ type CommandMenuProps = {
   position?: { top: number; left: number; bottom?: number };
   isOpen?: boolean;
   frequentCommands?: CommandMenuCommand[];
+  submenuMode?: string | null;
 };
 
 type CommandMenuRow = {
@@ -52,8 +53,6 @@ const namespaceLabels: Record<string, string> = {
   frequent: 'Frequently Used',
   builtin: 'Built-in Commands',
   skill: 'Skills',
-  project: 'Project Commands',
-  user: 'User Commands',
   other: 'Other Commands',
 };
 
@@ -128,6 +127,7 @@ export default function CommandMenu({
   position = { top: 0, left: 0 },
   isOpen = false,
   frequentCommands = [],
+  submenuMode,
 }: CommandMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const selectedItemRef = useRef<HTMLDivElement | null>(null);
@@ -233,6 +233,52 @@ export default function CommandMenu({
         }}
       >
         No commands available
+      </div>
+    );
+  }
+
+  if (submenuMode) {
+    return (
+      <div
+        ref={menuRef}
+        role="listbox"
+        aria-label="Select model"
+        className="command-menu border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
+        style={{ ...menuPosition, ...menuBaseStyle, opacity: 1, transform: 'translateY(0)' }}
+      >
+        <div className="mb-1 border-b border-gray-100 px-3 pb-2 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          Select Model
+        </div>
+        {commands.map((command, index) => {
+          const isSelected = index === selectedIndex;
+          const isCurrent = command.metadata?.isCurrent === true;
+          return (
+            <div
+              key={command.name}
+              ref={isSelected ? selectedItemRef : null}
+              role="option"
+              aria-selected={isSelected}
+              className={`command-item mb-0.5 flex cursor-pointer items-center rounded-md px-3 py-2 transition-colors ${
+                isSelected ? 'bg-blue-50 dark:bg-blue-900' : 'bg-transparent'
+              }`}
+              onMouseEnter={() => onSelect && onSelect(command, index, true)}
+              onClick={() => onSelect && onSelect(command, index, false)}
+              onMouseDown={(event) => event.preventDefault()}
+            >
+              <span className="w-5 shrink-0 text-center text-sm text-green-600 dark:text-green-400">
+                {isCurrent ? '✓' : ''}
+              </span>
+              <span className={`font-mono text-sm ${isCurrent ? 'font-bold text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-200'}`}>
+                {command.name}
+              </span>
+              {command.description && command.description !== command.name && (
+                <span className="ml-2 truncate text-xs text-gray-400 dark:text-gray-500">
+                  {command.description}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   }

@@ -4,6 +4,7 @@ import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 import { authenticatedFetch } from '../../../utils/api';
 import { safeLocalStorage } from '../utils/chatStorage';
 import type { LLMProvider, Project } from '../../../types/app';
+import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../../../shared/modelConstants';
 
 const COMMAND_QUERY_DEBOUNCE_MS = 150;
 
@@ -24,6 +25,10 @@ interface UseSlashCommandsOptions {
   setInput: Dispatch<SetStateAction<string>>;
   textareaRef: RefObject<HTMLTextAreaElement>;
   onExecuteCommand: (command: SlashCommand, rawInput?: string) => void | Promise<void>;
+  onSelectCommand?: (command: SlashCommand) => void;
+  onModelSwitch?: (modelValue: string) => void;
+  provider?: string;
+  currentModel?: string;
 }
 
 type ProviderSkill = {
@@ -142,6 +147,10 @@ export function useSlashCommands({
   setInput,
   textareaRef,
   onExecuteCommand,
+  onSelectCommand,
+  onModelSwitch,
+  provider = 'claude',
+  currentModel,
 }: UseSlashCommandsOptions) {
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const [filteredCommands, setFilteredCommands] = useState<SlashCommand[]>([]);
@@ -149,6 +158,7 @@ export function useSlashCommands({
   const [commandQuery, setCommandQuery] = useState('');
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(-1);
   const [slashPosition, setSlashPosition] = useState(-1);
+  const [submenuMode, setSubmenuMode] = useState<string | null>(null);
 
   const commandQueryTimerRef = useRef<number | null>(null);
 
@@ -164,8 +174,34 @@ export function useSlashCommands({
     setSlashPosition(-1);
     setCommandQuery('');
     setSelectedCommandIndex(-1);
+    setSubmenuMode(null);
     clearCommandQueryTimer();
   }, [clearCommandQueryTimer]);
+
+  const getModelOptionsForProvider = useCallback((p: string): SlashCommand[] => {
+    const config = p === 'claude' ? CLAUDE_MODELS
+      : p === 'cursor' ? CURSOR_MODELS
+      : p === 'codex' ? CODEX_MODELS
+      : p === 'gemini' ? GEMINI_MODELS
+      : CLAUDE_MODELS;
+    return config.OPTIONS.map((o: { value: string; label: string }) => ({
+      name: o.value,
+      description: o.label,
+      namespace: 'model',
+      type: 'model-option',
+      metadata: { type: 'model', isCurrent: o.value === currentModel },
+    }));
+  }, [currentModel]);
+
+  const enterSubmenu = useCallback((commandName: string) => {
+    if (commandName === '/model') {
+      const modelOptions = getModelOptionsForProvider(provider);
+      setSubmenuMode('/model');
+      setFilteredCommands(modelOptions);
+      setSelectedCommandIndex(-1);
+      setCommandQuery('');
+    }
+  }, [provider, getModelOptionsForProvider]);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,6 +222,7 @@ export function useSlashCommands({
           },
           body: JSON.stringify({
             projectPath: workspacePath || selectedProject.path,
+            provider,
           }),
         });
 
@@ -216,6 +253,10 @@ export function useSlashCommands({
           ...((data.custom || []) as SlashCommand[]).map((command) => ({
             ...command,
             type: 'custom',
+          })),
+          ...((data.skills || []) as SlashCommand[]).map((command) => ({
+            ...command,
+            type: 'skill',
           })),
         ];
 
@@ -250,8 +291,23 @@ export function useSlashCommands({
   }, [showCommandMenu]);
 
   useEffect(() => {
-    setFilteredCommands(filterSlashCommands(slashCommands, commandQuery));
-  }, [commandQuery, slashCommands]);
+    if (submenuMode) {
+      return;
+    }
+
+    if (!commandQuery) {
+      setFilteredCommands(slashCommands);
+      return;
+    }
+
+    if (!fuse) {
+      setFilteredCommands([]);
+      return;
+    }
+
+    const results = fuse.search(commandQuery);
+    setFilteredCommands(results.map((result) => result.item));
+  }, [commandQuery, slashCommands, fuse, submenuMode]);
 
   const frequentCommands = useMemo(() => {
     if (!selectedProject || slashCommands.length === 0) {
@@ -285,6 +341,21 @@ export function useSlashCommands({
 
   const insertCommandIntoInput = useCallback(
     (command: SlashCommand) => {
+      trackCommandUsage(command);
+
+      // Handle submenu item selection (e.g. model option)
+      if (submenuMode === '/model' && command.type === 'model-option') {
+        onModelSwitch?.(command.name);
+        resetCommandMenuState();
+        return;
+      }
+
+      // Enter submenu for /model command
+      if (command.name === '/model') {
+        enterSubmenu('/model');
+        return;
+      }
+
       const currentTextarea = textareaRef.current;
       const insertionStart = slashPosition >= 0
         ? slashPosition
@@ -379,6 +450,11 @@ export function useSlashCommands({
 
   const handleCommandInputChange = useCallback(
     (newValue: string, cursorPos: number) => {
+      // In submenu mode, ignore input changes (menu stays open)
+      if (submenuMode) {
+        return;
+      }
+
       if (!newValue.trim()) {
         resetCommandMenuState();
         return;
@@ -404,6 +480,15 @@ export function useSlashCommands({
       const slashPos = 0;
       const query = match[1];
 
+      // 当输入精确匹配 /model 时，直接进入子菜单，跳过 slash command 选择步骤
+      if (query === 'model') {
+        setSlashPosition(slashPos);
+        setShowCommandMenu(true);
+        clearCommandQueryTimer();
+        enterSubmenu('/model');
+        return;
+      }
+
       setSlashPosition(slashPos);
       setShowCommandMenu(true);
       setSelectedCommandIndex(-1);
@@ -413,7 +498,7 @@ export function useSlashCommands({
         setCommandQuery(query);
       }, COMMAND_QUERY_DEBOUNCE_MS);
     },
-    [resetCommandMenuState, clearCommandQueryTimer],
+    [resetCommandMenuState, clearCommandQueryTimer, submenuMode, enterSubmenu],
   );
 
   const handleCommandMenuKeyDown = useCallback(
@@ -483,6 +568,7 @@ export function useSlashCommands({
     commandQuery,
     showCommandMenu,
     selectedCommandIndex,
+    submenuMode,
     resetCommandMenuState,
     handleCommandSelect,
     handleToggleCommandMenu,

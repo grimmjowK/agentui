@@ -4,6 +4,7 @@
     "account": "账户",
     "permissions": "权限",
     "mcpServers": "MCP 服务器",
+    "skills": "Skills",
     "appearance": "外观"
   },
   "account": {
@@ -325,6 +326,9 @@
       }
     },
     "connectionStatus": "连接状态",
+    "enable": "启用",
+    "disable": "禁用",
+    "lastEnabledTooltip": "至少需要保留一个启用的智能体",
     "login": {
       "title": "登录",
       "reAuthenticate": "重新认证",
@@ -444,6 +448,52 @@
       "title": "关于 Codex MCP",
       "description": "Codex 支持基于 stdio 的 MCP 服务器。您可以添加服务器，通过额外的工具和资源来扩展 Codex 的功能。"
     }
+  },
+  "skills": {
+    "title": "Skills",
+    "description": "Skills 是 Markdown 文件，用于扩展 Agent 的自定义指令和知识。",
+    "unsupported": "当前 Agent 不支持 Skills。",
+    "addButton": "新建 Skill",
+    "uploadButton": "上传",
+    "empty": "暂无 Skill",
+    "emptyHint": "创建新 Skill 或上传 .md/.zip 文件开始使用。",
+    "scope": {
+      "user": "全局（用户）",
+      "project": "项目"
+    },
+    "scopeGroup": {
+      "user": "全局 Skills",
+      "project": "项目 Skills"
+    },
+    "editor": {
+      "titleCreate": "创建 Skill",
+      "titleEdit": "编辑 Skill",
+      "name": "Skill 名称",
+      "namePlaceholder": "例如：code-review-guidelines",
+      "scope": "范围",
+      "content": "内容（Markdown）",
+      "contentPlaceholder": "使用 Markdown 编写 Skill 内容...",
+      "save": "保存",
+      "saving": "保存中...",
+      "cancel": "取消",
+      "nameRequired": "请输入 Skill 名称"
+    },
+    "upload": {
+      "title": "上传 Skill 文件",
+      "selectFile": "选择文件",
+      "dragHint": "选择 .md 或 .zip 文件",
+      "scope": "目标范围",
+      "upload": "上传",
+      "uploading": "上传中...",
+      "cancel": "取消",
+      "invalidType": "仅支持 .md 和 .zip 文件",
+      "successCount": "已导入 {{count}} 个 Skill"
+    },
+    "actions": {
+      "edit": "编辑 Skill",
+      "delete": "删除 Skill"
+    },
+    "confirmDelete": "确定要删除 Skill \"{{name}}\" 吗？"
   },
   "pluginSettings": {
     "title": "插件",
