@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
 
 import crossSpawn from 'cross-spawn';
 
@@ -17,6 +18,164 @@ import { stripAnsiSequences } from './utils/url-detection.js';
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 
 let activeGeminiProcesses = new Map(); // Track active processes by session ID
+const pendingGeminiApprovals = new Map();
+
+function createRequestId() {
+    if (typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return crypto.randomBytes(16).toString('hex');
+}
+
+function waitForGeminiApproval(requestId, options = {}) {
+    const { timeoutMs = 120000 } = options;
+
+    return new Promise(resolve => {
+        let settled = false;
+        let timeout;
+
+        const finalize = (decision) => {
+            if (settled) return;
+            settled = true;
+            if (timeout) clearTimeout(timeout);
+            pendingGeminiApprovals.delete(requestId);
+            resolve(decision);
+        };
+
+        if (timeoutMs > 0) {
+            timeout = setTimeout(() => {
+                finalize(null);
+            }, timeoutMs);
+        }
+
+        pendingGeminiApprovals.set(requestId, (decision) => finalize(decision));
+    });
+}
+
+function resolveGeminiApproval(requestId, decision) {
+    const resolver = pendingGeminiApprovals.get(requestId);
+    if (resolver) {
+        resolver(decision);
+    }
+}
+
+// 权限提示检测器 — 检测 Gemini CLI 的交互式权限请求
+// 实际 TUI 格式示例：
+//   ╭─────────────────────────────────────────────╮
+//   │ ? WriteFile  Writing to .gitlab-ci.yml      │
+//   │ Apply this change?                          │
+//   │   1. Allow once                             │
+//   │ ● 2. Allow for this session                 │
+//   │   3. Modify with external editor            │
+//   │   4. No, suggest changes (esc)              │
+//   ╰─────────────────────────────────────────────╯
+// @deprecated — headless（--prompt）+ stream-json 模式下 Gemini CLI 不输出 TUI 权限提示，
+// 且当前始终使用 --yolo，此检测器不会被触发。保留代码供未来交互模式支持时参考。
+class GeminiPermissionDetector {
+    constructor() {
+        this.buffer = '';
+        this.state = 'IDLE'; // IDLE, AWAITING_OPTIONS, COMPLETE
+        this.detectedToolName = null;
+    }
+
+    feed(cleanText) {
+        this.buffer += cleanText + '\n';
+        if (this.buffer.length > 3000) {
+            this.buffer = this.buffer.slice(-3000);
+        }
+        return this.detect();
+    }
+
+    detect() {
+        if (this.state === 'IDLE') {
+            // 匹配工具名称行："? WriteFile  Writing to ..." 或 "? Shell  Running command: ..."
+            const toolHeaderMatch = this.buffer.match(/\?\s+(\w+)\s{2,}/);
+            if (toolHeaderMatch) {
+                // 检查确认问题："Apply this change?" 或 "Allow execution?" 等
+                const hasConfirmation = /Apply this change\?|Allow (?:execution|this action)\?|Do you want to proceed\?/i.test(this.buffer);
+                if (hasConfirmation) {
+                    this.detectedToolName = toolHeaderMatch[1].trim();
+                    this.state = 'AWAITING_OPTIONS';
+                }
+            }
+        }
+
+        if (this.state === 'AWAITING_OPTIONS') {
+            const optionPattern = /(?:[●•]\s*)?\d+\.\s*(?:Allow once|Allow for this session|No,?\s*suggest changes|Modify with external editor)/gi;
+            const matches = this.buffer.match(optionPattern);
+            if (matches && matches.length >= 2) {
+                this.state = 'COMPLETE';
+            }
+        }
+
+        if (this.state === 'COMPLETE') {
+            const result = { toolName: this.detectedToolName };
+            this.clear();
+            return result;
+        }
+
+        return null;
+    }
+
+    clear() {
+        this.buffer = '';
+        this.state = 'IDLE';
+        this.detectedToolName = null;
+    }
+}
+
+function parseGeminiErrorMessage(rawError) {
+    if (!rawError || typeof rawError !== 'string') return rawError;
+
+    const trimmed = rawError.trim();
+    if (!trimmed) return trimmed;
+
+    const lines = trimmed.split('\n');
+    const nonStackLines = lines.filter(line => !/^\s+at\s+/.test(line));
+    if (nonStackLines.length === 0) return 'An unexpected error occurred.';
+
+    const cleaned = nonStackLines.join('\n').trim();
+
+    const apiErrorJsonMatch = cleaned.match(/ApiError:\s*(\{[\s\S]*\})/);
+    if (apiErrorJsonMatch) {
+        try {
+            const parsed = JSON.parse(apiErrorJsonMatch[1]);
+            if (parsed.error && parsed.error.message) {
+                return parsed.error.message;
+            }
+        } catch {
+            // not valid JSON, fall through
+        }
+    }
+
+    const namedErrorMatch = cleaned.match(/(?:Terminal\w*Error|QuotaError|ApiError):\s*(.+)/);
+    if (namedErrorMatch) {
+        return namedErrorMatch[1].trim();
+    }
+
+    let result = cleaned
+        .replace(/Full report available at:\s*\S+/g, '')
+        .replace(/^Error when talking to Gemini API\s*/m, '')
+        .trim();
+
+    return result || cleaned;
+}
+
+function isStderrNoise(line) {
+    return line.includes('[DEP0040]') ||
+        line.includes('DeprecationWarning') ||
+        line.includes('--trace-deprecation') ||
+        line.includes('Loaded cached credentials');
+}
+
+// Gemini CLI 的 --resume 只接受 UUID、数字索引、或 "latest"
+function isValidGeminiResumeId(id) {
+    if (!id || typeof id !== 'string') return false;
+    if (id === 'latest') return true;
+    if (/^\d+$/.test(id)) return true;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return true;
+    return false;
+}
 
 function mapGeminiExitCodeToMessage(exitCode) {
     switch (exitCode) {
@@ -227,27 +386,12 @@ async function spawnGemini(command, options = {}, ws) {
     // 且传入不匹配的工具名会意外限制可用工具，导致 "Tool not found" 错误
 
     const geminiPath = process.env.GEMINI_PATH || 'gemini';
-    let spawnCmd = geminiPath;
-    let spawnArgs = args;
-
-    // On non-Windows platforms, wrap the execution in a shell to avoid ENOEXEC
-    // which happens when the target is a script lacking a shebang.
-    if (os.platform() !== 'win32') {
-        spawnCmd = 'sh';
-        // Use exec to replace the shell process, ensuring signals hit gemini directly
-        spawnArgs = ['-c', 'exec "$0" "$@"', geminiPath, ...args];
-    }
 
     const spawnEnv = await buildGeminiProcessEnv();
 
     return new Promise((resolve, reject) => {
-        const geminiProcess = spawnFunction(spawnCmd, spawnArgs, {
-            cwd: workingDir,
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: spawnEnv
-        });
-        let terminalNotificationSent = false;
-        let terminalFailureReason = null;
+        let geminiProcess;
+        let isPty = false;
 
         // 统一使用 --prompt（headless 模式），配合 --approval-mode auto_edit 允许文件编辑
         const spawnArgs = [...args];
@@ -261,7 +405,7 @@ async function spawnGemini(command, options = {}, ws) {
                 cols: 250,
                 rows: 50,
                 cwd: workingDir,
-                env: { ...process.env }
+                env: spawnEnv
             });
             isPty = true;
         } catch (ptyError) {
@@ -278,7 +422,7 @@ async function spawnGemini(command, options = {}, ws) {
             geminiProcess = spawnFunction(spawnCmd, finalArgs, {
                 cwd: workingDir,
                 stdio: ['pipe', 'pipe', 'pipe'],
-                env: { ...process.env }
+                env: spawnEnv
             });
             geminiProcess.stdin.end();
         }

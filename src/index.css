@@ -554,9 +554,15 @@
 }
 
 /* Mobile optimizations and components */
-@layer components {
-  /* Mobile touch optimization and safe areas */
-  @media (max-width: 768px) {
+/*
+ * 注意：以下 @media (max-width: 768px) 块刻意置于 @layer components 之外。
+ * Tailwind 3 在展开 @layer 时，对其中同时包含嵌套 @media 与任意值 @apply
+ * (如 max-w-[85%]) 的手写规则存在解析缺陷，会重复并损坏整个块
+ * (例如 .chat-message.user 被错误转义为 .chat-message.\!user)。
+ * 放到 @layer 之外即可规避该问题，详见构建时的 esbuild CSS 警告。
+ */
+/* Mobile touch optimization and safe areas */
+@media (max-width: 768px) {
     * {
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
@@ -648,7 +654,8 @@
       }
     }
   }
-  
+
+@layer components {
   /* Touch device optimizations for all screen sizes */
   @media (hover: none) and (pointer: coarse) {
     .touch\:opacity-100 {

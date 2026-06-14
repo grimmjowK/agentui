@@ -444,7 +444,6 @@ export function useChatComposerState({
     onExecuteCommand: executeCommand,
     onSelectCommand: handleSelectCommand,
     onModelSwitch: handleModelSwitch,
-    provider,
     currentModel,
   });
 

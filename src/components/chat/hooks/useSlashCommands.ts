@@ -20,14 +20,13 @@ export interface SlashCommand {
 
 interface UseSlashCommandsOptions {
   selectedProject: Project | null;
-  provider: LLMProvider;
+  provider?: LLMProvider;
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
   textareaRef: RefObject<HTMLTextAreaElement>;
   onExecuteCommand: (command: SlashCommand, rawInput?: string) => void | Promise<void>;
   onSelectCommand?: (command: SlashCommand) => void;
   onModelSwitch?: (modelValue: string) => void;
-  provider?: string;
   currentModel?: string;
 }
 
@@ -142,7 +141,6 @@ const filterSlashCommands = (
 
 export function useSlashCommands({
   selectedProject,
-  provider,
   input,
   setInput,
   textareaRef,
@@ -300,14 +298,8 @@ export function useSlashCommands({
       return;
     }
 
-    if (!fuse) {
-      setFilteredCommands([]);
-      return;
-    }
-
-    const results = fuse.search(commandQuery);
-    setFilteredCommands(results.map((result) => result.item));
-  }, [commandQuery, slashCommands, fuse, submenuMode]);
+    setFilteredCommands(filterSlashCommands(slashCommands, commandQuery));
+  }, [commandQuery, slashCommands, submenuMode]);
 
   const frequentCommands = useMemo(() => {
     if (!selectedProject || slashCommands.length === 0) {
