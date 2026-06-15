@@ -66,7 +66,7 @@ import geminiRoutes from './routes/gemini.js';
 import pluginsRoutes from './routes/plugins.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
-import { initializeDatabase, projectsDb } from './modules/database/index.js';
+import { initializeDatabase, projectsDb, sessionsDb } from './modules/database/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
@@ -79,6 +79,28 @@ const APP_ROOT = findAppRoot(__dirname);
 const installMode = fs.existsSync(path.join(APP_ROOT, '.git')) ? 'git' : 'npm';
 
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
+
+function getShellSessionById(sessionId) {
+    const memorySession = sessionManager.getSession(sessionId);
+    if (memorySession?.cliSessionId) {
+        return memorySession;
+    }
+
+    const indexedSession = sessionsDb.getSessionById(sessionId);
+    if (
+        indexedSession?.provider === 'gemini'
+        && typeof indexedSession.jsonl_path === 'string'
+        && indexedSession.jsonl_path.endsWith('.jsonl')
+        && fs.existsSync(indexedSession.jsonl_path)
+    ) {
+        return {
+            ...(memorySession || {}),
+            cliSessionId: sessionId,
+        };
+    }
+
+    return memorySession || null;
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -111,7 +133,7 @@ const wss = createWebSocketServer(server, {
         getActiveGeminiSessions,
     },
     shell: {
-        getSessionById: (sessionId) => sessionManager.getSession(sessionId),
+        getSessionById: getShellSessionById,
         stripAnsiSequences,
         normalizeDetectedUrl,
         extractUrlsFromText,

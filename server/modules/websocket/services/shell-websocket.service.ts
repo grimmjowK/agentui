@@ -33,6 +33,11 @@ const ptySessionsMap = new Map<string, PtySessionEntry>();
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 const SHELL_URL_PARSE_BUFFER_LIMIT = 32768;
 
+type ShellCommandResult = {
+  command: string;
+  mode: 'plain' | 'new' | 'resume';
+};
+
 type ShellWebSocketDependencies = {
   getSessionById: (sessionId: string) => { cliSessionId?: string } | null | undefined;
   stripAnsiSequences: (content: string) => string;
@@ -81,7 +86,7 @@ function parseShellMessage(rawMessage: RawData): ShellIncomingMessage | null {
 function buildShellCommand(
   message: ShellIncomingMessage,
   dependencies: ShellWebSocketDependencies
-): string {
+): ShellCommandResult {
   const hasSession = readBoolean(message.hasSession);
   const sessionId = readString(message.sessionId);
   const initialCommand = readString(message.initialCommand);
@@ -93,29 +98,32 @@ function buildShellCommand(
     provider === 'plain-shell';
 
   if (isPlainShell) {
-    return initialCommand;
+    return { command: initialCommand, mode: 'plain' };
   }
 
   if (provider === 'cursor') {
     if (hasSession && sessionId) {
-      return `cursor-agent --resume="${sessionId}"`;
+      return { command: `cursor-agent --resume="${sessionId}"`, mode: 'resume' };
     }
-    return 'cursor-agent';
+    return { command: 'cursor-agent', mode: 'new' };
   }
 
   if (provider === 'codex') {
     if (hasSession && sessionId) {
       if (os.platform() === 'win32') {
-        return `codex resume "${sessionId}"; if ($LASTEXITCODE -ne 0) { codex }`;
+        return {
+          command: `codex resume "${sessionId}"; if ($LASTEXITCODE -ne 0) { codex }`,
+          mode: 'resume',
+        };
       }
-      return `codex resume "${sessionId}" || codex`;
+      return { command: `codex resume "${sessionId}" || codex`, mode: 'resume' };
     }
-    return 'codex';
+    return { command: 'codex', mode: 'new' };
   }
 
   if (provider === 'gemini') {
     const command = initialCommand || 'gemini';
-    let resumeId = sessionId;
+    let resumeId = '';
     if (hasSession && sessionId) {
       try {
         const existingSession = dependencies.getSessionById(sessionId);
@@ -131,19 +139,22 @@ function buildShellCommand(
     }
 
     if (hasSession && resumeId) {
-      return `${command} --resume "${resumeId}"`;
+      return { command: `${command} --resume "${resumeId}"`, mode: 'resume' };
     }
-    return command;
+    return { command, mode: 'new' };
   }
 
   const command = initialCommand || 'claude';
   if (hasSession && sessionId) {
     if (os.platform() === 'win32') {
-      return `claude --resume "${sessionId}"; if ($LASTEXITCODE -ne 0) { claude }`;
+      return {
+        command: `claude --resume "${sessionId}"; if ($LASTEXITCODE -ne 0) { claude }`,
+        mode: 'resume',
+      };
     }
-    return `claude --resume "${sessionId}" || claude`;
+    return { command: `claude --resume "${sessionId}" || claude`, mode: 'resume' };
   }
-  return command;
+  return { command, mode: 'new' };
 }
 
 /**
@@ -250,7 +261,8 @@ export function handleShellConnection(
           return;
         }
 
-        const shellCommand = buildShellCommand(data, dependencies);
+        const shellCommandResult = buildShellCommand(data, dependencies);
+        const shellCommand = shellCommandResult.command;
         const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
         const shellArgs =
           os.platform() === 'win32' ? ['-Command', shellCommand] : ['-c', shellCommand];
@@ -390,7 +402,7 @@ export function handleShellConnection(
                 : provider === 'gemini'
                   ? 'Gemini'
                   : 'Claude';
-          welcomeMsg = hasSession
+          welcomeMsg = shellCommandResult.mode === 'resume'
             ? `\x1b[36mResuming ${providerName} session ${sessionId} in: ${projectPath}\x1b[0m\r\n`
             : `\x1b[36mStarting new ${providerName} session in: ${projectPath}\x1b[0m\r\n`;
         }
