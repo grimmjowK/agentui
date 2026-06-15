@@ -71,7 +71,10 @@ const isPromiseLike = (value: unknown): value is Promise<unknown> =>
   Boolean(value) && typeof (value as Promise<unknown>).then === 'function';
 
 const isSkillCommand = (command: SlashCommand) =>
-  command.type === 'skill' || command.metadata?.type === 'skill';
+  command.type === 'skill' ||
+  command.type === 'custom' ||
+  command.type === 'model-option' ||
+  command.metadata?.type === 'skill';
 
 const dedupeProviderSkills = (skills: ProviderSkill[]): ProviderSkill[] => {
   const seenCommands = new Set<string>();

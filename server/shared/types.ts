@@ -208,6 +208,7 @@ export type ProviderSkill = {
   provider: LLMProvider;
   name: string;
   description: string;
+  content: string;
   command: string;
   scope: ProviderSkillScope;
   sourcePath: string;

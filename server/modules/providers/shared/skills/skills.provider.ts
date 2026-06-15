@@ -45,6 +45,7 @@ export abstract class SkillsProvider implements IProviderSkills {
             provider: this.provider,
             name: definition.name,
             description: definition.description,
+            content: definition.content,
             command,
             scope: source.scope,
             sourcePath: skillPath,

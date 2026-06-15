@@ -585,7 +585,7 @@ export async function findProviderSkillMarkdownFiles(
  */
 export async function readProviderSkillMarkdownDefinition(
   skillPath: string,
-): Promise<{ name: string; description: string }> {
+): Promise<{ name: string; description: string; content: string }> {
   const content = await readFile(skillPath, 'utf8');
   const parsed = parseFrontMatter(content);
   const data = readObjectRecord(parsed.data) ?? {};
@@ -594,6 +594,7 @@ export async function readProviderSkillMarkdownDefinition(
   return {
     name: readOptionalString(data.name) ?? fallbackName,
     description: readOptionalString(data.description) ?? '',
+    content,
   };
 }
 

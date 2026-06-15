@@ -27,7 +27,7 @@ function SkillRow({
   onDelete: (skill: SkillItem) => void;
 }) {
   const { t } = useTranslation('settings');
-  const preview = skill.content.trim().split('\n')[0]?.slice(0, 80) ?? '';
+  const preview = (skill.content ?? '').trim().split('\n')[0]?.slice(0, 80) ?? '';
 
   return (
     <div className="flex items-start gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-accent/30">

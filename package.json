@@ -32,7 +32,7 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build",
     "prebuild:server": "node -e \"require('node:fs').rmSync('dist-server', { recursive: true, force: true })\"",
-    "build:server": "tsc -p server/tsconfig.json && tsc-alias -p server/tsconfig.json",
+    "build:server": "tsc -p server/tsconfig.json && tsc-alias -p server/tsconfig.json && chmod +x dist-server/server/cli.js",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p server/tsconfig.json",
     "lint": "eslint src/ server/",
