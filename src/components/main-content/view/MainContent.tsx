@@ -51,6 +51,8 @@ function MainContent({
   onShowSettings,
   externalMessageUpdate,
   newSessionTrigger,
+  pendingShellCommand,
+  onRunInShell,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom, sendByCtrlEnter } = preferences;
@@ -146,6 +148,7 @@ function MainContent({
                 externalMessageUpdate={externalMessageUpdate}
                 newSessionTrigger={newSessionTrigger}
                 onShowAllTasks={tasksEnabled ? () => setActiveTab('tasks') : null}
+                onRunInShell={onRunInShell}
               />
             </ErrorBoundary>
           </div>
@@ -163,6 +166,7 @@ function MainContent({
                 session={selectedSession}
                 showHeader={false}
                 isActive={activeTab === 'shell'}
+                pendingCommand={pendingShellCommand}
               />
             </div>
           )}

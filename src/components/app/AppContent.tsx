@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -64,6 +64,14 @@ function AppContentInner() {
     openSettings,
     refreshProjects: refreshProjectsSilently,
   });
+
+  // 交互式内置命令（如 /model）切到 Shell 标签后注入真实 CLI 进程的待发命令。
+  // 用单调递增的 nonce 保证「同一命令重复触发」也能被 Shell 感知并再次注入。
+  const [pendingShellCommand, setPendingShellCommand] = useState<{ command: string; nonce: number } | null>(null);
+  const runInShell = useCallback((command: string) => {
+    setPendingShellCommand((prev) => ({ command, nonce: (prev?.nonce ?? 0) + 1 }));
+    setActiveTab('shell');
+  }, [setActiveTab]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
@@ -196,6 +204,8 @@ function AppContentInner() {
           onShowSettings={() => setShowSettings(true)}
           externalMessageUpdate={externalMessageUpdate}
           newSessionTrigger={newSessionTrigger}
+          pendingShellCommand={pendingShellCommand}
+          onRunInShell={runInShell}
         />
       </div>
 

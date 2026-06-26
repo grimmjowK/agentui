@@ -35,6 +35,9 @@ export interface ChatMessage {
   isThinking?: boolean;
   isStreaming?: boolean;
   isInteractivePrompt?: boolean;
+  isBuiltinModelList?: boolean;
+  modelOptions?: Array<{ value: string; label: string }>;
+  currentModel?: string;
   isToolUse?: boolean;
   toolName?: string;
   toolInput?: unknown;
@@ -126,4 +129,5 @@ export interface ChatInterfaceProps {
   newSessionTrigger?: number;
   onTaskClick?: (...args: unknown[]) => void;
   onShowAllTasks?: (() => void) | null;
+  onRunInShell?: (command: string) => void;
 }

@@ -44,6 +44,7 @@ function ChatInterface({
   externalMessageUpdate,
   newSessionTrigger,
   onShowAllTasks,
+  onRunInShell,
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
   const { t } = useTranslation('chat');
@@ -174,6 +175,7 @@ function ChatInterface({
     isInputFocused,
     pendingCommand,
     clearPendingCommand,
+    handleModelSwitch,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -210,6 +212,7 @@ function ChatInterface({
     setClaudeStatus,
     setIsUserScrolledUp,
     setPendingPermissionRequests,
+    onRunInShell,
   });
 
   // On WebSocket reconnect, re-fetch the current session's messages from the server
@@ -361,6 +364,7 @@ function ChatInterface({
           onFileOpen={onFileOpen}
           onShowSettings={onShowSettings}
           onGrantToolPermission={handleGrantToolPermission}
+          onModelSwitch={handleModelSwitch}
           autoExpandTools={autoExpandTools}
           showRawParameters={showRawParameters}
           showThinking={showThinking}

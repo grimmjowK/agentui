@@ -28,6 +28,7 @@ type MessageComponentProps = {
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
   onGrantToolPermission?: (suggestion: ClaudePermissionSuggestion) => PermissionGrantResult | null | undefined;
+  onModelSwitch?: (modelValue: string) => void;
   autoExpandTools?: boolean;
   showRawParameters?: boolean;
   showThinking?: boolean;
@@ -44,7 +45,7 @@ type InteractiveOption = {
 type PermissionGrantState = 'idle' | 'granted' | 'error';
 const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onShowSettings, onGrantToolPermission, autoExpandTools, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onShowSettings, onGrantToolPermission, onModelSwitch, autoExpandTools, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const isGrouped = prevMessage && prevMessage.type === message.type &&
     ((prevMessage.type === 'assistant') ||
@@ -298,6 +299,36 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                   )
                 )}
               </>
+            ) : message.isBuiltinModelList ? (
+              // 内联渲染 /model 的可选择模型列表
+              <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
+                <h4 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  {t('builtinModel.title', '选择模型')}
+                </h4>
+                <div className="space-y-1.5">
+                  {(Array.isArray(message.modelOptions) ? message.modelOptions : []).map((option) => {
+                    const isCurrent = option.value === message.currentModel;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => onModelSwitch?.(option.value)}
+                        className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                          isCurrent
+                            ? 'border-primary/40 bg-primary/10 text-primary'
+                            : 'border-gray-200 bg-transparent text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700/50'
+                        }`}
+                      >
+                        <span className="flex flex-col">
+                          <span className="font-medium">{option.label}</span>
+                          <span className="font-mono text-xs text-gray-400">{option.value}</span>
+                        </span>
+                        {isCurrent && <span className="text-primary">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ) : message.isInteractivePrompt ? (
               // Special handling for interactive prompts
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">

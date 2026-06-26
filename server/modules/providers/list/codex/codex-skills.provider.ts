@@ -63,6 +63,11 @@ export class CodexSkillsProvider extends SkillsProvider {
       rootDir: path.join(workspacePath, '.agents', 'skills'),
       commandPrefix: '$',
     });
+    addUniqueSource(sources, seenRootDirs, {
+      scope: 'repo',
+      rootDir: path.join(workspacePath, '.codex', 'skills'),
+      commandPrefix: '$',
+    });
 
     if (repoRoot) {
       // Codex checks repository skills at the launch folder, one folder above it,
@@ -74,7 +79,17 @@ export class CodexSkillsProvider extends SkillsProvider {
       });
       addUniqueSource(sources, seenRootDirs, {
         scope: 'repo',
+        rootDir: path.join(path.dirname(workspacePath), '.codex', 'skills'),
+        commandPrefix: '$',
+      });
+      addUniqueSource(sources, seenRootDirs, {
+        scope: 'repo',
         rootDir: path.join(repoRoot, '.agents', 'skills'),
+        commandPrefix: '$',
+      });
+      addUniqueSource(sources, seenRootDirs, {
+        scope: 'repo',
+        rootDir: path.join(repoRoot, '.codex', 'skills'),
         commandPrefix: '$',
       });
     }

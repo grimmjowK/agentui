@@ -28,6 +28,7 @@ export type MessageKind =
   | 'permission_cancelled'
   | 'session_created'
   | 'interactive_prompt'
+  | 'builtin_model_list'
   | 'task_notification';
 
 export interface NormalizedMessage {
@@ -54,6 +55,9 @@ export interface NormalizedMessage {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  /** Carried by the client-only `builtin_model_list` kind (/model inline list). */
+  modelOptions?: Array<{ value: string; label: string }>;
+  currentModel?: string;
   images?: string[];
   toolName?: string;
   toolInput?: unknown;

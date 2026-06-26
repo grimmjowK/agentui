@@ -9,6 +9,9 @@ import { parseFrontMatter } from '../shared/frontmatter.js';
 import { findAppRoot, getModuleDir } from '../utils/runtime-paths.js';
 import { providerSkillsService } from '../modules/providers/services/skills.service.js';
 
+// Skills 列表已统一由 /api/providers/:provider/skills 提供（带插件命名空间与完整元数据），
+// 此处不再返回 skills 字段，避免与前端二次请求重复。
+
 const __dirname = getModuleDir(import.meta.url);
 // This route reads the top-level package.json for the status command, so it needs the real
 // app root even after compilation moves the route file under dist-server/server/routes.
@@ -410,7 +413,7 @@ Custom commands can be created in:
  */
 router.post('/list', async (req, res) => {
   try {
-    const { projectPath, provider = 'claude' } = req.body;
+    const { projectPath } = req.body;
     const allCommands = [...builtInCommands];
 
     // Scan project-level commands (.claude/commands/)
@@ -434,37 +437,16 @@ router.post('/list', async (req, res) => {
     );
     allCommands.push(...userCommands);
 
-    // Load skills for the current provider, reusing the providers skills service.
-    // Unsupported providers (cursor/codex) throw, so degrade to an empty list.
-    let skills = [];
-    try {
-      const skillItems = await providerSkillsService.listSkills(provider, projectPath);
-      skills = skillItems.map((skill) => {
-        const { data: frontmatter } = parseFrontmatter(skill.content || '');
-        return {
-          name: `/${skill.name}`,
-          description: frontmatter.description || '',
-          namespace: 'skill',
-          metadata: { type: 'skill', scope: skill.scope }
-        };
-      });
-    } catch (err) {
-      // Provider does not support skills (cursor/codex) or skills dir unreadable.
-      skills = [];
-    }
-
     // Separate built-in and custom commands
     const customCommands = allCommands.filter(cmd => cmd.namespace !== 'builtin');
 
     // Sort commands alphabetically by name
     customCommands.sort((a, b) => a.name.localeCompare(b.name));
-    skills.sort((a, b) => a.name.localeCompare(b.name));
 
     res.json({
       builtIn: builtInCommands,
       custom: customCommands,
-      skills,
-      count: allCommands.length + skills.length
+      count: allCommands.length
     });
   } catch (error) {
     console.error('Error listing commands:', error);
@@ -514,8 +496,8 @@ router.post('/execute', async (req, res) => {
     if (commandType === 'skill') {
       try {
         const provider = context.provider || 'claude';
-        const skillName = commandName.replace(/^\//, '');
-        const allSkills = await providerSkillsService.listSkills(provider, context.projectPath);
+        const skillName = commandName.replace(/^[/$]/, '');
+        const allSkills = await providerSkillsService.listProviderSkills(provider, { workspacePath: context.projectPath });
         const skill = allSkills.find((s) => s.name === skillName);
         if (!skill) {
           return res.status(404).json({
@@ -523,7 +505,7 @@ router.post('/execute', async (req, res) => {
             message: `Skill "${skillName}" not found`
           });
         }
-        const { content: skillContent } = parseFrontmatter(skill.content || '');
+        const { content: skillContent } = parseFrontMatter(skill.content || '');
         let processedContent = skillContent;
         const argsString = args.join(' ');
         processedContent = processedContent.replace(/\$ARGUMENTS/g, argsString);

@@ -9,6 +9,7 @@ import {
   PROMPT_MIN_OPTIONS,
   PROMPT_OPTION_SCAN_LINES,
   SHELL_RESTART_DELAY_MS,
+  TERMINAL_INIT_DELAY_MS,
 } from '../constants/constants';
 import { useShellRuntime } from '../hooks/useShellRuntime';
 import { sendSocketMessage } from '../utils/socket';
@@ -30,6 +31,7 @@ type ShellProps = {
   minimal?: boolean;
   autoConnect?: boolean;
   isActive?: boolean;
+  pendingCommand?: { command: string; nonce: number } | null;
 };
 
 export default function Shell({
@@ -41,6 +43,7 @@ export default function Shell({
   minimal = false,
   autoConnect = false,
   isActive = true,
+  pendingCommand = null,
 }: ShellProps) {
   const { t } = useTranslation('chat');
   const [isRestarting, setIsRestarting] = useState(false);
@@ -178,6 +181,49 @@ export default function Shell({
     },
     [wsRef],
   );
+
+  // 注入由 chat 触发的交互式命令（如 /model）到真实 CLI 进程。
+  // 以 nonce 去重：同一命令重复触发也会再次注入；未连接时先发起连接，
+  // 待 PTY 就绪后再写入，确保命令进入真实 CLI 而非丢失。
+  const injectedNonceRef = useRef<number | null>(null);
+  const pendingInjectRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingCommand || !isActive) {
+      return;
+    }
+    if (injectedNonceRef.current === pendingCommand.nonce) {
+      return;
+    }
+    injectedNonceRef.current = pendingCommand.nonce;
+    pendingInjectRef.current = pendingCommand.command;
+
+    if (!isConnected) {
+      // 终端未连接时先连接，连接后由下方 effect 完成注入。
+      connectToShell();
+    }
+  }, [pendingCommand, isActive, isConnected, connectToShell]);
+
+  useEffect(() => {
+    if (!isConnected || !isInitialized) {
+      return;
+    }
+    const command = pendingInjectRef.current;
+    if (!command) {
+      return;
+    }
+    pendingInjectRef.current = null;
+    // 分两步写入：先写命令文本（CLI 的斜杠命令自动补全弹层会出现），
+    // 再延迟补发一次回车提交——直接拼 `\r` 会被补全弹层当作"接受补全"吞掉，
+    // 导致命令停在输入行而不执行。
+    const cmdTimer = window.setTimeout(() => {
+      sendInput(command);
+      window.setTimeout(() => {
+        sendInput('\r');
+      }, TERMINAL_INIT_DELAY_MS);
+    }, TERMINAL_INIT_DELAY_MS);
+    return () => window.clearTimeout(cmdTimer);
+  }, [isConnected, isInitialized, sendInput]);
 
   const sessionDisplayName = useMemo(() => getSessionDisplayName(selectedSession), [selectedSession]);
   const sessionDisplayNameShort = useMemo(

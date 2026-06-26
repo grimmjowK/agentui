@@ -4,7 +4,6 @@ import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 import { authenticatedFetch } from '../../../utils/api';
 import { safeLocalStorage } from '../utils/chatStorage';
 import type { LLMProvider, Project } from '../../../types/app';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../../../shared/modelConstants';
 
 const COMMAND_QUERY_DEBOUNCE_MS = 150;
 
@@ -27,6 +26,7 @@ interface UseSlashCommandsOptions {
   onExecuteCommand: (command: SlashCommand, rawInput?: string) => void | Promise<void>;
   onSelectCommand?: (command: SlashCommand) => void;
   onModelSwitch?: (modelValue: string) => void;
+  onRunInShell?: (command: string) => void;
   currentModel?: string;
 }
 
@@ -66,15 +66,6 @@ const readCommandHistory = (projectName: string): Record<string, number> => {
 const saveCommandHistory = (projectName: string, history: Record<string, number>) => {
   safeLocalStorage.setItem(getCommandHistoryKey(projectName), JSON.stringify(history));
 };
-
-const isPromiseLike = (value: unknown): value is Promise<unknown> =>
-  Boolean(value) && typeof (value as Promise<unknown>).then === 'function';
-
-const isSkillCommand = (command: SlashCommand) =>
-  command.type === 'skill' ||
-  command.type === 'custom' ||
-  command.type === 'model-option' ||
-  command.metadata?.type === 'skill';
 
 const dedupeProviderSkills = (skills: ProviderSkill[]): ProviderSkill[] => {
   const seenCommands = new Set<string>();
@@ -144,21 +135,15 @@ const filterSlashCommands = (
 
 export function useSlashCommands({
   selectedProject,
-  input,
-  setInput,
   textareaRef,
-  onExecuteCommand,
   onSelectCommand,
-  onModelSwitch,
   provider = 'claude',
-  currentModel,
 }: UseSlashCommandsOptions) {
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const [filteredCommands, setFilteredCommands] = useState<SlashCommand[]>([]);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(-1);
-  const [slashPosition, setSlashPosition] = useState(-1);
   const [submenuMode, setSubmenuMode] = useState<string | null>(null);
 
   const commandQueryTimerRef = useRef<number | null>(null);
@@ -172,37 +157,11 @@ export function useSlashCommands({
 
   const resetCommandMenuState = useCallback(() => {
     setShowCommandMenu(false);
-    setSlashPosition(-1);
     setCommandQuery('');
     setSelectedCommandIndex(-1);
     setSubmenuMode(null);
     clearCommandQueryTimer();
   }, [clearCommandQueryTimer]);
-
-  const getModelOptionsForProvider = useCallback((p: string): SlashCommand[] => {
-    const config = p === 'claude' ? CLAUDE_MODELS
-      : p === 'cursor' ? CURSOR_MODELS
-      : p === 'codex' ? CODEX_MODELS
-      : p === 'gemini' ? GEMINI_MODELS
-      : CLAUDE_MODELS;
-    return config.OPTIONS.map((o: { value: string; label: string }) => ({
-      name: o.value,
-      description: o.label,
-      namespace: 'model',
-      type: 'model-option',
-      metadata: { type: 'model', isCurrent: o.value === currentModel },
-    }));
-  }, [currentModel]);
-
-  const enterSubmenu = useCallback((commandName: string) => {
-    if (commandName === '/model') {
-      const modelOptions = getModelOptionsForProvider(provider);
-      setSubmenuMode('/model');
-      setFilteredCommands(modelOptions);
-      setSelectedCommandIndex(-1);
-      setCommandQuery('');
-    }
-  }, [provider, getModelOptionsForProvider]);
 
   useEffect(() => {
     let cancelled = false;
@@ -254,10 +213,6 @@ export function useSlashCommands({
           ...((data.custom || []) as SlashCommand[]).map((command) => ({
             ...command,
             type: 'custom',
-          })),
-          ...((data.skills || []) as SlashCommand[]).map((command) => ({
-            ...command,
-            type: 'skill',
           })),
         ];
 
@@ -334,78 +289,29 @@ export function useSlashCommands({
     [selectedProject],
   );
 
-  const insertCommandIntoInput = useCallback(
+  // 统一的命令选中入口：将命令固化为 Chip（点击 / Enter / Tab 行为一致）。
+  // 包括 skills、custom 与 build-in 内置指令；build-in 不再切到 Shell 终端，
+  // 而是固化为 Chip、提交后在 chat 内联处理。
+  const selectCommand = useCallback(
     (command: SlashCommand) => {
       trackCommandUsage(command);
 
-      // Handle submenu item selection (e.g. model option)
-      if (submenuMode === '/model' && command.type === 'model-option') {
-        onModelSwitch?.(command.name);
-        resetCommandMenuState();
-        return;
-      }
-
-      // Enter submenu for /model command
-      if (command.name === '/model') {
-        enterSubmenu('/model');
-        return;
-      }
-
-      const currentTextarea = textareaRef.current;
-      const insertionStart = slashPosition >= 0
-        ? slashPosition
-        : currentTextarea?.selectionStart ?? input.length;
-      const textBeforeCommand = input.slice(0, insertionStart);
-      const textAfterCommandStart = input.slice(insertionStart);
-      const spaceIndex = textAfterCommandStart.indexOf(' ');
-      const textAfterCommand = slashPosition >= 0 && spaceIndex !== -1
-        ? textAfterCommandStart.slice(spaceIndex).trimStart()
-        : input.slice(currentTextarea?.selectionEnd ?? insertionStart);
-      const separator = textBeforeCommand && !/\s$/.test(textBeforeCommand) ? ' ' : '';
-      const newInput = `${textBeforeCommand}${separator}${command.name}${textAfterCommand ? ` ${textAfterCommand}` : ' '}`;
-
-      setInput(newInput);
+      // 所有从菜单选中的命令固化为可删除的命令 Chip，等待追加文本后由回车提交
+      onSelectCommand?.(command);
       resetCommandMenuState();
-
-      window.requestAnimationFrame(() => {
-        currentTextarea?.focus();
-        const nextCursorPosition = `${textBeforeCommand}${separator}${command.name} `.length;
-        currentTextarea?.setSelectionRange(nextCursorPosition, nextCursorPosition);
-      });
     },
-    [input, resetCommandMenuState, setInput, slashPosition, textareaRef],
-  );
-
-  const executeNonSkillCommand = useCallback(
-    (command: SlashCommand) => {
-      const executionResult = onExecuteCommand(command);
-      if (isPromiseLike(executionResult)) {
-        executionResult.then(
-          () => {
-            resetCommandMenuState();
-          },
-          () => {
-            resetCommandMenuState();
-            // Keep behavior silent; execution errors are handled by caller.
-          },
-        );
-      } else {
-        resetCommandMenuState();
-      }
-    },
-    [onExecuteCommand, resetCommandMenuState],
+    [
+      trackCommandUsage,
+      resetCommandMenuState,
+      onSelectCommand,
+    ],
   );
 
   const selectCommandFromKeyboard = useCallback(
     (command: SlashCommand) => {
-      if (isSkillCommand(command)) {
-        insertCommandIntoInput(command);
-        return;
-      }
-
-      executeNonSkillCommand(command);
+      selectCommand(command);
     },
-    [executeNonSkillCommand, insertCommandIntoInput],
+    [selectCommand],
   );
 
   const handleCommandSelect = useCallback(
@@ -419,15 +325,9 @@ export function useSlashCommands({
         return;
       }
 
-      trackCommandUsage(command);
-      if (isSkillCommand(command)) {
-        insertCommandIntoInput(command);
-        return;
-      }
-
-      executeNonSkillCommand(command);
+      selectCommand(command);
     },
-    [selectedProject, trackCommandUsage, insertCommandIntoInput, executeNonSkillCommand],
+    [selectedProject, selectCommand],
   );
 
   const handleToggleCommandMenu = useCallback(() => {
@@ -472,19 +372,8 @@ export function useSlashCommands({
         return;
       }
 
-      const slashPos = 0;
       const query = match[1];
 
-      // 当输入精确匹配 /model 时，直接进入子菜单，跳过 slash command 选择步骤
-      if (query === 'model') {
-        setSlashPosition(slashPos);
-        setShowCommandMenu(true);
-        clearCommandQueryTimer();
-        enterSubmenu('/model');
-        return;
-      }
-
-      setSlashPosition(slashPos);
       setShowCommandMenu(true);
       setSelectedCommandIndex(-1);
 
@@ -493,7 +382,7 @@ export function useSlashCommands({
         setCommandQuery(query);
       }, COMMAND_QUERY_DEBOUNCE_MS);
     },
-    [resetCommandMenuState, clearCommandQueryTimer, submenuMode, enterSubmenu],
+    [resetCommandMenuState, clearCommandQueryTimer, submenuMode],
   );
 
   const handleCommandMenuKeyDown = useCallback(

@@ -55,6 +55,8 @@ export type MainContentProps = {
   onShowSettings: () => void;
   externalMessageUpdate: number;
   newSessionTrigger: number;
+  pendingShellCommand?: { command: string; nonce: number } | null;
+  onRunInShell?: (command: string) => void;
 };
 
 export type MainContentHeaderProps = {

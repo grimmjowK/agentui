@@ -22,6 +22,7 @@ import type {
 } from '../types/types';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import { escapeRegExp } from '../utils/chatFormatting';
+import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../../../shared/modelConstants';
 
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
@@ -67,6 +68,7 @@ interface UseChatComposerStateArgs {
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
   setIsUserScrolledUp: (isScrolledUp: boolean) => void;
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
+  onRunInShell?: (command: string) => void;
 }
 
 interface MentionableFile {
@@ -141,6 +143,7 @@ export function useChatComposerState({
   setClaudeStatus,
   setIsUserScrolledUp,
   setPendingPermissionRequests,
+  onRunInShell,
 }: UseChatComposerStateArgs) {
   const [input, setInput] = useState(() => {
     if (typeof window !== 'undefined' && selectedProject) {
@@ -221,13 +224,24 @@ export function useChatComposerState({
             const targetModel = data.message.replace('Switching to model: ', '').trim();
             handleModelSwitch(targetModel);
           } else {
-            const p = data.current.provider || 'claude';
-            const providerModels = data.available[p] || [];
-            const modelContent = `**Current Model**: ${data.current.model}\n\n**Available Models** (${p}):\n${providerModels.join(', ')}`;
+            // 内联渲染可选择的模型列表：选项取自 modelConstants（含 label），
+            // 当前生效模型用于高亮标识。点击列表项由 MessageComponent 调用切换。
+            const p = (provider || 'claude') as LLMProvider;
+            const config = p === 'cursor' ? CURSOR_MODELS
+              : p === 'codex' ? CODEX_MODELS
+              : p === 'gemini' ? GEMINI_MODELS
+              : CLAUDE_MODELS;
+            const activeModel = p === 'cursor' ? cursorModel
+              : p === 'codex' ? codexModel
+              : p === 'gemini' ? geminiModel
+              : claudeModel;
             addMessage({
               type: 'assistant',
-              content: modelContent,
+              content: '',
               timestamp: Date.now(),
+              isBuiltinModelList: true,
+              modelOptions: config.OPTIONS,
+              currentModel: activeModel,
             });
           }
           break;
@@ -289,7 +303,7 @@ export function useChatComposerState({
           console.warn('Unknown built-in command action:', action);
       }
     },
-    [onFileOpen, onShowSettings, addMessage, clearMessages, rewindMessages, handleModelSwitch],
+    [onFileOpen, onShowSettings, addMessage, clearMessages, rewindMessages, handleModelSwitch, provider, claudeModel, cursorModel, codexModel, geminiModel],
   );
 
   const handleCustomCommand = useCallback(async (result: CommandExecutionResult) => {
@@ -336,7 +350,9 @@ export function useChatComposerState({
 
       try {
         const effectiveInput = rawInput ?? input;
-        const commandMatch = effectiveInput.match(new RegExp(`${escapeRegExp(command.name)}\\s*(.*)`));
+        // 使用 `s`（dotAll）标志，使追加文本中的换行也能被捕获，
+        // 否则换行后的内容会被丢弃、无法作为参数发送给 CLI。
+        const commandMatch = effectiveInput.match(new RegExp(`${escapeRegExp(command.name)}\\s*([\\s\\S]*)`));
         const args =
           commandMatch && commandMatch[1] ? commandMatch[1].trim().split(/\s+/) : [];
 
@@ -444,6 +460,7 @@ export function useChatComposerState({
     onExecuteCommand: executeCommand,
     onSelectCommand: handleSelectCommand,
     onModelSwitch: handleModelSwitch,
+    onRunInShell,
     currentModel,
   });
 
@@ -770,7 +787,7 @@ export function useChatComposerState({
         setIsLoading(false);
         setCanAbortSession(false);
         setClaudeStatus(null);
-        if (effectiveSessionId && !isTemporarySessionId(effectiveSessionId)) {
+        if (effectiveSessionId) {
           onSessionNotProcessing?.(effectiveSessionId);
         }
         addMessage({
@@ -1114,5 +1131,6 @@ export function useChatComposerState({
     isInputFocused,
     pendingCommand,
     clearPendingCommand,
+    handleModelSwitch,
   };
 }

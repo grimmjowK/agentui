@@ -338,16 +338,34 @@ test('providerSkillsService lists codex repository, user, and system skills', { 
       'Codex cwd skill',
     );
     await writeSkill(
+      path.join(workspacePath, '.codex', 'skills'),
+      'codex-cwd-codex-dir',
+      'codex-cwd-codex',
+      'Codex cwd .codex skill',
+    );
+    await writeSkill(
       path.join(repoRoot, 'packages', '.agents', 'skills'),
       'codex-parent-dir',
       'codex-parent',
       'Codex parent skill',
     );
     await writeSkill(
+      path.join(repoRoot, 'packages', '.codex', 'skills'),
+      'codex-parent-codex-dir',
+      'codex-parent-codex',
+      'Codex parent .codex skill',
+    );
+    await writeSkill(
       path.join(repoRoot, '.agents', 'skills'),
       'codex-root-dir',
       'codex-root',
       'Codex root skill',
+    );
+    await writeSkill(
+      path.join(repoRoot, '.codex', 'skills'),
+      'codex-root-codex-dir',
+      'codex-root-codex',
+      'Codex root .codex skill',
     );
     await writeSkill(
       path.join(tempRoot, '.agents', 'skills'),
@@ -366,11 +384,15 @@ test('providerSkillsService lists codex repository, user, and system skills', { 
     const byName = new Map(skills.map((skill) => [skill.name, skill]));
 
     assert.equal(byName.get('codex-cwd')?.scope, 'repo');
+    assert.equal(byName.get('codex-cwd-codex')?.scope, 'repo');
     assert.equal(byName.get('codex-parent')?.scope, 'repo');
+    assert.equal(byName.get('codex-parent-codex')?.scope, 'repo');
     assert.equal(byName.get('codex-root')?.scope, 'repo');
+    assert.equal(byName.get('codex-root-codex')?.scope, 'repo');
     assert.equal(byName.get('codex-user')?.scope, 'user');
     assert.equal(byName.get('codex-system')?.scope, 'system');
     assert.equal(byName.get('codex-root')?.command, '$codex-root');
+    assert.equal(byName.get('codex-root-codex')?.command, '$codex-root-codex');
   } finally {
     restoreHomeDir();
     await fs.rm(tempRoot, { recursive: true, force: true });
