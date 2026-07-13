@@ -1,0 +1,62 @@
+services:
+  # CloudCLI UI 服务（Web 界面 + API）
+  cloudcli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cloudcli-server
+    ports:
+      - "3001:3001"
+    volumes:
+      # 持久化数据
+      - cloudcli-data:/data/db
+      - popo-sessions:/data/popo-sessions
+      # Codex 配置（从宿主机挂载）
+      - ${HOME}/.codex/config.toml:/root/.codex/config.toml:ro
+      - ${HOME}/.codex/codemaker-models.json:/root/.codex/codemaker-models.json:ro
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - SERVER_PORT=3001
+      - VITE_IS_PLATFORM=true
+      - DATABASE_PATH=/data/db/auth.db
+      - VITE_CONTEXT_WINDOW=160000
+      - CONTEXT_WINDOW=160000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # POPO 机器人服务（消息路由）
+  popo-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: popo-bot
+    depends_on:
+      cloudcli:
+        condition: service_healthy
+    volumes:
+      - popo-sessions:/data/popo-sessions
+      # Codex 配置
+      - ${HOME}/.codex/config.toml:/root/.codex/config.toml:ro
+      - ${HOME}/.codex/codemaker-models.json:/root/.codex/codemaker-models.json:ro
+    environment:
+      # POPO bot 通过 cloudcli 容器的内部网络访问 API
+      - CLOUDCLI_API_URL=http://cloudcli:3001/api/agent/
+      - SESSION_WORKDIR=/data/popo-sessions
+      - AI_PROVIDER=codex
+      - AI_MODEL=deepseek-v4-pro
+      # POPO 机器人凭证（建议通过 .env 文件注入，不要硬编码）
+      - POPO_APP_KEY=${POPO_APP_KEY:-FmsUxbLECVGG4JzWbYRS}
+      - POPO_APP_SECRET=${POPO_APP_SECRET:-P9GnS3ZUVTrfRVCDfM5MO0WCmZCWW3IHpa28J3vJdnZ8DU5u1NGdgNEAmjABBArx}
+      - POPO_AES_KEY=${POPO_AES_KEY:-HAT2EmPksEG630ssPXBrwNpXRN1tTb65}
+    command: ["/app/.venv/bin/python", "/app/scripts/popo-bot-connect.py"]
+    restart: unless-stopped
+
+volumes:
+  cloudcli-data:
+  popo-sessions:
