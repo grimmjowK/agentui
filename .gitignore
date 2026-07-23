@@ -142,3 +142,7 @@ tasks/
 
 # Git worktrees
 .worktrees/
+/docs/
+/.venv/
+__pycache__/
+*.pyc
