@@ -7,7 +7,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
   onDecision,
 }) => {
   const input = request.input as { questions?: Question[] } | undefined;
-  const questions: Question[] = input?.questions || [];
+  const questions: Question[] = Array.isArray(input?.questions) ? input.questions : [];
 
   const [currentStep, setCurrentStep] = useState(0);
   const [selections, setSelections] = useState<Map<number, Set<string>>>(() => new Map());
@@ -219,7 +219,7 @@ export const AskUserQuestionPanel: React.FC<PermissionPanelProps> = ({
         {/* Options — tight spacing */}
         <div className="scrollbar-thin max-h-48 overflow-y-auto px-4 pb-2" role={multi ? 'group' : 'radiogroup'} aria-label={q.question}>
           <div className="space-y-1">
-            {q.options.map((opt, optIdx) => {
+            {(Array.isArray(q.options) ? q.options : []).map((opt, optIdx) => {
               const isSelected = selected.has(opt.label);
               return (
                 <button

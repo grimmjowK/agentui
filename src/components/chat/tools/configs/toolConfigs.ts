@@ -478,10 +478,23 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       },
       defaultOpen: true,
       contentType: 'question-answer',
-      getContentProps: (input: any) => ({
-        questions: input.questions || [],
-        answers: input.answers || {}
-      }),
+      getContentProps: (input: any) => {
+        let questions = input.questions;
+        if (typeof questions === 'string') {
+          try {
+            questions = JSON.parse(questions);
+          } catch {
+            questions = [];
+          }
+        }
+        if (!Array.isArray(questions)) {
+          questions = [];
+        }
+        return {
+          questions,
+          answers: input.answers || {}
+        };
+      },
     },
     result: {
       hideOnSuccess: true
