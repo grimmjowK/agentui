@@ -1,4 +1,4 @@
-import { Check, Edit2, Trash2, X } from 'lucide-react';
+import { Check, Edit2, Star, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Badge, Button } from '../../../../shared/view/ui';
@@ -7,6 +7,9 @@ import type { Project, ProjectSession, LLMProvider } from '../../../../types/app
 import type { SessionWithProvider } from '../../types/types';
 import { createSessionViewModel } from '../../utils/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
+
+// 收藏态星标：实心紫，和未收藏的灰色描边拉开差距
+const STAR_ACTIVE_CLASS = 'fill-[#9b59b6] text-[#9b59b6]';
 
 type SidebarSessionItemProps = {
   project: Project;
@@ -27,6 +30,7 @@ type SidebarSessionItemProps = {
     sessionTitle: string,
     provider: LLMProvider,
   ) => void;
+  onToggleStarSession: (sessionId: string) => void;
   t: TFunction;
 };
 
@@ -72,6 +76,7 @@ export default function SidebarSessionItem({
   onProjectSelect,
   onSessionSelect,
   onDeleteSession,
+  onToggleStarSession,
   t,
 }: SidebarSessionItemProps) {
   const sessionView = createSessionViewModel(session, currentTime, t);
@@ -88,6 +93,9 @@ export default function SidebarSessionItem({
   const saveEditedSession = () => {
     onSaveEditingSession(project.projectId, session.id, editingSessionName, session.__provider);
   };
+
+  const isStarred = Boolean(session.isStarred);
+  const starTooltip = t(isStarred ? 'tooltips.removeFromFavorites' : 'tooltips.addToFavorites');
 
   const requestDeleteSession = () => {
     onDeleteSession(project.projectId, session.id, sessionView.sessionName, session.__provider);
@@ -137,6 +145,22 @@ export default function SidebarSessionItem({
                 )}
               </div>
             </div>
+
+            <button
+              className="ml-1 flex h-5 w-5 items-center justify-center rounded-md bg-muted/50 opacity-70 transition-transform active:scale-95"
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleStarSession(session.id);
+              }}
+              title={starTooltip}
+            >
+              <Star
+                className={cn(
+                  'h-2.5 w-2.5',
+                  isStarred ? STAR_ACTIVE_CLASS : 'text-muted-foreground',
+                )}
+              />
+            </button>
 
             {!sessionView.isCursorSession && (
               <button
@@ -222,6 +246,21 @@ export default function SidebarSessionItem({
               </>
             ) : (
               <>
+                <button
+                  className="flex h-6 w-6 items-center justify-center rounded bg-gray-50 hover:bg-gray-100 dark:bg-gray-900/20 dark:hover:bg-gray-900/40"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleStarSession(session.id);
+                  }}
+                  title={starTooltip}
+                >
+                  <Star
+                    className={cn(
+                      'h-3 w-3',
+                      isStarred ? STAR_ACTIVE_CLASS : 'text-gray-600 dark:text-gray-400',
+                    )}
+                  />
+                </button>
                 <button
                   className="flex h-6 w-6 items-center justify-center rounded bg-gray-50 hover:bg-gray-100 dark:bg-gray-900/20 dark:hover:bg-gray-900/40"
                   onClick={(event) => {

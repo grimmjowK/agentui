@@ -4,6 +4,7 @@ import { promises as fsPromises } from 'node:fs';
 
 import chokidar, { type FSWatcher } from 'chokidar';
 
+import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 import { sessionSynchronizerService } from '@/modules/providers/services/session-synchronizer.service.js';
 import { WS_OPEN_STATE, connectedClients } from '@/modules/websocket/index.js';
 import type { LLMProvider } from '@/shared/types.js';
@@ -200,6 +201,11 @@ async function onUpdate(
       filePath,
       sessionId: result.sessionId,
     });
+    // 收藏会话的备份在这里统一刷新：只有这里能拿到“哪个 session 的文件变了”
+    if (result.sessionId) {
+      await sessionPinService.syncPinnedTranscript(result.sessionId);
+    }
+
     queuePendingWatcherUpdate(eventType, provider, result.sessionId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -6,7 +6,7 @@ import readline from 'node:readline';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
-import { sessionsDb } from '@/modules/database/index.js';
+import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 
 const PROVIDER = 'claude';
 
@@ -107,7 +107,7 @@ async function getSessionMessages(
   offset: number,
 ): Promise<ClaudeHistoryMessagesResult> {
   try {
-    const jsonLPath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
+    const jsonLPath = await sessionPinService.resolveTranscriptPath(sessionId);
 
     if (!jsonLPath) {
       return { messages: [], total: 0, hasMore: false };

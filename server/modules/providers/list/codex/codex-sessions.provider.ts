@@ -1,10 +1,10 @@
 import fsSync from 'node:fs';
 import readline from 'node:readline';
 
-import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
+import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 
 const PROVIDER = 'codex';
 
@@ -62,7 +62,7 @@ async function getCodexSessionMessages(
   offset = 0,
 ): Promise<CodexHistoryResult> {
   try {
-    const sessionFilePath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
+    const sessionFilePath = await sessionPinService.resolveTranscriptPath(sessionId);
 
     if (!sessionFilePath) {
       console.warn(`Codex session file not found for session ${sessionId}`);

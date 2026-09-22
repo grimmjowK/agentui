@@ -886,6 +886,23 @@ export function useSidebarController({
     [onRefresh, t],
   );
 
+  // 收藏：置顶 + 服务端备份转录，成功后整体刷新一次项目树
+  const toggleStarSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        const response = await api.toggleSessionStar(sessionId);
+        if (response.ok) {
+          await onRefresh();
+        } else {
+          console.error('[Sidebar] Failed to toggle session star:', response.status);
+        }
+      } catch (error) {
+        console.error('[Sidebar] Error toggling session star:', error);
+      }
+    },
+    [onRefresh],
+  );
+
   const collapseSidebar = useCallback(() => {
     setSidebarVisible(false);
   }, [setSidebarVisible]);
@@ -935,6 +952,7 @@ export function useSidebarController({
     restoreArchivedSession,
     refreshProjects,
     updateSessionSummary,
+    toggleStarSession,
     collapseSidebar,
     expandSidebar,
     setShowNewProject,

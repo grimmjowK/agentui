@@ -2,10 +2,10 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import readline from 'node:readline';
 
-import { sessionsDb } from '@/modules/database/index.js';
 import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
+import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 
 const PROVIDER = 'gemini';
 
@@ -232,7 +232,7 @@ async function getGeminiJsonlSessionMessages(sessionFilePath: string): Promise<G
 }
 
 async function getGeminiCliSessionMessages(sessionId: string): Promise<GeminiHistoryResult> {
-  const sessionFilePath = sessionsDb.getSessionById(sessionId)?.jsonl_path;
+  const sessionFilePath = await sessionPinService.resolveTranscriptPath(sessionId);
   if (!sessionFilePath) {
     return { messages: [] };
   }

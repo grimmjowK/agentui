@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 import type {
   FetchHistoryOptions,
   FetchHistoryResult,
@@ -184,6 +185,8 @@ export const sessionsService = {
       removedFromDisk = await removeFileIfExists(session.jsonl_path);
     }
 
+    await sessionPinService.removePinnedTranscript(sessionId);
+
     const deleted = sessionsDb.deleteSessionById(sessionId);
     if (!deleted) {
       throw new AppError(`Session "${sessionId}" was not found.`, {
@@ -213,6 +216,33 @@ export const sessionsService = {
 
     sessionsDb.updateSessionIsArchived(sessionId, false);
     return { sessionId, isArchived: false };
+  },
+
+  /**
+   * 切换会话收藏状态。
+   *
+   * 收藏后会在文件夹内置顶，并把转录复制一份到备份目录，
+   * 这样 CLI 的全局保留期清理掉原文件后仍然读得到历史。
+   */
+  async toggleSessionStar(sessionId: string): Promise<{ sessionId: string; isStarred: boolean }> {
+    const session = sessionsDb.getSessionById(sessionId);
+    if (!session) {
+      throw new AppError(`Session "${sessionId}" was not found.`, {
+        code: 'SESSION_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+
+    const isStarred = !session.isStarred;
+    sessionsDb.updateSessionIsStarred(sessionId, isStarred);
+
+    if (isStarred) {
+      await sessionPinService.syncPinnedTranscript(sessionId);
+    } else {
+      await sessionPinService.removePinnedTranscript(sessionId);
+    }
+
+    return { sessionId, isStarred };
   },
 
   /**

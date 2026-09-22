@@ -98,6 +98,11 @@ export const api = {
   },
   getArchivedSessions: () =>
     authenticatedFetch('/api/providers/sessions/archived'),
+  // 收藏：文件夹内置顶 + 转录另存一份，规避 CLI 全局保留期清理
+  toggleSessionStar: (sessionId) =>
+    authenticatedFetch(`/api/providers/sessions/${sessionId}/toggle-star`, {
+      method: 'POST',
+    }),
   restoreSession: (sessionId) =>
     authenticatedFetch(`/api/providers/sessions/${sessionId}/restore`, {
       method: 'POST',

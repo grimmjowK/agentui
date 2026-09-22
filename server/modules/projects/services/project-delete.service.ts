@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { sessionPinService } from '@/modules/providers/index.js';
 import { AppError } from '@/shared/utils.js';
 
 function uniqueJsonlPathsFromSessions(
@@ -47,6 +48,11 @@ export async function deleteSessionJsonlFilesForProjectPath(projectPath: string)
 
   for (const filePath of paths) {
     await unlinkJsonlIfExists(filePath);
+  }
+
+  // 收藏备份跟着会话一起硬删除，否则项目删完还留着孤儿副本
+  for (const session of sessions) {
+    await sessionPinService.removePinnedTranscript(session.session_id);
   }
 }
 
