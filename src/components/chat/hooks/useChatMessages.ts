@@ -4,6 +4,7 @@
  */
 
 import type { NormalizedMessage } from '../../../stores/useSessionStore';
+import { stripImagePathNote } from '../../../stores/useSessionStore';
 import type { ChatMessage, SubagentChildTool } from '../types/types';
 import { decodeHtmlEntities, unescapeWithMathProtection, formatUsageLimitText } from '../utils/chatFormatting';
 
@@ -35,6 +36,12 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       isLocalCommand: msg.isLocalCommand,
       isLocalCommandStdout: msg.isLocalCommandStdout,
       isCompactSummary: msg.isCompactSummary,
+      isInterrupted: msg.isInterrupted,
+      attachmentKind: msg.attachmentKind,
+      attachmentPath: msg.attachmentPath,
+      attachmentDetail: msg.attachmentDetail,
+      isCompactBoundary: msg.isCompactBoundary,
+      images: msg.images,
     };
 
     switch (msg.kind) {
@@ -56,9 +63,12 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
               ...sharedMetadata,
             });
           } else {
+            // 已经有缩略图可渲染时，服务端追加的临时路径说明就是冗余噪声，隐藏掉；
+            // 没有缩略图（刷新后历史不带图片数据）时保留，至少能看出当时带了图。
+            const display = msg.images?.length ? stripImagePathNote(content) : content;
             converted.push({
               type: 'user',
-              content: unescapeWithMathProtection(decodeHtmlEntities(content)),
+              content: unescapeWithMathProtection(decodeHtmlEntities(display)),
               timestamp: msg.timestamp,
               ...sharedMetadata,
             });
@@ -152,18 +162,6 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           content: msg.content || '',
           timestamp: msg.timestamp,
           isInteractivePrompt: true,
-          ...sharedMetadata,
-        });
-        break;
-
-      case 'builtin_model_list':
-        converted.push({
-          type: 'assistant',
-          content: '',
-          timestamp: msg.timestamp,
-          isBuiltinModelList: true,
-          modelOptions: Array.isArray(msg.modelOptions) ? msg.modelOptions : [],
-          currentModel: msg.currentModel,
           ...sharedMetadata,
         });
         break;

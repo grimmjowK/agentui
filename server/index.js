@@ -137,6 +137,13 @@ const wss = createWebSocketServer(server, {
         normalizeDetectedUrl,
         extractUrlsFromText,
         shouldAutoOpenUrlFromOutput,
+        // 终端启动时反查同一个 sessionId 是否已有聊天页会话在跑
+        isChatSessionActive: (sessionId, provider) => {
+            if (provider === 'cursor') return isCursorSessionActive(sessionId);
+            if (provider === 'codex') return isCodexSessionActive(sessionId);
+            if (provider === 'gemini') return isGeminiSessionActive(sessionId);
+            return isClaudeSDKSessionActive(sessionId);
+        },
     },
     getPluginPort,
 });

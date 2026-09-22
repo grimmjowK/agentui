@@ -28,7 +28,6 @@ export type MessageKind =
   | 'permission_cancelled'
   | 'session_created'
   | 'interactive_prompt'
-  | 'builtin_model_list'
   | 'task_notification';
 
 export interface NormalizedMessage {
@@ -55,10 +54,12 @@ export interface NormalizedMessage {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
-  /** Carried by the client-only `builtin_model_list` kind (/model inline list). */
-  modelOptions?: Array<{ value: string; label: string }>;
-  currentModel?: string;
-  images?: string[];
+  isInterrupted?: boolean;
+  attachmentKind?: string;
+  attachmentPath?: string;
+  attachmentDetail?: string;
+  isCompactBoundary?: boolean;
+  images?: { data: string; name: string }[];
   toolName?: string;
   toolInput?: unknown;
   toolId?: string;
@@ -126,9 +127,20 @@ function createEmptySlot(): SessionSlot {
  * assistant echo (same trimmed text), so finalized stream rows do not stack
  * on top of the persisted copy before realtime is cleared.
  */
+/**
+ * 带图提交时 server/claude-sdk.js 会把图片临时路径追加到 prompt 末尾再落盘，
+ * 所以服务端那条用户消息比客户端乐观消息多一段路径说明。去重前必须剥掉，
+ * 否则两条文本永远不相等，同一句话会渲染成两个气泡。
+ */
+const IMAGE_PATH_NOTE_RE = /\n*\[Images provided at the following paths:\][\s\S]*$/;
+
+export function stripImagePathNote(text: string): string {
+  return text.replace(IMAGE_PATH_NOTE_RE, '').trimEnd();
+}
+
 function userTextFingerprint(m: NormalizedMessage): string | null {
   if (m.kind !== 'text' || m.role !== 'user') return null;
-  const t = (m.content || '').trim();
+  const t = stripImagePathNote(m.content || '').trim();
   return t.length > 0 ? t : null;
 }
 
@@ -176,18 +188,32 @@ function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[
   const serverUserTexts = new Set(
     server.map(userTextFingerprint).filter((t): t is string => t !== null),
   );
+  // 被丢弃的乐观消息上挂着本地图片缩略图（服务端历史里没有图片数据），
+  // 按文本指纹记下来，回填到对应的服务端消息上，否则气泡里的缩略图会消失。
+  const droppedImages = new Map<string, NormalizedMessage['images']>();
   const extra = realtime.filter((m) => {
     if (serverIds.has(m.id)) return false;
     // Optimistic user rows use `local_*` ids; once the same text exists on the
     // server-backed copy, drop the realtime echo to avoid duplicate bubbles.
     if (m.id.startsWith('local_')) {
       const fp = userTextFingerprint(m);
-      if (fp && serverUserTexts.has(fp)) return false;
+      if (fp && serverUserTexts.has(fp)) {
+        if (m.images?.length) droppedImages.set(fp, m.images);
+        return false;
+      }
     }
     return true;
   });
-  if (extra.length === 0) return server;
-  return dedupeAdjacentAssistantEchoes([...server, ...extra]);
+  const base = droppedImages.size === 0
+    ? server
+    : server.map((m) => {
+        if (m.images?.length) return m;
+        const fp = userTextFingerprint(m);
+        const images = fp ? droppedImages.get(fp) : undefined;
+        return images ? { ...m, images } : m;
+      });
+  if (extra.length === 0) return base;
+  return dedupeAdjacentAssistantEchoes([...base, ...extra]);
 }
 
 function compareMessagesByTimestamp(left: NormalizedMessage, right: NormalizedMessage): number {

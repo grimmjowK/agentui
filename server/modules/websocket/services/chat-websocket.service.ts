@@ -1,6 +1,10 @@
 import type { WebSocket } from 'ws';
 
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
+import {
+  hasLiveShellSession,
+  markShellSessionStale,
+} from '@/modules/websocket/services/shell-websocket.service.js';
 import { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
 import type {
   AnyRecord,
@@ -23,6 +27,35 @@ type ChatIncomingMessage = AnyRecord & {
 };
 
 const DEFAULT_PROVIDER: LLMProvider = 'claude';
+
+/**
+ * 同一个 sessionId 如果同时被终端页的 `<cli> --resume` 进程和聊天页的 SDK
+ * 打开，两个进程各自持有一份内存历史，又都往同一份 transcript 追加：终端页
+ * 会永远停在启动那一刻的历史，记录本身也会分叉。
+ *
+ * 这里不拦截（在终端里看历史会话是正常用法），只做两件事：把终端标记为陈旧
+ * 并在那边打警告，同时给聊天页回一条提示消息。
+ */
+function warnOnConcurrentShellSession(
+  sessionId: unknown,
+  provider: LLMProvider,
+  writer: WebSocketWriter,
+): void {
+  if (typeof sessionId !== 'string' || !hasLiveShellSession(sessionId)) {
+    return;
+  }
+
+  markShellSessionStale(sessionId);
+  writer.send(
+    createNormalizedMessage({
+      kind: 'task_notification',
+      provider,
+      sessionId,
+      status: 'warning',
+      summary: `终端页正打开同一个会话（${sessionId}）。两边是独立进程，终端那侧的历史不会自动同步，继续在终端输入会造成记录分叉。`,
+    }),
+  );
+}
 
 type ChatWebSocketDependencies = {
   queryClaudeSDK: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
@@ -115,21 +148,25 @@ export function handleChatConnection(
       }
 
       if (messageType === 'claude-command') {
+        warnOnConcurrentShellSession(data.options?.sessionId, 'claude', writer);
         await dependencies.queryClaudeSDK(data.command ?? '', data.options, writer);
         return;
       }
 
       if (messageType === 'cursor-command') {
+        warnOnConcurrentShellSession(data.options?.sessionId, 'cursor', writer);
         await dependencies.spawnCursor(data.command ?? '', data.options, writer);
         return;
       }
 
       if (messageType === 'codex-command') {
+        warnOnConcurrentShellSession(data.options?.sessionId, 'codex', writer);
         await dependencies.queryCodex(data.command ?? '', data.options, writer);
         return;
       }
 
       if (messageType === 'gemini-command') {
+        warnOnConcurrentShellSession(data.options?.sessionId, 'gemini', writer);
         await dependencies.spawnGemini(data.command ?? '', data.options, writer);
         return;
       }

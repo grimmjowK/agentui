@@ -27,11 +27,70 @@ type PtySessionEntry = {
   timeoutId: NodeJS.Timeout | null;
   projectPath: string;
   sessionId: string | null;
+  /**
+   * 聊天页在本 pty 启动之后又往同一份 transcript 追加过内容，说明这个 CLI
+   * 进程内存里的历史已经落后。见 `markShellSessionStale`。
+   */
+  stale: boolean;
 };
 
 const ptySessionsMap = new Map<string, PtySessionEntry>();
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
 const SHELL_URL_PARSE_BUFFER_LIMIT = 32768;
+
+const WARN_COLOR = '\x1b[33m';
+const COLOR_RESET = '\x1b[0m';
+
+/**
+ * 同一个 sessionId 可以同时被两个 writer 打开：终端页 `claude --resume` 起的
+ * 真实 CLI 进程，和聊天页走 SDK 的另一个进程。两者各自持有一份内存历史、
+ * 各自往同一个 transcript jsonl 追加，谁都不会感知对方的写入 —— 结果就是
+ * 终端页停留在启动那一刻的历史，而且 transcript 会分叉。
+ *
+ * 这里不做拦截（在终端里查看历史会话是正常用法），只让两边互相知情。
+ */
+function sendShellWarning(ws: WebSocket | null, text: string): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  ws.send(JSON.stringify({ type: 'output', data: `\r\n${WARN_COLOR}${text}${COLOR_RESET}\r\n` }));
+}
+
+/**
+ * 返回该 sessionId 是否有存活的终端 pty。聊天页在发起请求前调用，用于提示
+ * 用户"终端页还开着同一个会话，那边的内容会过期"。
+ */
+export function hasLiveShellSession(sessionId: string): boolean {
+  if (!sessionId) {
+    return false;
+  }
+  for (const entry of ptySessionsMap.values()) {
+    if (entry.sessionId === sessionId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 聊天页向某个 sessionId 写入后调用：把对应的终端 pty 标记为陈旧，并立刻
+ * 往终端里打一行警告（终端已断开时留到下次重连再提示）。
+ */
+export function markShellSessionStale(sessionId: string): void {
+  if (!sessionId) {
+    return;
+  }
+  for (const entry of ptySessionsMap.values()) {
+    if (entry.sessionId !== sessionId || entry.stale) {
+      continue;
+    }
+    entry.stale = true;
+    sendShellWarning(
+      entry.ws,
+      `[警告] 聊天页正在向同一个会话 ${sessionId} 写入。该 CLI 进程的历史停留在启动时刻，不会自动同步；继续在此输入会导致会话记录分叉。断开并重连终端可重新加载最新历史。`,
+    );
+  }
+}
 
 type ShellCommandResult = {
   command: string;
@@ -44,6 +103,8 @@ type ShellWebSocketDependencies = {
   normalizeDetectedUrl: (url: string) => string | null;
   extractUrlsFromText: (content: string) => string[];
   shouldAutoOpenUrlFromOutput: (content: string) => boolean;
+  /** 该 sessionId 当前是否有聊天页的 SDK 会话在跑。 */
+  isChatSessionActive: (sessionId: string, provider: string) => boolean;
 };
 
 /**
@@ -241,6 +302,14 @@ export function handleShellConnection(
           }
 
           existingSession.ws = ws;
+          // 复用的是同一个 CLI 进程，不会重新读 transcript。断线期间聊天页写过
+          // 东西的话，这里回放的缓冲区就是过期内容，必须说清楚。
+          if (existingSession.stale) {
+            sendShellWarning(
+              ws,
+              `[警告] 期间聊天页向会话 ${sessionId} 写入过内容。这里复用的是原有 CLI 进程，历史未刷新；需要最新记录请点"断开"后重新连接。`,
+            );
+          }
           return;
         }
 
@@ -289,6 +358,7 @@ export function handleShellConnection(
           timeoutId: null,
           projectPath,
           sessionId,
+          stale: false,
         });
 
         shellProcess.onData((chunk) => {
@@ -413,6 +483,15 @@ export function handleShellConnection(
             data: welcomeMsg,
           })
         );
+
+        // 反向检测：聊天页此刻正在跑同一个会话，两个进程会各自往同一份
+        // transcript 追加，历史会分叉。
+        if (sessionId && !isPlainShell && dependencies.isChatSessionActive(sessionId, provider)) {
+          sendShellWarning(
+            ws,
+            `[警告] 聊天页当前正在运行同一个会话 ${sessionId}。两边是各自独立的进程，会往同一份记录里写入并造成分叉；建议先在聊天页结束该会话再在此继续。`,
+          );
+        }
         return;
       }
 
