@@ -23,4 +23,18 @@ export const providerAuthService = {
       return true;
     }
   },
+
+  /**
+   * Suffix appended to "CLI is not installed" messages so the failure is
+   * self-diagnosable.
+   *
+   * The message alone is misleading whenever the CLI *is* installed but simply
+   * is not on the server process's PATH — the common case for the desktop shell,
+   * where a GUI-launched app inherits a minimal PATH and the user can plainly run
+   * the same CLI in their terminal. Showing the PATH actually in effect turns
+   * "it says it's not installed but it is" into an obvious diagnosis.
+   */
+  cliLookupPathHint(): string {
+    return `\n\nPATH in effect for the server process:\n${process.env.PATH || '(empty)'}`;
+  },
 };

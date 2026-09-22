@@ -290,7 +290,7 @@ async function spawnCursor(command, options = {}, ws) {
         // Check if Cursor CLI is installed for a clearer error message
         const installed = await providerAuthService.isProviderInstalled('cursor');
         const errorContent = !installed
-          ? 'Cursor CLI is not installed. Please install it from https://cursor.com'
+          ? 'Cursor CLI is not installed. Please install it from https://cursor.com' + providerAuthService.cliLookupPathHint()
           : error.message;
 
         ws.send(createNormalizedMessage({ kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'cursor' }));

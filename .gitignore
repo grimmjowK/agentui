@@ -146,3 +146,6 @@ __pycache__/
 # Task files
 tasks.json
 tasks/ 
+
+# Electron packaging output
+release/

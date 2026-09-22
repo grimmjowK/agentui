@@ -345,7 +345,7 @@ export async function queryCodex(command, options = {}, ws) {
       // Check if Codex SDK is available for a clearer error message
       const installed = await providerAuthService.isProviderInstalled('codex');
       const errorContent = !installed
-        ? 'Codex CLI is not configured. Please set up authentication first.'
+        ? 'Codex CLI is not configured. Please set up authentication first.' + providerAuthService.cliLookupPathHint()
         : error.message;
 
       sendMessage(ws, createNormalizedMessage({ kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'codex' }));

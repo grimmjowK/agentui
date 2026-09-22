@@ -739,7 +739,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       // Check if Claude CLI is installed for a clearer error message
       const installed = await providerAuthService.isProviderInstalled('claude');
       const errorContent = !installed
-        ? 'Claude Code is not installed. Please install it first: https://docs.anthropic.com/en/docs/claude-code'
+        ? 'Claude Code is not installed. Please install it first: https://docs.anthropic.com/en/docs/claude-code' + providerAuthService.cliLookupPathHint()
         : error.message;
 
       // Send error to WebSocket

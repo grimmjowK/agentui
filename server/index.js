@@ -1417,13 +1417,19 @@ async function startServer() {
    
         server.listen(SERVER_PORT, HOST, async () => {
             const appInstallPath = APP_ROOT;
+            // SERVER_PORT=0 时由内核分配端口，必须从 address() 取真实端口
+            const actualPort = server.address().port;
+
+            // 机器可解析的端口回报：桌面端 (Electron) 以 SERVER_PORT=0 拉起本进程，
+            // 靠逐行读取 stdout 匹配这一行来获知实际端口，避免父进程预先探测端口的竞争。
+            console.log(`CLOUDCLI_LISTENING ${JSON.stringify({ port: actualPort })}`);
 
             console.log('');
             console.log(c.dim('═'.repeat(63)));
             console.log(`  ${c.bright('CloudCLI Server - Ready')}`);
             console.log(c.dim('═'.repeat(63)));
             console.log('');
-            console.log(`${c.info('[INFO]')} Server URL:  ${c.bright('http://' + DISPLAY_HOST + ':' + SERVER_PORT)}`);
+            console.log(`${c.info('[INFO]')} Server URL:  ${c.bright('http://' + DISPLAY_HOST + ':' + actualPort)}`);
             console.log(`${c.info('[INFO]')} Installed at: ${c.dim(appInstallPath)}`);
             console.log(`${c.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');

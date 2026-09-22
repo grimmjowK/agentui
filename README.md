@@ -108,6 +108,87 @@ Supports Claude Code, Codex, and Gemini CLI. See the [sandbox docs](docker/) for
 
 ---
 
+## Building & Running from Source
+
+Requires **Node.js v22+**. Run `npm install` first.
+
+### Web
+
+**Development** — Vite dev server on `5173`, proxying API and WebSocket traffic to the backend on `3001`:
+
+```
+npm run dev
+```
+
+**Production** — compiles the frontend into `dist/` and the backend into `dist-server/`, then serves both from a single Node process on `3001`:
+
+```
+npm run build
+npm run server      # or: npm run start  (build + server in one step)
+```
+
+**Docker** — the root `Dockerfile` is a two-stage build:
+
+```
+docker build -t cloudcli-ui .
+docker run -p 3001:3001 -v cloudcli-data:/data cloudcli-ui
+```
+
+> ⚠️ The image sets `VITE_IS_PLATFORM=true`, which makes `server/middleware/auth.js` accept every HTTP and WebSocket request without authentication. Only run it behind a gateway that authenticates on its behalf — never expose it directly to an untrusted network.
+
+### Desktop (Electron)
+
+The desktop shell spawns the compiled backend as a child process on a random loopback port, so `dist/` and `dist-server/` must exist before it can start.
+
+**Development:**
+
+```
+npm run build       # once, and again after any source change
+npm run desktop:dev
+```
+
+**Packaging** — builds everything and writes installers to `release/`:
+
+```
+npm run desktop:package
+```
+
+| Platform | Output |
+|---|---|
+| macOS | `.dmg` + `.zip`, `arm64` and `x64` |
+| Windows | NSIS installer, `x64` |
+
+Builds are **unsigned and unnotarized** (`identity: null` in `electron-builder.config.js`), so macOS Gatekeeper blocks the first launch — right-click → *Open* to get past it.
+
+#### Native module ABI
+
+`better-sqlite3` is a native module, and its compiled binary matches only one Node ABI at a time. Switching between the web and desktop targets requires a rebuild:
+
+```
+npm run desktop:rebuild            # → Electron ABI   (desktop:dev / desktop:package)
+npm run desktop:restore-node-abi   # → system Node ABI (npm run dev / npm run server)
+```
+
+The `desktop:*` scripts already invoke the right one, and `desktop:package` restores the Node ABI when it finishes. If you hit `NODE_MODULE_VERSION ... does not match`, run the command for the target you want.
+
+### CLI (`cloudcli`)
+
+`cloudcli` is the npm `bin` entry (`dist-server/server/cli.js`), not a standalone executable — the target machine still needs Node.js v22+. To install a local build globally:
+
+```
+npm run build
+npm pack                                        # → cloudcli-ai-cloudcli-<version>.tgz
+npm install -g ./cloudcli-ai-cloudcli-<version>.tgz
+cloudcli                                        # http://localhost:3001
+```
+
+Publishing to npm goes through release-it (`npm run release`), which requires a clean working tree on `main`.
+
+> The CLI and the desktop app can run at the same time — the desktop app binds a random loopback port and never collides with the CLI's `3001`. Both default to the same database at `~/.cloudcli/auth.db`; pass `cloudcli --database-path <path>` to keep them separate.
+
+
+---
+
 ## Which option is right for you?
 
 CloudCLI UI is the open source UI layer that powers CloudCLI Cloud. You can self-host it on your own machine, run it in a Docker sandbox for isolation, or use CloudCLI Cloud for a fully managed environment.

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+  <title>CloudCLI</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
+      font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: #111827; color: #e5e7eb; -webkit-user-select: none; user-select: none;
+    }
+    main { width: min(560px, 90vw); text-align: center; }
+    h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+    .spinner {
+      width: 28px; height: 28px; margin: 0 auto 20px; border-radius: 50%;
+      border: 2px solid #374151; border-top-color: #60a5fa; animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .detail {
+      display: none; margin-top: 16px; padding: 12px; max-height: 40vh; overflow: auto;
+      background: #0b1220; border: 1px solid #1f2937; border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+      white-space: pre-wrap; text-align: left; color: #fca5a5; user-select: text;
+    }
+    button {
+      margin-top: 20px; padding: 8px 20px; border: 0; border-radius: 6px;
+      background: #2563eb; color: #fff; font-size: 14px; cursor: pointer;
+    }
+    button:hover { background: #1d4ed8; }
+    button[hidden] { display: none; }
+    body.error .spinner { display: none; }
+    body.error h1 { color: #f87171; }
+    body.error .detail { display: block; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="spinner" id="spinner"></div>
+    <h1 id="message">正在启动后端服务…</h1>
+    <pre class="detail" id="detail"></pre>
+    <button id="retry" hidden>重试</button>
+  </main>
+  <script>
+    const el = { message: document.getElementById('message'), detail: document.getElementById('detail'), retry: document.getElementById('retry') };
+
+    function render(state) {
+      if (!state) return;
+      document.body.classList.toggle('error', state.phase === 'error');
+      el.message.textContent = state.message || '';
+      el.detail.textContent = state.detail || '';
+      el.retry.hidden = state.phase !== 'error';
+    }
+
+    // preload 未注入时（加载失败）也不该白屏：退化成静态文案，只是没有重试按钮
+    if (window.cloudcliDesktop) {
+      window.cloudcliDesktop.getStartupState().then(render);
+      window.cloudcliDesktop.onStartupState(render);
+      el.retry.addEventListener('click', () => {
+        render({ phase: 'loading', message: '正在重启后端服务…' });
+        window.cloudcliDesktop.retry();
+      });
+    } else {
+      el.message.textContent = '桌面外壳初始化失败（preload 未加载）';
+      document.body.classList.add('error');
+      el.detail.textContent = '请退出应用后重新启动。';
+    }
+  </script>
+</body>
+</html>

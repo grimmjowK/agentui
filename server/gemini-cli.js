@@ -685,7 +685,7 @@ async function spawnGemini(command, options = {}, ws) {
                 if (code === 127) {
                     const installed = await providerAuthService.isProviderInstalled('gemini');
                     errorMsg = !installed
-                        ? 'Gemini CLI is not installed. Please install it first: https://github.com/google-gemini/gemini-cli'
+                        ? 'Gemini CLI is not installed. Please install it first: https://github.com/google-gemini/gemini-cli' + providerAuthService.cliLookupPathHint()
                         : `Gemini CLI exited with code ${code}`;
                 } else if (code === 42) {
                     errorMsg = 'Gemini CLI input error (invalid arguments or session). Please start a new conversation.';
@@ -719,7 +719,7 @@ async function spawnGemini(command, options = {}, ws) {
                 if (code === 127) {
                     const installed = await providerAuthService.isProviderInstalled('gemini');
                     if (!installed) {
-                        terminalFailureReason = 'Gemini CLI is not installed. Please install it first: https://github.com/google-gemini/gemini-cli';
+                        terminalFailureReason = 'Gemini CLI is not installed. Please install it first: https://github.com/google-gemini/gemini-cli' + providerAuthService.cliLookupPathHint();
                         ws.send(createNormalizedMessage({ kind: 'error', content: terminalFailureReason, sessionId: socketSessionId, provider: 'gemini' }));
                     }
                 } else if (code === 41) {
@@ -790,7 +790,7 @@ async function spawnGemini(command, options = {}, ws) {
 
                 const installed = await providerAuthService.isProviderInstalled('gemini');
                 const errorContent = !installed
-                    ? 'Gemini CLI is not installed. Please install it first: https://github.com/google-gemini/gemini-cli'
+                    ? 'Gemini CLI is not installed. Please install it first: https://github.com/google-gemini/gemini-cli' + providerAuthService.cliLookupPathHint()
                     : error.message;
 
                 const errorSessionId = capturedSessionId || sessionId || processKey;
