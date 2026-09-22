@@ -271,5 +271,15 @@
   },
   "tasks": {
     "nextTaskPrompt": "Inizia l'attività successiva"
+  },
+  "transcriptEvents": {
+    "interrupted": "Interrotto dall'utente",
+    "compactBoundary": "Conversazione compattata",
+    "attachmentFile": "File aggiunto: {{path}}",
+    "attachmentEditedFile": "Modificato esternamente: {{path}}",
+    "attachmentPlanMode": "Modalità piano attivata",
+    "attachmentPlanModeExit": "Modalità piano disattivata",
+    "attachmentInvokedSkills": "Skill invocata: {{detail}}",
+    "attachmentQueuedCommand": "Attività in background: {{detail}}"
   }
 }

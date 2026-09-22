@@ -271,5 +271,15 @@
   },
   "tasks": {
     "nextTaskPrompt": "Sonraki görevi başlat"
+  },
+  "transcriptEvents": {
+    "interrupted": "Kullanıcı tarafından kesildi",
+    "compactBoundary": "Konuşma sıkıştırıldı",
+    "attachmentFile": "Dosya eklendi: {{path}}",
+    "attachmentEditedFile": "Harici olarak düzenlendi: {{path}}",
+    "attachmentPlanMode": "Plan moduna girildi",
+    "attachmentPlanModeExit": "Plan modundan çıkıldı",
+    "attachmentInvokedSkills": "Yetenek çağrıldı: {{detail}}",
+    "attachmentQueuedCommand": "Arka plan görevi: {{detail}}"
   }
 }

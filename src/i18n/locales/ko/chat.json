@@ -253,5 +253,15 @@
   },
   "tasks": {
     "nextTaskPrompt": "다음 작업 시작"
+  },
+  "transcriptEvents": {
+    "interrupted": "사용자에 의해 중단됨",
+    "compactBoundary": "대화가 압축되었습니다",
+    "attachmentFile": "파일 추가됨: {{path}}",
+    "attachmentEditedFile": "외부에서 편집됨: {{path}}",
+    "attachmentPlanMode": "플랜 모드로 진입",
+    "attachmentPlanModeExit": "플랜 모드 종료",
+    "attachmentInvokedSkills": "스킬 호출됨: {{detail}}",
+    "attachmentQueuedCommand": "백그라운드 작업: {{detail}}"
   }
 }

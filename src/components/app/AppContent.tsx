@@ -24,14 +24,14 @@ function AppContentInner() {
   const { sessionId } = useParams<{ sessionId?: string }>();
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
-  const { ws, sendMessage, latestMessage, isConnected } = useWebSocket();
+  const { ws, sendMessage, latestMessage, latestProjectEvent, isConnected } = useWebSocket();
   const wasConnectedRef = useRef(false);
 
   const {
-    activeSessions,
     processingSessions,
     markSessionAsActive,
     markSessionAsInactive,
+    isSessionActive,
     markSessionAsProcessing,
     markSessionAsNotProcessing,
   } = useSessionProtection();
@@ -55,9 +55,9 @@ function AppContentInner() {
   } = useProjectsState({
     sessionId,
     navigate,
-    latestMessage,
+    latestProjectEvent,
     isMobile,
-    activeSessions,
+    isSessionActive,
   });
 
   usePaletteOpsRegister({

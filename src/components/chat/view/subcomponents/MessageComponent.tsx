@@ -28,7 +28,6 @@ type MessageComponentProps = {
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
   onGrantToolPermission?: (suggestion: ClaudePermissionSuggestion) => PermissionGrantResult | null | undefined;
-  onModelSwitch?: (modelValue: string) => void;
   autoExpandTools?: boolean;
   showRawParameters?: boolean;
   showThinking?: boolean;
@@ -45,7 +44,33 @@ type InteractiveOption = {
 type PermissionGrantState = 'idle' | 'granted' | 'error';
 const COPY_HIDDEN_TOOL_NAMES = new Set(['Bash', 'Edit', 'Write', 'ApplyPatch']);
 
-const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onShowSettings, onGrantToolPermission, onModelSwitch, autoExpandTools, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
+/**
+ * Compact one-line label for the transcript-coverage message types
+ * (attachment/compact-boundary/interrupted). Falls back to the raw content
+ * string for an attachment kind the frontend doesn't specifically know about,
+ * so an unrecognized kind still renders instead of showing nothing.
+ */
+function getAttachmentLabel(t: (key: string, options?: Record<string, unknown>) => string, message: ChatMessage): string {
+  const basename = (path?: string) => (path ? path.split('/').pop() || path : '');
+  switch (message.attachmentKind) {
+    case 'file':
+      return t('transcriptEvents.attachmentFile', { path: basename(message.attachmentPath) });
+    case 'edited_text_file':
+      return t('transcriptEvents.attachmentEditedFile', { path: basename(message.attachmentPath) });
+    case 'plan_mode':
+      return t('transcriptEvents.attachmentPlanMode');
+    case 'plan_mode_exit':
+      return t('transcriptEvents.attachmentPlanModeExit');
+    case 'invoked_skills':
+      return t('transcriptEvents.attachmentInvokedSkills', { detail: message.attachmentDetail || '' });
+    case 'queued_command':
+      return t('transcriptEvents.attachmentQueuedCommand', { detail: message.attachmentDetail || '' });
+    default:
+      return message.content || '';
+  }
+}
+
+const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, onShowSettings, onGrantToolPermission, autoExpandTools, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const isGrouped = prevMessage && prevMessage.type === message.type &&
     ((prevMessage.type === 'assistant') ||
@@ -117,7 +142,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
       data-message-timestamp={message.timestamp || undefined}
       className={`chat-message ${message.type} ${isGrouped ? 'grouped' : ''} ${message.type === 'user' ? 'flex justify-end px-3 sm:px-0' : 'px-3 sm:px-0'}`}
     >
-      {message.type === 'user' ? (
+      {message.type === 'user' && !message.isInterrupted ? (
         /* User message bubble on the right */
         <div className="flex w-full items-end space-x-0 sm:w-auto sm:max-w-[85%] sm:space-x-3 md:max-w-md lg:max-w-lg xl:max-w-xl">
           <div className="group flex-1 rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-white shadow-sm sm:flex-initial sm:px-4">
@@ -150,12 +175,37 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
             </div>
           )}
         </div>
+      ) : message.isInterrupted ? (
+        /* User pressed Esc mid-turn — compact notice, not a chat bubble */
+        <div className="w-full">
+          <div className="flex items-center gap-2 py-0.5">
+            <span className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-400 dark:bg-amber-500" />
+            <span className="text-xs text-gray-500 dark:text-gray-400">{t('transcriptEvents.interrupted')}</span>
+          </div>
+        </div>
       ) : message.isTaskNotification ? (
         /* Compact task notification on the left */
         <div className="w-full">
           <div className="flex items-center gap-2 py-0.5">
             <span className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${message.taskStatus === 'completed' ? 'bg-green-400 dark:bg-green-500' : 'bg-amber-400 dark:bg-amber-500'}`} />
             <span className="text-xs text-gray-500 dark:text-gray-400">{message.content}</span>
+          </div>
+        </div>
+      ) : message.isCompactBoundary ? (
+        /* Context window was compacted — explains a discontinuity in the transcript above */
+        <div className="w-full">
+          <div className="my-1 flex items-center gap-2 py-0.5">
+            <div className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+            <span className="flex-shrink-0 text-xs text-gray-400 dark:text-gray-500">{t('transcriptEvents.compactBoundary')}</span>
+            <div className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+          </div>
+        </div>
+      ) : message.attachmentKind ? (
+        /* Dropped-in file, external edit, plan-mode toggle, invoked skill, or queued background command */
+        <div className="w-full">
+          <div className="flex items-center gap-2 py-0.5">
+            <span className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-400 dark:bg-gray-500" />
+            <span className="text-xs text-gray-500 dark:text-gray-400">{getAttachmentLabel(t, message)}</span>
           </div>
         </div>
       ) : (
@@ -299,36 +349,6 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                   )
                 )}
               </>
-            ) : message.isBuiltinModelList ? (
-              // 内联渲染 /model 的可选择模型列表
-              <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800/50">
-                <h4 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  {t('builtinModel.title', '选择模型')}
-                </h4>
-                <div className="space-y-1.5">
-                  {(Array.isArray(message.modelOptions) ? message.modelOptions : []).map((option) => {
-                    const isCurrent = option.value === message.currentModel;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => onModelSwitch?.(option.value)}
-                        className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors ${
-                          isCurrent
-                            ? 'border-primary/40 bg-primary/10 text-primary'
-                            : 'border-gray-200 bg-transparent text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700/50'
-                        }`}
-                      >
-                        <span className="flex flex-col">
-                          <span className="font-medium">{option.label}</span>
-                          <span className="font-mono text-xs text-gray-400">{option.value}</span>
-                        </span>
-                        {isCurrent && <span className="text-primary">✓</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
             ) : message.isInteractivePrompt ? (
               // Special handling for interactive prompts
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">

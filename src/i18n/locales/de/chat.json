@@ -271,5 +271,15 @@
   },
   "tasks": {
     "nextTaskPrompt": "Nächste Aufgabe starten"
+  },
+  "transcriptEvents": {
+    "interrupted": "Vom Benutzer unterbrochen",
+    "compactBoundary": "Unterhaltung komprimiert",
+    "attachmentFile": "Datei hinzugefügt: {{path}}",
+    "attachmentEditedFile": "Extern bearbeitet: {{path}}",
+    "attachmentPlanMode": "Planmodus aktiviert",
+    "attachmentPlanModeExit": "Planmodus verlassen",
+    "attachmentInvokedSkills": "Skill aufgerufen: {{detail}}",
+    "attachmentQueuedCommand": "Hintergrundaufgabe: {{detail}}"
   }
 }

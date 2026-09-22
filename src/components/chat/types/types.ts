@@ -35,9 +35,6 @@ export interface ChatMessage {
   isThinking?: boolean;
   isStreaming?: boolean;
   isInteractivePrompt?: boolean;
-  isBuiltinModelList?: boolean;
-  modelOptions?: Array<{ value: string; label: string }>;
-  currentModel?: string;
   isToolUse?: boolean;
   toolName?: string;
   toolInput?: unknown;
@@ -50,6 +47,16 @@ export interface ChatMessage {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  // ponytail: 这类 kind:'text' + 布尔标记的展示变体已超过 8 个（isLocalCommand/
+  // isLocalCommandStdout/isCompactSummary/isInterrupted/isCompactBoundary/
+  // isSubagentContainer 等），是当初为避免同步两边 MessageKind 联合类型付出的代价
+  // （见 openspec/changes/fix-chat-sync-and-transcript-coverage/design.md D4）。
+  // 下次再加新变体前，先收敛成一个 `variant?: string` 字段。
+  isInterrupted?: boolean;
+  attachmentKind?: string;
+  attachmentPath?: string;
+  attachmentDetail?: string;
+  isCompactBoundary?: boolean;
   isSubagentContainer?: boolean;
   subagentState?: {
     childTools: SubagentChildTool[];

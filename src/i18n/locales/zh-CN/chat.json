@@ -272,5 +272,15 @@
   },
   "tasks": {
     "nextTaskPrompt": "开始下一个任务"
+  },
+  "transcriptEvents": {
+    "interrupted": "已被用户中断",
+    "compactBoundary": "会话已压缩",
+    "attachmentFile": "添加了文件：{{path}}",
+    "attachmentEditedFile": "外部编辑了文件：{{path}}",
+    "attachmentPlanMode": "进入了 Plan 模式",
+    "attachmentPlanModeExit": "退出了 Plan 模式",
+    "attachmentInvokedSkills": "调用了 skill：{{detail}}",
+    "attachmentQueuedCommand": "后台任务：{{detail}}"
   }
 }

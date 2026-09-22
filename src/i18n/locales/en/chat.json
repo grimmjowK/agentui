@@ -272,5 +272,15 @@
   },
   "tasks": {
     "nextTaskPrompt": "Start the next task"
+  },
+  "transcriptEvents": {
+    "interrupted": "Interrupted by user",
+    "compactBoundary": "Conversation compacted",
+    "attachmentFile": "Added file: {{path}}",
+    "attachmentEditedFile": "Edited externally: {{path}}",
+    "attachmentPlanMode": "Entered plan mode",
+    "attachmentPlanModeExit": "Exited plan mode",
+    "attachmentInvokedSkills": "Invoked skill: {{detail}}",
+    "attachmentQueuedCommand": "Background task: {{detail}}"
   }
 }

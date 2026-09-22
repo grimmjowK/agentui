@@ -8,10 +8,16 @@ const AUTH_FAILURE_CLOSE_CODE = 1006;
 const MAX_AUTH_RETRIES = 3;
 const RECONNECT_DELAY_MS = 3000;
 
+// 消息类型分流表：这些类型走独立的 latestProjectEvent 槽，不与聊天流式消息共用 latestMessage。
+// 高频的 content_block_delta 等聊天流消息会在同一批 React 更新里覆盖掉单值 state，
+// 项目级事件（尤其是偶发的 projects_updated）因此可能连 effect 都触发不到。
+const PROJECT_EVENT_TYPES = new Set(['projects_updated', 'loading_progress']);
+
 type WebSocketContextType = {
   ws: WebSocket | null;
   sendMessage: (message: any) => boolean;
   latestMessage: any | null;
+  latestProjectEvent: any | null;
   isConnected: boolean;
 };
 
@@ -38,6 +44,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
   const hasConnectedRef = useRef(false);
   const consecutiveFailuresRef = useRef(0);
   const [latestMessage, setLatestMessage] = useState<any>(null);
+  const [latestProjectEvent, setLatestProjectEvent] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { token } = useAuth();
@@ -83,7 +90,11 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       websocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          setLatestMessage(data);
+          if (PROJECT_EVENT_TYPES.has(data?.type)) {
+            setLatestProjectEvent(data);
+          } else {
+            setLatestMessage(data);
+          }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
         }
@@ -145,8 +156,9 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     ws: wsRef.current,
     sendMessage,
     latestMessage,
+    latestProjectEvent,
     isConnected
-  }), [sendMessage, latestMessage, isConnected]);
+  }), [sendMessage, latestMessage, latestProjectEvent, isConnected]);
 
   return value;
 };

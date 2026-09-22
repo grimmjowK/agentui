@@ -15,9 +15,9 @@ import type {
 type UseProjectsStateArgs = {
   sessionId?: string;
   navigate: NavigateFunction;
-  latestMessage: AppSocketMessage | null;
+  latestProjectEvent: AppSocketMessage | null;
   isMobile: boolean;
-  activeSessions: Set<string>;
+  isSessionActive: (sessionId?: string | null) => boolean;
 };
 
 type FetchProjectsOptions = {
@@ -25,6 +25,27 @@ type FetchProjectsOptions = {
 };
 
 const serialize = (value: unknown) => JSON.stringify(value ?? null);
+
+/**
+ * 拉取项目列表。
+ *
+ * 必须显式校验 response.ok 与数组类型：401/500 时 body 是 `{error: ...}`，
+ * 直接当 Project[] 用会让下游 `sortProjects` 的展开语法抛 "not iterable"，
+ * 而那是在 useMemo 里 —— React 整棵树崩成白屏，连错误提示都看不到。
+ */
+const fetchProjectList = async (): Promise<Project[]> => {
+  const response = await api.projects();
+  if (!response.ok) {
+    throw new Error(`Failed to load projects: ${String(response.status)}`);
+  }
+
+  const payload: unknown = await response.json();
+  if (!Array.isArray(payload)) {
+    throw new Error('Unexpected /api/projects payload: expected an array');
+  }
+
+  return payload as Project[];
+};
 
 const projectsHaveChanges = (
   prevProjects: Project[],
@@ -238,9 +259,9 @@ const readPersistedTab = (): AppTab => {
 export function useProjectsState({
   sessionId,
   navigate,
-  latestMessage,
+  latestProjectEvent,
   isMobile,
-  activeSessions,
+  isSessionActive,
 }: UseProjectsStateArgs) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -292,8 +313,7 @@ export function useProjectsState({
       if (showLoadingState) {
         setIsLoadingProjects(true);
       }
-      const response = await api.projects();
-      const projectData = (await response.json()) as Project[];
+      const projectData = await fetchProjectList();
 
       setProjects((prevProjects) => {
         const projectsWithTaskMaster = mergeTaskMasterCache(projectData, prevProjects);
@@ -388,28 +408,28 @@ export function useProjectsState({
   }, [isLoadingProjects, projects, selectedProject, sessionId]);
 
   useEffect(() => {
-    if (!latestMessage) {
+    if (!latestProjectEvent) {
       return;
     }
 
-    // `latestMessage` is event-like data. This effect also depends on local state
+    // `latestProjectEvent` is event-like data. This effect also depends on local state
     // (`projects`, `selectedProject`, `selectedSession`) to compute derived updates.
     // Without this guard, handling one websocket message can update that local
     // state, retrigger the effect, and re-handle the same websocket message.
-    if (lastHandledMessageRef.current === latestMessage) {
+    if (lastHandledMessageRef.current === latestProjectEvent) {
       return;
     }
-    lastHandledMessageRef.current = latestMessage;
+    lastHandledMessageRef.current = latestProjectEvent;
 
-    if (latestMessage.type === 'loading_progress') {
+    if (latestProjectEvent.type === 'loading_progress') {
       if (loadingProgressTimeoutRef.current) {
         clearTimeout(loadingProgressTimeoutRef.current);
         loadingProgressTimeoutRef.current = null;
       }
 
-      setLoadingProgress(latestMessage as LoadingProgress);
+      setLoadingProgress(latestProjectEvent as LoadingProgress);
 
-      if (latestMessage.phase === 'complete') {
+      if (latestProjectEvent.phase === 'complete') {
         loadingProgressTimeoutRef.current = setTimeout(() => {
           setLoadingProgress(null);
           loadingProgressTimeoutRef.current = null;
@@ -419,23 +439,31 @@ export function useProjectsState({
       return;
     }
 
-    if (latestMessage.type !== 'projects_updated') {
+    if (latestProjectEvent.type !== 'projects_updated') {
       return;
     }
 
-    const projectsMessage = latestMessage as ProjectsUpdatedMessage;
+    const projectsMessage = latestProjectEvent as ProjectsUpdatedMessage;
 
-    if (projectsMessage.updatedSessionId && selectedSession && selectedProject) {
-      if (projectsMessage.updatedSessionId === selectedSession.id) {
-        const isSessionActive = activeSessions.has(selectedSession.id);
+    if (selectedSession && selectedProject) {
+      // 优先用完整集合判定：debounce 窗口内可能合并了多个会话的变更，
+      // 当前会话不一定是 updatedSessionId 那个"第一名"。字段缺失时退回单值兼容旧载荷。
+      const affectedSessionIds = projectsMessage.updatedSessionIds?.length
+        ? projectsMessage.updatedSessionIds
+        : projectsMessage.updatedSessionId
+          ? [projectsMessage.updatedSessionId]
+          : [];
 
-        if (!isSessionActive) {
+      if (affectedSessionIds.includes(selectedSession.id)) {
+        const sessionCurrentlyActive = isSessionActive(selectedSession.id);
+
+        if (!sessionCurrentlyActive) {
           setExternalMessageUpdate((prev) => prev + 1);
         }
       }
     }
 
-    const hasActiveSession = Boolean(selectedSession && activeSessions.has(selectedSession.id));
+    const hasActiveSession = Boolean(selectedSession && isSessionActive(selectedSession.id));
 
     const updatedProjectsWithTaskMaster = mergeTaskMasterCache(projectsMessage.projects, projects);
     const updatedProjects = mergeExpandedSessionPages(projects, updatedProjectsWithTaskMaster);
@@ -478,7 +506,7 @@ export function useProjectsState({
     if (!updatedSelectedSession) {
       setSelectedSession(null);
     }
-  }, [latestMessage, selectedProject, selectedSession, activeSessions, projects]);
+  }, [latestProjectEvent, selectedProject, selectedSession, isSessionActive, projects]);
 
   useEffect(() => {
     return () => {
@@ -702,8 +730,7 @@ export function useProjectsState({
 
   const handleSidebarRefresh = useCallback(async () => {
     try {
-      const response = await api.projects();
-      const freshProjects = (await response.json()) as Project[];
+      const freshProjects = await fetchProjectList();
       const projectsWithTaskMaster = mergeTaskMasterCache(freshProjects, projects);
       const mergedProjects = mergeExpandedSessionPages(projects, projectsWithTaskMaster);
 

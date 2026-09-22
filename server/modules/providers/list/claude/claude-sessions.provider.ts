@@ -212,11 +212,20 @@ async function getSessionMessages(
 const INTERNAL_CONTENT_PREFIXES = [
   '<system-reminder>',
   'Caveat:',
-  '[Request interrupted',
 ] as const;
 
 function isInternalContent(content: string): boolean {
   return INTERNAL_CONTENT_PREFIXES.some((prefix) => content.startsWith(prefix));
+}
+
+/**
+ * `[Request interrupted` marks a user-initiated abort (Esc) of the in-flight
+ * turn. It used to be treated as internal content and silently dropped, which
+ * made the chat transcript look like the assistant stopped for no reason.
+ * Surface it as a normal user message flagged `isInterrupted` instead.
+ */
+function isInterruptedContent(content: string): boolean {
+  return content.startsWith('[Request interrupted');
 }
 
 /**
@@ -286,6 +295,94 @@ function stripAnsiFormatting(text: string): string {
   return text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, '');
 }
 
+/**
+ * `attachment` entries cover a wide range of CLI-internal bookkeeping (hook
+ * results, token-budget reminders, MCP instruction deltas, skill listings, ...)
+ * that has no user-facing meaning and must stay silent — in a typical
+ * transcript `hook_success` alone outnumbers every other attachment sub-type
+ * combined. This whitelist is intentionally narrow: only sub-types with clear
+ * user-visible semantics are normalized, so a future CLI release adding new
+ * noisy sub-types doesn't leak into the chat by default.
+ */
+const ATTACHMENT_TYPE_WHITELIST = new Set([
+  'file',
+  'edited_text_file',
+  'plan_mode',
+  'plan_mode_exit',
+  'invoked_skills',
+  'queued_command',
+]);
+
+/**
+ * Extracts the `<summary>` text from a `<task-notification>` wrapper, the
+ * same shape the frontend already parses out of synthetic user messages
+ * (see `useChatMessages.ts`). `queued_command` attachments carry this same
+ * wrapper as their `prompt`.
+ */
+function extractTaskNotificationSummary(prompt: string): string | null {
+  const match = /<summary>([^<]*)<\/summary>/.exec(prompt);
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * Builds normalized display fields for a whitelisted `attachment` entry.
+ * Returns `null` when the attachment's shape doesn't carry enough
+ * information to render (missing/reshaped fields from a CLI version bump),
+ * so the caller skips the entry instead of emitting an empty message.
+ */
+function buildAttachmentMessageFields(attachment: AnyRecord): {
+  content: string;
+  attachmentKind: string;
+  attachmentPath?: string;
+  attachmentDetail?: string;
+} | null {
+  const attachmentKind = typeof attachment.type === 'string' ? attachment.type : null;
+  if (!attachmentKind || !ATTACHMENT_TYPE_WHITELIST.has(attachmentKind)) {
+    return null;
+  }
+
+  switch (attachmentKind) {
+    case 'file':
+    case 'edited_text_file': {
+      const attachmentPath = typeof attachment.filename === 'string' ? attachment.filename : null;
+      if (!attachmentPath) {
+        return null;
+      }
+      return { content: attachmentPath, attachmentKind, attachmentPath };
+    }
+
+    case 'plan_mode':
+    case 'plan_mode_exit': {
+      const attachmentPath = typeof attachment.planFilePath === 'string' ? attachment.planFilePath : undefined;
+      return { content: attachmentPath || '', attachmentKind, attachmentPath };
+    }
+
+    case 'invoked_skills': {
+      const skills = Array.isArray(attachment.skills) ? attachment.skills : [];
+      const names = skills
+        .map((skill: AnyRecord) => (typeof skill?.name === 'string' ? skill.name : null))
+        .filter((name: string | null): name is string => Boolean(name));
+      if (names.length === 0) {
+        return null;
+      }
+      const attachmentDetail = names.join(', ');
+      return { content: attachmentDetail, attachmentKind, attachmentDetail };
+    }
+
+    case 'queued_command': {
+      const prompt = typeof attachment.prompt === 'string' ? attachment.prompt : '';
+      const attachmentDetail = extractTaskNotificationSummary(prompt);
+      if (!attachmentDetail) {
+        return null;
+      }
+      return { content: attachmentDetail, attachmentKind, attachmentDetail };
+    }
+
+    default:
+      return null;
+  }
+}
+
 export class ClaudeSessionsProvider implements IProviderSessions {
   /**
    * Normalizes one Claude JSONL entry or live SDK stream event into the shared
@@ -307,6 +404,42 @@ export class ClaudeSessionsProvider implements IProviderSessions {
     const messages: NormalizedMessage[] = [];
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('claude');
+
+    if (raw.type === 'attachment') {
+      const attachment = readObjectRecord(raw.attachment);
+      const fields = attachment ? buildAttachmentMessageFields(attachment) : null;
+      if (!fields) {
+        return [];
+      }
+      return [createNormalizedMessage({
+        id: baseId,
+        sessionId,
+        timestamp: ts,
+        provider: PROVIDER,
+        kind: 'text',
+        role: 'assistant',
+        content: fields.content,
+        attachmentKind: fields.attachmentKind,
+        attachmentPath: fields.attachmentPath,
+        attachmentDetail: fields.attachmentDetail,
+      })];
+    }
+
+    if (raw.type === 'system') {
+      if (raw.subtype !== 'compact_boundary') {
+        return [];
+      }
+      return [createNormalizedMessage({
+        id: baseId,
+        sessionId,
+        timestamp: ts,
+        provider: PROVIDER,
+        kind: 'text',
+        role: 'assistant',
+        content: typeof raw.content === 'string' ? raw.content : '',
+        isCompactBoundary: true,
+      })];
+    }
 
     if (raw.message?.role === 'user' && raw.message?.content && raw.isMeta !== true) {
       if (Array.isArray(raw.message.content)) {
@@ -336,6 +469,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
                 kind: 'text',
                 role: 'user',
                 content: text,
+                ...(isInterruptedContent(text) ? { isInterrupted: true } : {}),
               }));
             }
           }
@@ -444,6 +578,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
             kind: 'text',
             role: 'user',
             content: text,
+            ...(isInterruptedContent(text) ? { isInterrupted: true } : {}),
           }));
         }
       }

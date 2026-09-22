@@ -98,6 +98,11 @@ export const api = {
   },
   getArchivedSessions: () =>
     authenticatedFetch('/api/providers/sessions/archived'),
+  // 某个 provider 当前账号可用的模型；服务端取不到实时清单时回落到内置常量
+  providerModels: (provider, { refresh = false } = {}) =>
+    authenticatedFetch(
+      `/api/providers/${encodeURIComponent(provider)}/models${refresh ? '?refresh=true' : ''}`,
+    ),
   // 收藏：文件夹内置顶 + 转录另存一份，规避 CLI 全局保留期清理
   toggleSessionStar: (sessionId) =>
     authenticatedFetch(`/api/providers/sessions/${sessionId}/toggle-star`, {

@@ -22,7 +22,6 @@ import type {
 } from '../types/types';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import { escapeRegExp } from '../utils/chatFormatting';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../../../shared/modelConstants';
 
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
@@ -158,6 +157,7 @@ export function useChatComposerState({
   const [imageErrors, setImageErrors] = useState<Map<string, string>>(new Map());
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
   const [thinkingMode, setThinkingMode] = useState('none');
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
 
   const [pendingCommand, setPendingCommand] = useState<SlashCommand | null>(null);
 
@@ -224,25 +224,9 @@ export function useChatComposerState({
             const targetModel = data.message.replace('Switching to model: ', '').trim();
             handleModelSwitch(targetModel);
           } else {
-            // 内联渲染可选择的模型列表：选项取自 modelConstants（含 label），
-            // 当前生效模型用于高亮标识。点击列表项由 MessageComponent 调用切换。
-            const p = (provider || 'claude') as LLMProvider;
-            const config = p === 'cursor' ? CURSOR_MODELS
-              : p === 'codex' ? CODEX_MODELS
-              : p === 'gemini' ? GEMINI_MODELS
-              : CLAUDE_MODELS;
-            const activeModel = p === 'cursor' ? cursorModel
-              : p === 'codex' ? codexModel
-              : p === 'gemini' ? geminiModel
-              : claudeModel;
-            addMessage({
-              type: 'assistant',
-              content: '',
-              timestamp: Date.now(),
-              isBuiltinModelList: true,
-              modelOptions: config.OPTIONS,
-              currentModel: activeModel,
-            });
+            // 不带参数的 /model 直接拉起输入框右下角的选择器，
+            // 而不是在消息流里塞一份一次性的列表
+            setIsModelMenuOpen(true);
           }
           break;
         }
@@ -303,7 +287,7 @@ export function useChatComposerState({
           console.warn('Unknown built-in command action:', action);
       }
     },
-    [onFileOpen, onShowSettings, addMessage, clearMessages, rewindMessages, handleModelSwitch, provider, claudeModel, cursorModel, codexModel, geminiModel],
+    [onFileOpen, onShowSettings, addMessage, clearMessages, rewindMessages, handleModelSwitch],
   );
 
   const handleCustomCommand = useCallback(async (result: CommandExecutionResult) => {
@@ -1132,5 +1116,8 @@ export function useChatComposerState({
     pendingCommand,
     clearPendingCommand,
     handleModelSwitch,
+    currentModel,
+    isModelMenuOpen,
+    setIsModelMenuOpen,
   };
 }

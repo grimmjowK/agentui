@@ -18,6 +18,7 @@ import CommandMenu from './CommandMenu';
 import CommandChip from './CommandChip';
 import ClaudeStatus from './ClaudeStatus';
 import ImageAttachment from './ImageAttachment';
+import ModelSelector from './ModelSelector';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import ThinkingModeSelector from './ThinkingModeSelector';
 import TokenUsagePie from './TokenUsagePie';
@@ -62,6 +63,10 @@ interface ChatComposerProps {
   onModeSwitch: () => void;
   thinkingMode: string;
   setThinkingMode: Dispatch<SetStateAction<string>>;
+  model: string;
+  onModelChange: (value: string) => void;
+  isModelMenuOpen: boolean;
+  onModelMenuOpenChange: (open: boolean) => void;
   tokenBudget: { used?: number; total?: number } | null;
   slashCommandsCount: number;
   onToggleCommandMenu: () => void;
@@ -120,6 +125,10 @@ export default function ChatComposer({
   onModeSwitch,
   thinkingMode,
   setThinkingMode,
+  model,
+  onModelChange,
+  isModelMenuOpen,
+  onModelMenuOpenChange,
   tokenBudget,
   slashCommandsCount,
   onToggleCommandMenu,
@@ -276,6 +285,24 @@ export default function ChatComposer({
             </div>
           )}
 
+          {attachedImages.length > 0 && (
+            <PromptInputHeader>
+              <div className="rounded-xl bg-muted/40 p-2">
+                <div className="flex flex-wrap gap-2">
+                  {attachedImages.map((file, index) => (
+                    <ImageAttachment
+                      key={`${file.name}-${String(index)}`}
+                      file={file}
+                      onRemove={() => onRemoveImage(index)}
+                      uploadProgress={uploadingImages.get(file.name)}
+                      error={imageErrors.get(file.name)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </PromptInputHeader>
+          )}
+
           <input {...getInputProps()} />
 
           <PromptInputBody>
@@ -417,6 +444,13 @@ export default function ChatComposer({
             >
               {sendByCtrlEnter ? t('input.hintText.ctrlEnter') : t('input.hintText.enter')}
             </div>
+            <ModelSelector
+              provider={String(provider)}
+              model={model}
+              onModelChange={onModelChange}
+              isOpen={isModelMenuOpen}
+              onOpenChange={onModelMenuOpenChange}
+            />
             <PromptInputSubmit
               disabled={(!input.trim() && !pendingCommand) || isLoading}
               className="h-10 w-10 sm:h-10 sm:w-10"

@@ -176,6 +176,9 @@ function ChatInterface({
     pendingCommand,
     clearPendingCommand,
     handleModelSwitch,
+    currentModel,
+    isModelMenuOpen,
+    setIsModelMenuOpen,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -364,7 +367,6 @@ function ChatInterface({
           onFileOpen={onFileOpen}
           onShowSettings={onShowSettings}
           onGrantToolPermission={handleGrantToolPermission}
-          onModelSwitch={handleModelSwitch}
           autoExpandTools={autoExpandTools}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
@@ -383,6 +385,10 @@ function ChatInterface({
           onModeSwitch={cyclePermissionMode}
           thinkingMode={thinkingMode}
           setThinkingMode={setThinkingMode}
+          model={currentModel}
+          onModelChange={handleModelSwitch}
+          isModelMenuOpen={isModelMenuOpen}
+          onModelMenuOpenChange={setIsModelMenuOpen}
           tokenBudget={tokenBudget}
           slashCommandsCount={slashCommandsCount}
           onToggleCommandMenu={handleToggleCommandMenu}

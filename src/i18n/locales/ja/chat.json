@@ -238,5 +238,15 @@
     "providers": {
       "assistant": "Assistant"
     }
+  },
+  "transcriptEvents": {
+    "interrupted": "ユーザーによって中断されました",
+    "compactBoundary": "会話が圧縮されました",
+    "attachmentFile": "ファイルを追加しました: {{path}}",
+    "attachmentEditedFile": "外部で編集されました: {{path}}",
+    "attachmentPlanMode": "プランモードに入りました",
+    "attachmentPlanModeExit": "プランモードを終了しました",
+    "attachmentInvokedSkills": "スキルを呼び出しました: {{detail}}",
+    "attachmentQueuedCommand": "バックグラウンドタスク: {{detail}}"
   }
 }

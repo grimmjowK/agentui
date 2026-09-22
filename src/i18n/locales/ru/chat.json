@@ -271,5 +271,15 @@
   },
   "tasks": {
     "nextTaskPrompt": "Начать следующую задачу"
+  },
+  "transcriptEvents": {
+    "interrupted": "Прервано пользователем",
+    "compactBoundary": "Диалог сжат",
+    "attachmentFile": "Добавлен файл: {{path}}",
+    "attachmentEditedFile": "Изменено извне: {{path}}",
+    "attachmentPlanMode": "Включён режим плана",
+    "attachmentPlanModeExit": "Режим плана выключен",
+    "attachmentInvokedSkills": "Вызван навык: {{detail}}",
+    "attachmentQueuedCommand": "Фоновая задача: {{detail}}"
   }
 }

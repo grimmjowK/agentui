@@ -117,6 +117,27 @@ export type NormalizedMessage = {
   isLocalCommand?: boolean;
   isLocalCommandStdout?: boolean;
   isCompactSummary?: boolean;
+  /**
+   * User pressed Esc mid-turn (`[Request interrupted` in the Claude
+   * transcript). Previously silently dropped as internal content; now
+   * surfaced so the chat transcript doesn't look like the assistant stopped
+   * for no reason.
+   */
+  isInterrupted?: boolean;
+  /**
+   * Whitelisted `attachment` transcript entries (dropped-in file, external
+   * edit, plan-mode enter/exit, invoked skill, queued background command).
+   * `attachmentKind` mirrors the transcript's `attachment.type`.
+   */
+  attachmentKind?: string;
+  attachmentPath?: string;
+  attachmentDetail?: string;
+  /**
+   * `system` entry with `subtype: 'compact_boundary'` — the CLI compacted
+   * the context window, so anything before this point may be summarized
+   * rather than verbatim.
+   */
+  isCompactBoundary?: boolean;
   images?: unknown;
   toolName?: string;
   toolInput?: unknown;

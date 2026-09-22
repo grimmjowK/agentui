@@ -68,14 +68,6 @@ function chatMessageToNormalized(
   if (msg.isInteractivePrompt) {
     return { ...base, kind: 'interactive_prompt', content: msg.content || '' } as NormalizedMessage;
   }
-  if (msg.isBuiltinModelList) {
-    return {
-      ...base,
-      kind: 'builtin_model_list',
-      modelOptions: Array.isArray(msg.modelOptions) ? msg.modelOptions : [],
-      currentModel: msg.currentModel,
-    } as NormalizedMessage;
-  }
   if ((msg as any).isTaskNotification) {
     return {
       ...base,
@@ -92,6 +84,9 @@ function chatMessageToNormalized(
     kind: 'text',
     role: msg.type === 'user' ? 'user' : 'assistant',
     content: msg.content || '',
+    // 图片必须随乐观消息一起进 store，否则 normalizedToChatMessages 转回来时
+    // message.images 为空，刚发出的那条用户气泡看不到缩略图
+    ...(msg.images?.length ? { images: msg.images } : {}),
   } as NormalizedMessage;
 }
 
