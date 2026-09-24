@@ -258,9 +258,9 @@ export default function ChatMessagesPane({
           scrollContainerRef={scrollContainerRef}
           allMessagesLoaded={allMessagesLoaded}
           loadAllMessages={loadAllMessages}
+          sessionId={selectedSession?.id || currentSessionId}
         />
       )}
     </div>
   );
 }
-

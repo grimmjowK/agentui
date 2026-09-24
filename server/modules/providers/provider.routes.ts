@@ -426,6 +426,25 @@ router.get(
   }),
 );
 
+router.get(
+  '/sessions/:sessionId/message-index',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const result = await sessionsService.fetchHistory(sessionId, { limit: null, offset: 0 });
+    const messages = result.messages ?? [];
+    const items = messages
+      .filter((message) => message.kind === 'text' && message.role === 'user' && !message.isInterrupted)
+      .map((message, index) => ({
+        id: `message-user-${new Date(message.timestamp).getTime()}--${String(message.content || '').slice(0, 48)}`,
+        timestamp: message.timestamp,
+        preview: String(message.content || '').trim().slice(0, 240),
+        offset: index,
+      }))
+      .filter((item) => item.preview.length > 0);
+    res.json({ sessionId, items });
+  }),
+);
+
 router.get('/search/sessions', asyncHandler(async (req: Request, res: Response) => {
   const query = parseSessionSearchQuery(req.query.q);
   const limit = parseSessionSearchLimit(req.query.limit);

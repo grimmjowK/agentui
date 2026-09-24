@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObjec
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import type { ChatMessage } from '../../types/types';
-import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import { USER_MESSAGE_ANCHOR_PREFIX } from './MessageComponent';
+import { authenticatedFetch } from '../../../../utils/api';
 
 interface UserMessageIndexProps {
   /** 当前会话已加载进 store 的全部消息（不是分页窗口内的 visibleMessages），
@@ -14,12 +14,16 @@ interface UserMessageIndexProps {
   allMessagesLoaded: boolean;
   /** 触发一次性拉取全部历史（复用搜索跳转已有的同一个入口）。 */
   loadAllMessages: (options?: { silent?: boolean }) => void;
+  sessionId: string | null;
 }
 
 interface IndexEntry {
   anchorId: string;
   preview: string;
 }
+
+const stableUserKey = (message: Pick<ChatMessage, 'timestamp' | 'content'>): string =>
+  `message-user-${new Date(message.timestamp).getTime()}--${String(message.content || '').slice(0, 48)}`;
 
 // 跳转命中后的高亮反馈，复用全局搜索跳转已有的同一套闪烁动画（见 index.css
 // .search-highlight-flash 与 useChatSessionState.ts 里的用法），避免为这个
@@ -43,6 +47,7 @@ export default function UserMessageIndex({
   scrollContainerRef,
   allMessagesLoaded,
   loadAllMessages,
+  sessionId,
 }: UserMessageIndexProps) {
   const { t } = useTranslation('chat');
   const [hovered, setHovered] = useState<{ preview: string; style: CSSProperties } | null>(null);
@@ -51,6 +56,26 @@ export default function UserMessageIndex({
   // 会跟着内容拉长，所以不能用 absolute inset-y-0）。
   const [barStyle, setBarStyle] = useState<CSSProperties | null>(null);
   const jumpRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [cachedEntries, setCachedEntries] = useState<IndexEntry[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!sessionId) {
+      setCachedEntries([]);
+      return () => { cancelled = true; };
+    }
+    void authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/message-index`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (cancelled || !data?.items) return;
+        setCachedEntries(data.items.map((item: { id: string; preview: string }) => ({
+          anchorId: `${USER_MESSAGE_ANCHOR_PREFIX}${item.id}`,
+          preview: item.preview,
+        })));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [sessionId]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -78,17 +103,23 @@ export default function UserMessageIndex({
     if (jumpRetryTimerRef.current) clearTimeout(jumpRetryTimerRef.current);
   }, []);
 
-  const entries = useMemo<IndexEntry[]>(() => {
+  const loadedEntries = useMemo<IndexEntry[]>(() => {
     return allMessages
       .filter((message) => message.type === 'user' && !message.isInterrupted)
       .map((message) => {
-        const key = getIntrinsicMessageKey(message);
+        const key = stableUserKey(message);
         const preview = String(message.content || '').trim();
         if (!key || !preview) return null;
         return { anchorId: `${USER_MESSAGE_ANCHOR_PREFIX}${key}`, preview };
       })
       .filter((entry): entry is IndexEntry => entry !== null);
   }, [allMessages]);
+
+  const entries = useMemo(() => {
+    const byId = new Map(cachedEntries.map((entry) => [entry.anchorId, entry]));
+    loadedEntries.forEach((entry) => byId.set(entry.anchorId, entry));
+    return [...byId.values()];
+  }, [cachedEntries, loadedEntries]);
 
   if (entries.length === 0) {
     return null;

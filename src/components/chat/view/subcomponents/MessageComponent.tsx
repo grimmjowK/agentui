@@ -9,7 +9,6 @@ import type {
 } from '../../types/types';
 import { formatUsageLimitText } from '../../utils/chatFormatting';
 import { getClaudePermissionSuggestion } from '../../utils/chatPermissions';
-import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import type { Project } from '../../../../types/app';
 import { ToolRenderer, shouldHideToolResult } from '../../tools';
 import { Reasoning, ReasoningTrigger, ReasoningContent } from '../../../../shared/view/ui';
@@ -142,7 +141,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
   }
 
   const isJumpableUserMessage = message.type === 'user' && !message.isInterrupted;
-  const anchorKey = isJumpableUserMessage ? getIntrinsicMessageKey(message) : null;
+  const anchorKey = isJumpableUserMessage
+    ? `message-user-${new Date(message.timestamp).getTime()}--${String(message.content || '').slice(0, 48)}`
+    : null;
 
   return (
     <div
@@ -514,4 +515,3 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
 });
 
 export default MessageComponent;
-
