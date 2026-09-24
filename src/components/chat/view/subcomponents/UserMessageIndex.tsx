@@ -35,10 +35,8 @@ const JUMP_RETRY_INTERVAL_MS = 200;
  * 点击跳转到对话中的对应位置并高亮反馈。
  *
  * 索引覆盖当前已加载到 store 的全部消息（allMessages），不局限于滚动窗口内
- * 的 visibleMessages，否则还没滚上去加载的历史会在索引里直接消失。挂载时会
- * 静默拉一次全量历史（silent: true，不弹进度浮层、不关闭虚拟化）以补全老
- * 会话的刻度。点击尚未渲染进 DOM 的条目时，再触发一次非静默加载并等锚点出现
- * 后跳转。
+ * 的 visibleMessages，否则还没滚上去加载的历史会在索引里直接消失。索引不在
+ * 挂载时强制拉取全量历史；点击未加载的条目时才按需加载，避免切换长会话卡顿。
  */
 export default function UserMessageIndex({
   allMessages,
@@ -53,12 +51,6 @@ export default function UserMessageIndex({
   // 会跟着内容拉长，所以不能用 absolute inset-y-0）。
   const [barStyle, setBarStyle] = useState<CSSProperties | null>(null);
   const jumpRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 静默补全历史，让长会话里还没滚上去的老消息也能出现在索引条上（不影响
-  // 分页/虚拟化 UI，见 loadAllMessages 的 silent 分支）。
-  useEffect(() => {
-    if (!allMessagesLoaded) loadAllMessages({ silent: true });
-  }, [allMessagesLoaded, loadAllMessages]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -103,7 +95,7 @@ export default function UserMessageIndex({
   }
 
   const scrollToAnchor = (target: Element) => {
-    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    target.scrollIntoView({ block: 'center', behavior: 'auto' });
     target.classList.add(HIGHLIGHT_CLASS);
     setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_DURATION_MS);
   };
@@ -119,7 +111,7 @@ export default function UserMessageIndex({
     }
 
     // 目标消息还没加载进 DOM（在未展示的历史里）：先拉全量历史，再等锚点出现。
-    if (!allMessagesLoaded) loadAllMessages();
+    loadAllMessages();
 
     if (jumpRetryTimerRef.current) clearTimeout(jumpRetryTimerRef.current);
     const retry = (retriesLeft: number) => {
