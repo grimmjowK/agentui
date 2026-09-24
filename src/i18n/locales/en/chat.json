@@ -68,9 +68,7 @@
   },
   "permissions": {
     "grant": "Grant permission for {{tool}}",
-    "added": "Permission added",
     "addTo": "Adds {{entry}} to Allowed Tools.",
-    "retry": "Permission saved. Retry the request to use the tool.",
     "error": "Unable to update permissions. Please try again.",
     "openSettings": "Open settings"
   },
@@ -282,5 +280,8 @@
     "attachmentPlanModeExit": "Exited plan mode",
     "attachmentInvokedSkills": "Invoked skill: {{detail}}",
     "attachmentQueuedCommand": "Background task: {{detail}}"
+  },
+  "messageMinimap": {
+    "jumpToMessage": "Jump to this message"
   }
 }
