@@ -206,7 +206,6 @@ export function useShellConnection({
   }, [connectWebSocket, isConnected, isConnecting, isInitialized]);
 
   const disconnectFromShell = useCallback(() => {
-    sendSocketMessage(wsRef.current, { type: 'terminate' });
     closeSocket();
     clearTerminalScreen();
     setIsConnected(false);

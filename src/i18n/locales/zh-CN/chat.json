@@ -68,7 +68,9 @@
   },
   "permissions": {
     "grant": "授予 {{tool}} 权限",
+    "added": "权限已添加",
     "addTo": "将 {{entry}} 添加到允许的工具。",
+    "retry": "权限已保存。重试请求以使用该工具。",
     "error": "无法更新权限。请重试。",
     "openSettings": "打开设置"
   },
@@ -280,8 +282,5 @@
     "attachmentPlanModeExit": "退出了 Plan 模式",
     "attachmentInvokedSkills": "调用了 skill：{{detail}}",
     "attachmentQueuedCommand": "后台任务：{{detail}}"
-  },
-  "messageMinimap": {
-    "jumpToMessage": "跳转到这条消息"
   }
 }

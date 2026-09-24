@@ -68,7 +68,9 @@
   },
   "permissions": {
     "grant": "Berechtigung für {{tool}} erteilen",
+    "added": "Berechtigung hinzugefügt",
     "addTo": "Fügt {{entry}} zu erlaubten Werkzeugen hinzu.",
+    "retry": "Berechtigung gespeichert. Wiederhole die Anfrage, um das Werkzeug zu verwenden.",
     "error": "Berechtigungen konnten nicht aktualisiert werden. Bitte erneut versuchen.",
     "openSettings": "Einstellungen öffnen"
   },
@@ -279,8 +281,5 @@
     "attachmentPlanModeExit": "Planmodus verlassen",
     "attachmentInvokedSkills": "Skill aufgerufen: {{detail}}",
     "attachmentQueuedCommand": "Hintergrundaufgabe: {{detail}}"
-  },
-  "messageMinimap": {
-    "jumpToMessage": "Zu dieser Nachricht springen"
   }
 }

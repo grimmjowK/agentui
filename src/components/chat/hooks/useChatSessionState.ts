@@ -130,6 +130,7 @@ export function useChatSessionState({
   const isLoadingSessionRef = useRef(false);
   const isLoadingMoreRef = useRef(false);
   const allMessagesLoadedRef = useRef(false);
+  const topLoadLockRef = useRef(false);
   const pendingScrollRestoreRef = useRef<ScrollRestoreState | null>(null);
   const pendingInitialScrollRef = useRef(true);
   const messagesOffsetRef = useRef(0);
@@ -195,6 +196,7 @@ export function useChatSessionState({
     setViewHiddenCount(0);
     setSearchTarget(null);
     searchScrollActiveRef.current = false;
+    topLoadLockRef.current = false;
     pendingScrollRestoreRef.current = null;
     pendingInitialScrollRef.current = true;
     lastLoadedSessionKeyRef.current = null;
@@ -364,12 +366,13 @@ export function useChatSessionState({
 
     if (!allMessagesLoadedRef.current) {
       const scrolledNearTop = container.scrollTop < 100;
-      // ponytail: 之前用一个额外的 topLoadLockRef + "scrollTop > 20 才解锁" 的
-      // 阈值来防抖，但 loadOlderMessages 成功后 useLayoutEffect 会把 scrollTop
-      // 恢复到接近原位（往往仍 < 100），锁于是卡死，后续向上滚动的事件被静默
-      // 吞掉——这正是"有时候无响应"的根因。loadOlderMessages 本身已经用
-      // isLoadingMoreRef 防重入，直接依赖它即可，不需要额外的位置阈值锁。
-      if (scrolledNearTop) await loadOlderMessages(container);
+      if (!scrolledNearTop) { topLoadLockRef.current = false; return; }
+      if (topLoadLockRef.current) {
+        if (container.scrollTop > 20) topLoadLockRef.current = false;
+        return;
+      }
+      const didLoad = await loadOlderMessages(container);
+      if (didLoad) topLoadLockRef.current = true;
     }
   }, [isNearBottom, loadOlderMessages]);
 
@@ -388,6 +391,7 @@ export function useChatSessionState({
       pendingInitialScrollRef.current = true;
       setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
     }
+    topLoadLockRef.current = false;
     pendingScrollRestoreRef.current = null;
     setIsUserScrolledUp(false);
   }, [selectedProject?.projectId, selectedSession?.id]);
@@ -729,13 +733,7 @@ export function useChatSessionState({
     return () => { if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current); };
   }, [isLoadingMoreMessages, hasMoreMessages]);
 
-  // silent=true 用于用户消息索引条在挂载时静默补全历史：只拉数据、把
-  // allMessagesLoaded 标记为已完成，不弹「加载全部」进度浮层、不做滚动位置
-  // 恢复、不强制 visibleMessageCount=Infinity（那会关闭虚拟化，对大会话是
-  // 索引跳转依赖目标消息进入 DOM；静默补全历史后也要扩大可见窗口，
-  // 否则索引条虽然出现，点击旧消息却永远找不到锚点。
-  const loadAllMessages = useCallback(async (options?: { silent?: boolean }) => {
-    const silent = options?.silent ?? false;
+  const loadAllMessages = useCallback(async () => {
     if (!selectedSession || !selectedProject) return;
     if (isLoadingAllMessages) return;
     const sessionProvider = selectedSession.__provider || 'claude';
@@ -744,7 +742,7 @@ export function useChatSessionState({
     allMessagesLoadedRef.current = true;
     isLoadingMoreRef.current = true;
     setIsLoadingAllMessages(true);
-    if (!silent) setShowLoadAllOverlay(true);
+    setShowLoadAllOverlay(true);
 
     const container = scrollContainerRef.current;
     const previousScrollHeight = container ? container.scrollHeight : 0;
@@ -762,7 +760,7 @@ export function useChatSessionState({
       if (currentSessionId !== requestSessionId) return;
 
       if (slot) {
-        if (container && !silent) {
+        if (container) {
           pendingScrollRestoreRef.current = { height: previousScrollHeight, top: previousScrollTop };
         }
 
@@ -772,19 +770,17 @@ export function useChatSessionState({
         setVisibleMessageCount(Infinity);
         setAllMessagesLoaded(true);
 
-        if (!silent) {
-          setLoadAllJustFinished(true);
-          if (loadAllFinishedTimerRef.current) clearTimeout(loadAllFinishedTimerRef.current);
-          loadAllFinishedTimerRef.current = setTimeout(() => { setLoadAllJustFinished(false); setShowLoadAllOverlay(false); }, 1000);
-        }
+        setLoadAllJustFinished(true);
+        if (loadAllFinishedTimerRef.current) clearTimeout(loadAllFinishedTimerRef.current);
+        loadAllFinishedTimerRef.current = setTimeout(() => { setLoadAllJustFinished(false); setShowLoadAllOverlay(false); }, 1000);
       } else {
         allMessagesLoadedRef.current = false;
-        if (!silent) setShowLoadAllOverlay(false);
+        setShowLoadAllOverlay(false);
       }
     } catch (error) {
       console.error('Error loading all messages:', error);
       allMessagesLoadedRef.current = false;
-      if (!silent) setShowLoadAllOverlay(false);
+      setShowLoadAllOverlay(false);
     } finally {
       isLoadingMoreRef.current = false;
       setIsLoadingAllMessages(false);
@@ -794,14 +790,6 @@ export function useChatSessionState({
   const loadEarlierMessages = useCallback(() => {
     setVisibleMessageCount((prev) => prev + 100);
   }, []);
-
-  const loadMessageContext = useCallback(async (offset: number, total: number) => {
-    if (!selectedSession) return;
-    await sessionStore.fetchWindow(selectedSession.id, Math.max(0, offset - 20), total, 40);
-    // The target window may be older than the current tail window. Expose the
-    // merged history after the focused fetch so the anchor can enter the DOM.
-    setVisibleMessageCount(Infinity);
-  }, [selectedSession, sessionStore]);
 
   return {
     chatMessages,
@@ -825,7 +813,6 @@ export function useChatSessionState({
     visibleMessageCount,
     visibleMessages,
     loadEarlierMessages,
-    loadMessageContext,
     loadAllMessages,
     allMessagesLoaded,
     isLoadingAllMessages,

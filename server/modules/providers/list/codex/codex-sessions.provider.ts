@@ -20,24 +20,15 @@ type CodexHistoryResult =
     };
 
 function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boolean {
-  if (!payload) {
+  if (!payload || payload.type !== 'user_message') {
     return false;
   }
 
-  if (payload.type === 'user_message') {
-    if (payload.kind && payload.kind !== 'plain') {
-      return false;
-    }
-    return typeof payload.message === 'string' && payload.message.trim().length > 0;
-  }
-
-  // Current Codex rollout files persist user input as response_item/message,
-  // not event_msg/user_message. Keep both historical formats visible.
-  if (payload.type !== 'message' || payload.role !== 'user') {
+  if (payload.kind && payload.kind !== 'plain') {
     return false;
   }
 
-  return extractCodexTextContent(payload.content).trim().length > 0;
+  return typeof payload.message === 'string' && payload.message.trim().length > 0;
 }
 
 function extractCodexTextContent(content: unknown): string {
@@ -112,17 +103,6 @@ async function getCodexSessionMessages(
             message: {
               role: 'user',
               content: entry.payload.message,
-            },
-          });
-        }
-
-        if (entry.type === 'response_item' && isVisibleCodexUserMessage(entry.payload as AnyRecord)) {
-          messages.push({
-            type: 'user',
-            timestamp: entry.timestamp,
-            message: {
-              role: 'user',
-              content: extractCodexTextContent(entry.payload.content),
             },
           });
         }

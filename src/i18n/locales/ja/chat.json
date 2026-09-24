@@ -67,7 +67,9 @@
   },
   "permissions": {
     "grant": "{{tool}}に権限を付与",
+    "added": "権限を追加しました",
     "addTo": "{{entry}}を許可されたツールに追加します。",
+    "retry": "権限を保存しました。ツールを使用するにはリクエストを再試行してください。",
     "error": "権限を更新できませんでした。もう一度お試しください。",
     "openSettings": "設定を開く"
   },
@@ -246,8 +248,5 @@
     "attachmentPlanModeExit": "プランモードを終了しました",
     "attachmentInvokedSkills": "スキルを呼び出しました: {{detail}}",
     "attachmentQueuedCommand": "バックグラウンドタスク: {{detail}}"
-  },
-  "messageMinimap": {
-    "jumpToMessage": "このメッセージにジャンプ"
   }
 }

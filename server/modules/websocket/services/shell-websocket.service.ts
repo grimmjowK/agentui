@@ -170,21 +170,16 @@ function buildShellCommand(
   }
 
   if (provider === 'codex') {
-    // The embedded terminal must not stop on Codex's interactive update
-    // prompt; otherwise a resumed session appears to have no history.
-    const codexExecutable = process.env.CODEX_CLI_PATH
-      || (fs.existsSync('/opt/homebrew/bin/codex') ? '/opt/homebrew/bin/codex' : 'codex');
-    const codexCommand = `${codexExecutable} -c check_for_update_on_startup=false`;
     if (hasSession && sessionId) {
       if (os.platform() === 'win32') {
         return {
-          command: `${codexCommand} resume "${sessionId}"; if ($LASTEXITCODE -ne 0) { ${codexCommand} }`,
+          command: `codex resume "${sessionId}"; if ($LASTEXITCODE -ne 0) { codex }`,
           mode: 'resume',
         };
       }
-      return { command: `${codexCommand} resume "${sessionId}" || ${codexCommand}`, mode: 'resume' };
+      return { command: `codex resume "${sessionId}" || codex`, mode: 'resume' };
     }
-    return { command: codexCommand, mode: 'new' };
+    return { command: 'codex', mode: 'new' };
   }
 
   if (provider === 'gemini') {
@@ -511,18 +506,6 @@ export function handleShellConnection(
         if (shellProcess) {
           shellProcess.resize(readNumber(data.cols, 80), readNumber(data.rows, 24));
         }
-        return;
-      }
-
-      if (data.type === 'terminate') {
-        if (ptySessionKey) {
-          const session = ptySessionsMap.get(ptySessionKey);
-          if (session) {
-            session.pty.kill();
-            ptySessionsMap.delete(ptySessionKey);
-          }
-        }
-        shellProcess = null;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -68,7 +68,9 @@
   },
   "permissions": {
     "grant": "{{tool}}에 대한 권한 부여",
+    "added": "권한이 추가되었습니다",
     "addTo": "{{entry}}을(를) 허용된 도구에 추가합니다.",
+    "retry": "권한이 저장되었습니다. 도구를 사용하려면 요청을 재시도하세요.",
     "error": "권한을 업데이트할 수 없습니다. 다시 시도해주세요.",
     "openSettings": "설정 열기"
   },
@@ -261,8 +263,5 @@
     "attachmentPlanModeExit": "플랜 모드 종료",
     "attachmentInvokedSkills": "스킬 호출됨: {{detail}}",
     "attachmentQueuedCommand": "백그라운드 작업: {{detail}}"
-  },
-  "messageMinimap": {
-    "jumpToMessage": "이 메시지로 이동"
   }
 }

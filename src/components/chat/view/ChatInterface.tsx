@@ -103,7 +103,6 @@ function ChatInterface({
     visibleMessageCount,
     visibleMessages,
     loadEarlierMessages,
-    loadMessageContext,
     loadAllMessages,
     allMessagesLoaded,
     isLoadingAllMessages,
@@ -359,7 +358,6 @@ function ChatInterface({
           visibleMessageCount={visibleMessageCount}
           visibleMessages={visibleMessages}
           loadEarlierMessages={loadEarlierMessages}
-          loadMessageContext={loadMessageContext}
           loadAllMessages={loadAllMessages}
           allMessagesLoaded={allMessagesLoaded}
           isLoadingAllMessages={isLoadingAllMessages}

@@ -68,7 +68,9 @@
   },
   "permissions": {
     "grant": "{{tool}} için izin ver",
+    "added": "İzin eklendi",
     "addTo": "{{entry}} İzin Verilen Araçlar listesine ekleniyor.",
+    "retry": "İzin kaydedildi. Aracı kullanmak için isteği tekrar dene.",
     "error": "İzinler güncellenemedi. Lütfen tekrar dene.",
     "openSettings": "Ayarları aç"
   },
@@ -279,8 +281,5 @@
     "attachmentPlanModeExit": "Plan modundan çıkıldı",
     "attachmentInvokedSkills": "Yetenek çağrıldı: {{detail}}",
     "attachmentQueuedCommand": "Arka plan görevi: {{detail}}"
-  },
-  "messageMinimap": {
-    "jumpToMessage": "Bu mesaja atla"
   }
 }
