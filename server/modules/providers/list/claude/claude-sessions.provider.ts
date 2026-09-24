@@ -172,6 +172,9 @@ async function getSessionMessages(
       }
     }
 
+    // Transcript rows can form multiple parentUuid branches for legitimate
+    // compaction/continuation and tool flows. Do not discard rows based on a
+    // guessed "active" leaf; the complete transcript is needed by the UI.
     const sortedMessages = messages.sort(
       (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime(),
     );
@@ -226,6 +229,14 @@ function isInternalContent(content: string): boolean {
  */
 function isInterruptedContent(content: string): boolean {
   return content.startsWith('[Request interrupted');
+}
+
+function isTaskNotificationContent(content: string): boolean {
+  return /<task-notification\b/i.test(content);
+}
+
+function isContinuationSummary(content: string): boolean {
+  return content.startsWith('This session is being continued from a previous conversation that ran out of context.');
 }
 
 /**
@@ -460,7 +471,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
             }));
           } else if (part.type === 'text') {
             const text = part.text || '';
-            if (text && !isInternalContent(text)) {
+            if (text && !isInternalContent(text) && !isTaskNotificationContent(text)) {
               messages.push(createNormalizedMessage({
                 id: `${baseId}_text_${partIndex}`,
                 sessionId,
@@ -481,7 +492,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
             .map((part: AnyRecord) => part.text)
             .filter(Boolean)
             .join('\n');
-          if (textParts && !isInternalContent(textParts)) {
+          if (textParts && !isInternalContent(textParts) && !isTaskNotificationContent(textParts)) {
             messages.push(createNormalizedMessage({
               id: `${baseId}_text`,
               sessionId,
@@ -504,7 +515,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
          * text; otherwise it is both filtered by the generic internal-prefix
          * check and visually mislabeled as a user message.
          */
-        if (raw.isCompactSummary === true && text.trim()) {
+        if ((raw.isCompactSummary === true || isContinuationSummary(text)) && text.trim()) {
           messages.push(createNormalizedMessage({
             id: baseId,
             sessionId,
@@ -569,7 +580,7 @@ export class ClaudeSessionsProvider implements IProviderSessions {
           return messages;
         }
 
-        if (text && !isInternalContent(text)) {
+        if (text && !isInternalContent(text) && !isTaskNotificationContent(text)) {
           messages.push(createNormalizedMessage({
             id: baseId,
             sessionId,

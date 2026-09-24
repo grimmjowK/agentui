@@ -50,18 +50,11 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         if (!content.trim()) continue;
 
         if (msg.role === 'user') {
-          // Parse task notifications
-          const taskNotifRegex = /<task-notification>\s*<task-id>[^<]*<\/task-id>\s*<output-file>[^<]*<\/output-file>\s*<status>([^<]*)<\/status>\s*<summary>([^<]*)<\/summary>\s*<\/task-notification>/g;
-          const taskNotifMatch = taskNotifRegex.exec(content);
-          if (taskNotifMatch) {
-            converted.push({
-              type: 'assistant',
-              content: taskNotifMatch[2]?.trim() || 'Background task finished',
-              timestamp: msg.timestamp,
-              isTaskNotification: true,
-              taskStatus: taskNotifMatch[1]?.trim() || 'completed',
-              ...sharedMetadata,
-            });
+          // 后台任务通知：模型自发触发，不是用户发起的对话，直接丢弃，不展示也不进索引。
+          // Claude changes the child-tag order and may add fields between
+          // versions. The wrapper itself is the stable contract.
+          if (/<task-notification\b/i.test(content)) {
+            // no-op: intentionally dropped
           } else {
             // 已经有缩略图可渲染时，服务端追加的临时路径说明就是冗余噪声，隐藏掉；
             // 没有缩略图（刷新后历史不带图片数据）时保留，至少能看出当时带了图。
@@ -167,14 +160,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         break;
 
       case 'task_notification':
-        converted.push({
-          type: 'assistant',
-          content: msg.summary || 'Background task update',
-          timestamp: msg.timestamp,
-          isTaskNotification: true,
-          taskStatus: msg.status || 'completed',
-          ...sharedMetadata,
-        });
+        // 同上：后台任务通知不是用户对话，丢弃。
         break;
 
       case 'stream_delta':

@@ -9,11 +9,16 @@ import type {
 } from '../../types/types';
 import { formatUsageLimitText } from '../../utils/chatFormatting';
 import { getClaudePermissionSuggestion } from '../../utils/chatPermissions';
+import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import type { Project } from '../../../../types/app';
 import { ToolRenderer, shouldHideToolResult } from '../../tools';
 import { Reasoning, ReasoningTrigger, ReasoningContent } from '../../../../shared/view/ui';
 import { Markdown } from './Markdown';
 import MessageCopyControl from './MessageCopyControl';
+
+// 跳转锚点 id 前缀，供 UserMessageIndex 用相同的 message key 拼出目标 id 并
+// 调用 scrollIntoView + 临时加 CSS 高亮类。
+export const USER_MESSAGE_ANCHOR_PREFIX = 'user-message-anchor-';
 
 type DiffLine = {
   type: string;
@@ -136,9 +141,13 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     return null;
   }
 
+  const isJumpableUserMessage = message.type === 'user' && !message.isInterrupted;
+  const anchorKey = isJumpableUserMessage ? getIntrinsicMessageKey(message) : null;
+
   return (
     <div
       ref={messageRef}
+      id={anchorKey ? `${USER_MESSAGE_ANCHOR_PREFIX}${anchorKey}` : undefined}
       data-message-timestamp={message.timestamp || undefined}
       className={`chat-message ${message.type} ${isGrouped ? 'grouped' : ''} ${message.type === 'user' ? 'flex justify-end px-3 sm:px-0' : 'px-3 sm:px-0'}`}
     >
@@ -181,14 +190,6 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
           <div className="flex items-center gap-2 py-0.5">
             <span className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-400 dark:bg-amber-500" />
             <span className="text-xs text-gray-500 dark:text-gray-400">{t('transcriptEvents.interrupted')}</span>
-          </div>
-        </div>
-      ) : message.isTaskNotification ? (
-        /* Compact task notification on the left */
-        <div className="w-full">
-          <div className="flex items-center gap-2 py-0.5">
-            <span className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${message.taskStatus === 'completed' ? 'bg-green-400 dark:bg-green-500' : 'bg-amber-400 dark:bg-amber-500'}`} />
-            <span className="text-xs text-gray-500 dark:text-gray-400">{message.content}</span>
           </div>
         </div>
       ) : message.isCompactBoundary ? (
@@ -265,6 +266,8 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                 {/* Tool Result Section */}
                 {message.toolResult && !shouldHideToolResult(message.toolName || 'UnknownTool', message.toolResult) && (
                   message.toolResult.isError ? (
+                    // 权限已授予（本次点击或此前已放行）后，错误框整体从对话中移除
+                    permissionSuggestion && (permissionSuggestion.isAllowed || permissionGrantState === 'granted') ? null : (
                     // Error results - red error box with content
                     <div
                       id={`tool-result-${message.toolId}`}
@@ -280,6 +283,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                         <Markdown className="prose prose-sm prose-red max-w-none dark:prose-invert">
                           {String(message.toolResult.content || '')}
                         </Markdown>
+                        {/* 授权后整个错误框会走上面的 null 分支消失，这里只需处理"未授权/授权失败"两种可见态 */}
                         {permissionSuggestion && (
                           <div className="mt-4 border-t border-red-200/60 pt-3 dark:border-red-800/60">
                             <div className="flex flex-wrap items-center gap-2">
@@ -294,15 +298,9 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                                     setPermissionGrantState('error');
                                   }
                                 }}
-                                disabled={permissionSuggestion.isAllowed || permissionGrantState === 'granted'}
-                                className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${permissionSuggestion.isAllowed || permissionGrantState === 'granted'
-                                  ? 'cursor-default border-green-300/70 bg-green-100 text-green-800 dark:border-green-800/60 dark:bg-green-900/30 dark:text-green-200'
-                                  : 'border-red-300/70 bg-white/80 text-red-700 hover:bg-white dark:border-red-800/60 dark:bg-gray-900/40 dark:text-red-200 dark:hover:bg-gray-900/70'
-                                  }`}
+                                className="inline-flex items-center gap-2 rounded-md border border-red-300/70 bg-white/80 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-white dark:border-red-800/60 dark:bg-gray-900/40 dark:text-red-200 dark:hover:bg-gray-900/70"
                               >
-                                {permissionSuggestion.isAllowed || permissionGrantState === 'granted'
-                                  ? t('permissions.added')
-                                  : t('permissions.grant', { tool: permissionSuggestion.toolName })}
+                                {t('permissions.grant', { tool: permissionSuggestion.toolName })}
                               </button>
                               {onShowSettings && (
                                 <button
@@ -322,15 +320,11 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                                 {t('permissions.error')}
                               </div>
                             )}
-                            {(permissionSuggestion.isAllowed || permissionGrantState === 'granted') && (
-                              <div className="mt-2 text-xs text-green-700 dark:text-green-200">
-                                {t('permissions.retry')}
-                              </div>
-                            )}
                           </div>
                         )}
                       </div>
                     </div>
+                    )
                   ) : (
                     // Non-error results - route through ToolRenderer (single source of truth)
                     <div id={`tool-result-${message.toolId}`} className="scroll-mt-4">

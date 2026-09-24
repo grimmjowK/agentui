@@ -199,7 +199,7 @@ export const PromptInputSubmit = React.forwardRef<HTMLButtonElement, PromptInput
     return (
       <Button
         ref={ref}
-        type={isActive ? 'button' : 'submit'}
+        type="button"
         variant="default"
         size="icon"
         className={cn('h-8 w-8 rounded-lg', className)}

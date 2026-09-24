@@ -6,6 +6,7 @@ import type { Project, ProjectSession, LLMProvider } from '../../../../types/app
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
+import UserMessageIndex from './UserMessageIndex';
 
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
@@ -37,7 +38,7 @@ interface ChatMessagesPaneProps {
   visibleMessageCount: number;
   visibleMessages: ChatMessage[];
   loadEarlierMessages: () => void;
-  loadAllMessages: () => void;
+  loadAllMessages: (options?: { silent?: boolean }) => void;
   allMessagesLoaded: boolean;
   isLoadingAllMessages: boolean;
   loadAllJustFinished: boolean;
@@ -196,7 +197,7 @@ export default function ChatMessagesPane({
               ) : (
                 <button
                   className="pointer-events-auto flex items-center space-x-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-all duration-200 hover:scale-105 hover:bg-blue-700 disabled:cursor-wait disabled:opacity-75 dark:bg-blue-500 dark:hover:bg-blue-600"
-                  onClick={loadAllMessages}
+                  onClick={() => loadAllMessages()}
                   disabled={isLoadingAllMessages}
                 >
                   {isLoadingAllMessages && (
@@ -223,7 +224,7 @@ export default function ChatMessagesPane({
               {' | '}
               <button
                 className="text-blue-600 underline hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                onClick={loadAllMessages}
+                onClick={() => loadAllMessages()}
               >
                 {t('session.messages.loadAll')}
               </button>
@@ -250,6 +251,14 @@ export default function ChatMessagesPane({
             );
           })}
         </>
+      )}
+      {chatMessages.length > 0 && (
+        <UserMessageIndex
+          allMessages={chatMessages}
+          scrollContainerRef={scrollContainerRef}
+          allMessagesLoaded={allMessagesLoaded}
+          loadAllMessages={loadAllMessages}
+        />
       )}
     </div>
   );
