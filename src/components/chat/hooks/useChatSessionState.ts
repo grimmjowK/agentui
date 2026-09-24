@@ -795,9 +795,9 @@ export function useChatSessionState({
     setVisibleMessageCount((prev) => prev + 100);
   }, []);
 
-  const loadMessageContext = useCallback(async (offset: number) => {
+  const loadMessageContext = useCallback(async (offset: number, total: number) => {
     if (!selectedSession) return;
-    await sessionStore.fetchWindow(selectedSession.id, Math.max(0, offset - 20), 40);
+    await sessionStore.fetchWindow(selectedSession.id, Math.max(0, offset - 20), total, 40);
     // The target window may be older than the current tail window. Expose the
     // merged history after the focused fetch so the anchor can enter the DOM.
     setVisibleMessageCount(Infinity);

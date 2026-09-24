@@ -407,10 +407,11 @@ export function useSessionStore() {
     }
   }, [getSlot, notify, resolveSessionId]);
 
-  const fetchWindow = useCallback(async (sessionId: string, offset: number, limit = 40) => {
+  const fetchWindow = useCallback(async (sessionId: string, start: number, total: number, limit = 40) => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const slot = getSlot(resolvedSessionId);
-    const response = await authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(resolvedSessionId)}/messages?limit=${limit}&offset=${Math.max(0, offset)}`);
+    const end = Math.min(total, Math.max(0, start) + limit);
+    const response = await authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(resolvedSessionId)}/messages?limit=${end - Math.max(0, start)}&offset=${Math.max(0, total - end)}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     slot.serverMessages = mergeMessagesById(slot.serverMessages, data.messages || []);

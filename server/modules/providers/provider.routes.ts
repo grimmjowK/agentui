@@ -439,6 +439,7 @@ router.get(
         timestamp: message.timestamp,
         preview: String(message.content || '').trim().slice(0, 240),
         offset: index,
+        total: messages.length,
       }))
       .filter((item) => item.preview.length > 0);
     res.json({ sessionId, items });

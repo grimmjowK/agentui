@@ -39,7 +39,7 @@ interface ChatMessagesPaneProps {
   visibleMessages: ChatMessage[];
   loadEarlierMessages: () => void;
   loadAllMessages: (options?: { silent?: boolean }) => void;
-  loadMessageContext: (offset: number) => Promise<void>;
+  loadMessageContext: (offset: number, total: number) => Promise<void>;
   allMessagesLoaded: boolean;
   isLoadingAllMessages: boolean;
   loadAllJustFinished: boolean;
