@@ -431,7 +431,7 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
     const result = await sessionsService.fetchHistory(sessionId, { limit: null, offset: 0 });
-    const messages = result.messages ?? [];
+    const messages = (result.messages ?? []).filter((message) => message.kind !== 'tool_result');
     const items = messages
       .filter((message) => message.kind === 'text' && message.role === 'user' && !message.isInterrupted)
       .map((message, index) => ({
