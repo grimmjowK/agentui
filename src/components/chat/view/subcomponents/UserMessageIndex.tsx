@@ -197,6 +197,8 @@ export default function UserMessageIndex({
           type="button"
           title={t('messageMinimap.jumpToMessage', { defaultValue: 'Jump to this message' })}
           onClick={() => void handleJump(entry.anchorId, entry.offset, entry.total, entry.timestamp)}
+          onPointerDown={(event) => event.stopPropagation()}
+          onPointerUp={(event) => event.stopPropagation()}
           onMouseEnter={(event) => handleMouseEnter(event, entry.preview)}
           onMouseLeave={() => setHovered(null)}
           style={{
@@ -205,7 +207,7 @@ export default function UserMessageIndex({
             top: `${entries.length === 1 ? 50 : (index / (entries.length - 1)) * 100}%`,
             transform: 'translateY(-50%)',
           }}
-          className="pointer-events-auto z-50 h-1.5 w-4 cursor-pointer rounded-full bg-gray-500 shadow-sm transition-colors hover:bg-blue-500 dark:bg-gray-400 dark:hover:bg-blue-400 sm:w-5"
+          className="pointer-events-auto z-50 h-4 w-6 cursor-pointer rounded-full bg-gray-500/80 shadow-sm transition-colors hover:bg-blue-500 dark:bg-gray-400/80 dark:hover:bg-blue-400 sm:w-7"
         />
       ))}
       {hovered && (
