@@ -103,6 +103,7 @@ function ChatInterface({
     visibleMessageCount,
     visibleMessages,
     loadEarlierMessages,
+    loadMessageContext,
     loadAllMessages,
     allMessagesLoaded,
     isLoadingAllMessages,
