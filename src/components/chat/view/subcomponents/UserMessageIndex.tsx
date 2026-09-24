@@ -188,7 +188,7 @@ export default function UserMessageIndex({
   return createPortal(
     <div
       className="pointer-events-none relative w-5 rounded-r-full bg-gray-200/40 dark:bg-gray-700/30 sm:w-6"
-      style={barStyle}
+      style={{ ...barStyle, zIndex: 50 }}
       aria-hidden="true"
     >
       {entries.map((entry, index) => (
@@ -205,7 +205,7 @@ export default function UserMessageIndex({
             top: `${entries.length === 1 ? 50 : (index / (entries.length - 1)) * 100}%`,
             transform: 'translateY(-50%)',
           }}
-          className="pointer-events-auto h-1.5 w-4 rounded-full bg-gray-500 shadow-sm transition-colors hover:bg-blue-500 dark:bg-gray-400 dark:hover:bg-blue-400 sm:w-5"
+          className="pointer-events-auto z-50 h-1.5 w-4 cursor-pointer rounded-full bg-gray-500 shadow-sm transition-colors hover:bg-blue-500 dark:bg-gray-400 dark:hover:bg-blue-400 sm:w-5"
         />
       ))}
       {hovered && (
