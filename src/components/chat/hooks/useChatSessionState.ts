@@ -795,6 +795,12 @@ export function useChatSessionState({
     setVisibleMessageCount((prev) => prev + 100);
   }, []);
 
+  const loadMessageContext = useCallback(async (offset: number) => {
+    if (!selectedSession) return;
+    await sessionStore.fetchWindow(selectedSession.id, Math.max(0, offset - 20), 40);
+    setVisibleMessageCount((count) => Math.max(count, 40));
+  }, [selectedSession, sessionStore]);
+
   return {
     chatMessages,
     addMessage,
@@ -817,6 +823,7 @@ export function useChatSessionState({
     visibleMessageCount,
     visibleMessages,
     loadEarlierMessages,
+    loadMessageContext,
     loadAllMessages,
     allMessagesLoaded,
     isLoadingAllMessages,

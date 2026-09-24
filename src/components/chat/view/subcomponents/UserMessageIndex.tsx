@@ -14,12 +14,14 @@ interface UserMessageIndexProps {
   allMessagesLoaded: boolean;
   /** 触发一次性拉取全部历史（复用搜索跳转已有的同一个入口）。 */
   loadAllMessages: (options?: { silent?: boolean }) => void;
+  loadMessageContext: (offset: number) => Promise<void>;
   sessionId: string | null;
 }
 
 interface IndexEntry {
   anchorId: string;
   preview: string;
+  offset: number;
 }
 
 const stableUserKey = (message: Pick<ChatMessage, 'timestamp' | 'content'>): string =>
@@ -47,6 +49,7 @@ export default function UserMessageIndex({
   scrollContainerRef,
   allMessagesLoaded,
   loadAllMessages,
+  loadMessageContext,
   sessionId,
 }: UserMessageIndexProps) {
   const { t } = useTranslation('chat');
@@ -68,9 +71,10 @@ export default function UserMessageIndex({
       .then((response) => response.ok ? response.json() : null)
       .then((data) => {
         if (cancelled || !data?.items) return;
-        setCachedEntries(data.items.map((item: { id: string; preview: string }) => ({
+        setCachedEntries(data.items.map((item: { id: string; preview: string; offset: number }) => ({
           anchorId: `${USER_MESSAGE_ANCHOR_PREFIX}${item.id}`,
           preview: item.preview,
+          offset: item.offset,
         })));
       })
       .catch(() => {});
@@ -110,7 +114,7 @@ export default function UserMessageIndex({
         const key = stableUserKey(message);
         const preview = String(message.content || '').trim();
         if (!key || !preview) return null;
-        return { anchorId: `${USER_MESSAGE_ANCHOR_PREFIX}${key}`, preview };
+        return { anchorId: `${USER_MESSAGE_ANCHOR_PREFIX}${key}`, preview, offset: allMessages.indexOf(message) };
       })
       .filter((entry): entry is IndexEntry => entry !== null);
   }, [allMessages]);
@@ -131,7 +135,7 @@ export default function UserMessageIndex({
     setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_DURATION_MS);
   };
 
-  const handleJump = (anchorId: string) => {
+  const handleJump = async (anchorId: string, offset: number) => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
@@ -142,7 +146,7 @@ export default function UserMessageIndex({
     }
 
     // 目标消息还没加载进 DOM（在未展示的历史里）：先拉全量历史，再等锚点出现。
-    loadAllMessages();
+    await loadMessageContext(offset);
 
     if (jumpRetryTimerRef.current) clearTimeout(jumpRetryTimerRef.current);
     const retry = (retriesLeft: number) => {
@@ -182,7 +186,7 @@ export default function UserMessageIndex({
           key={entry.anchorId}
           type="button"
           title={t('messageMinimap.jumpToMessage', { defaultValue: 'Jump to this message' })}
-          onClick={() => handleJump(entry.anchorId)}
+          onClick={() => void handleJump(entry.anchorId, entry.offset)}
           onMouseEnter={(event) => handleMouseEnter(event, entry.preview)}
           onMouseLeave={() => setHovered(null)}
           className="pointer-events-auto h-1.5 w-4 shrink-0 rounded-full bg-gray-500 shadow-sm transition-colors hover:bg-blue-500 dark:bg-gray-400 dark:hover:bg-blue-400 sm:w-5"

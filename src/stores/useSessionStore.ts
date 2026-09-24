@@ -407,6 +407,20 @@ export function useSessionStore() {
     }
   }, [getSlot, notify, resolveSessionId]);
 
+  const fetchWindow = useCallback(async (sessionId: string, offset: number, limit = 40) => {
+    const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
+    const slot = getSlot(resolvedSessionId);
+    const response = await authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(resolvedSessionId)}/messages?limit=${limit}&offset=${Math.max(0, offset)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    slot.serverMessages = mergeMessagesById(slot.serverMessages, data.messages || []);
+    slot.total = Math.max(slot.total, data.total ?? 0);
+    slot.fetchedAt = Date.now();
+    recomputeMergedIfNeeded(slot);
+    notify(resolvedSessionId);
+    return slot;
+  }, [getSlot, notify, resolveSessionId]);
+
   /**
    * Load older (paginated) messages and prepend to serverMessages.
    */
@@ -697,6 +711,7 @@ export function useSessionStore() {
     getSlot,
     has,
     fetchFromServer,
+    fetchWindow,
     fetchMore,
     appendRealtime,
     appendRealtimeBatch,
@@ -711,7 +726,7 @@ export function useSessionStore() {
     getSessionSlot,
     replaceSessionId,
   }), [
-    getSlot, has, fetchFromServer, fetchMore,
+    getSlot, has, fetchFromServer, fetchWindow, fetchMore,
     appendRealtime, appendRealtimeBatch, refreshFromServer,
     setActiveSession, setStatus, isStale, updateStreaming, finalizeStreaming,
     clearRealtime, getMessages, getSessionSlot, replaceSessionId,

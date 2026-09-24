@@ -39,6 +39,7 @@ interface ChatMessagesPaneProps {
   visibleMessages: ChatMessage[];
   loadEarlierMessages: () => void;
   loadAllMessages: (options?: { silent?: boolean }) => void;
+  loadMessageContext: (offset: number) => Promise<void>;
   allMessagesLoaded: boolean;
   isLoadingAllMessages: boolean;
   loadAllJustFinished: boolean;
@@ -84,6 +85,7 @@ export default function ChatMessagesPane({
   visibleMessages,
   loadEarlierMessages,
   loadAllMessages,
+  loadMessageContext,
   allMessagesLoaded,
   isLoadingAllMessages,
   loadAllJustFinished,
@@ -258,6 +260,7 @@ export default function ChatMessagesPane({
           scrollContainerRef={scrollContainerRef}
           allMessagesLoaded={allMessagesLoaded}
           loadAllMessages={loadAllMessages}
+          loadMessageContext={loadMessageContext}
           sessionId={selectedSession?.id || currentSessionId}
         />
       )}
