@@ -187,11 +187,11 @@ export default function UserMessageIndex({
 
   return createPortal(
     <div
-      className="pointer-events-none flex w-5 flex-col items-start justify-center gap-1 rounded-r-full bg-gray-200/40 py-4 dark:bg-gray-700/30 sm:w-6"
+      className="pointer-events-none relative w-5 rounded-r-full bg-gray-200/40 dark:bg-gray-700/30 sm:w-6"
       style={barStyle}
       aria-hidden="true"
     >
-      {entries.map((entry) => (
+      {entries.map((entry, index) => (
         <button
           key={entry.anchorId}
           type="button"
@@ -199,7 +199,13 @@ export default function UserMessageIndex({
           onClick={() => void handleJump(entry.anchorId, entry.offset, entry.total, entry.timestamp)}
           onMouseEnter={(event) => handleMouseEnter(event, entry.preview)}
           onMouseLeave={() => setHovered(null)}
-          className="pointer-events-auto h-1.5 w-4 shrink-0 rounded-full bg-gray-500 shadow-sm transition-colors hover:bg-blue-500 dark:bg-gray-400 dark:hover:bg-blue-400 sm:w-5"
+          style={{
+            position: 'absolute',
+            left: 2,
+            top: `${entries.length === 1 ? 50 : (index / (entries.length - 1)) * 100}%`,
+            transform: 'translateY(-50%)',
+          }}
+          className="pointer-events-auto h-1.5 w-4 rounded-full bg-gray-500 shadow-sm transition-colors hover:bg-blue-500 dark:bg-gray-400 dark:hover:bg-blue-400 sm:w-5"
         />
       ))}
       {hovered && (
