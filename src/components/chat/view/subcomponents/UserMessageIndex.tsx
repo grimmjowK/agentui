@@ -149,8 +149,13 @@ export default function UserMessageIndex({
       return;
     }
 
-    // 目标消息还没加载进 DOM（在未展示的历史里）：先拉全量历史，再等锚点出现。
-    await loadMessageContext(offset, total);
+    // 目标消息还没加载进 DOM：只拉目标附近窗口；失败时回退到完整历史。
+    try {
+      await loadMessageContext(offset, total);
+    } catch (error) {
+      console.error('[MessageIndex] failed to load context window:', error);
+      loadAllMessages();
+    }
 
     if (jumpRetryTimerRef.current) clearTimeout(jumpRetryTimerRef.current);
     const retry = (retriesLeft: number) => {
@@ -165,9 +170,7 @@ export default function UserMessageIndex({
         jumpRetryTimerRef.current = setTimeout(() => retry(retriesLeft - 1), JUMP_RETRY_INTERVAL_MS);
       }
     };
-    retry(JUMP_RETRY_COUNT);
-    const timestampTarget = container.querySelector(`[data-message-timestamp="${CSS.escape(String(timestamp))}"]`);
-    if (timestampTarget) scrollToAnchor(timestampTarget);
+    window.requestAnimationFrame(() => retry(JUMP_RETRY_COUNT));
   };
 
   const handleMouseEnter = (event: React.MouseEvent<HTMLButtonElement>, preview: string) => {

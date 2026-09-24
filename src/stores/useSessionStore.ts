@@ -414,6 +414,7 @@ export function useSessionStore() {
     const response = await authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(resolvedSessionId)}/messages?limit=${end - Math.max(0, start)}&offset=${Math.max(0, total - end)}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
+    if (!Array.isArray(data.messages)) throw new Error('Invalid message window response');
     slot.serverMessages = mergeMessagesById(slot.serverMessages, data.messages || []);
     slot.total = Math.max(slot.total, data.total ?? 0);
     slot.fetchedAt = Date.now();
