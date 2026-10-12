@@ -19,6 +19,17 @@ type ParsedSession = {
 };
 
 /**
+ * sub-agent 的转录写在 `<主会话 id>/subagents/agent-*.jsonl`，每行的 `sessionId`
+ * 都等于父会话 id（`isSidechain: true`），`cwd` 却是 sub-agent 自己的工作目录。
+ * 不挡掉的话，createSession 的 upsert 会把父会话的 `jsonl_path` 和 `project_path`
+ * 一起覆盖成 sub-agent 的——聊天页只剩 sub-agent 那段上下文，会话还会从原项目
+ * 消失、在 projects 表里凭空长出一个幽灵项目。
+ */
+function isSubagentTranscript(filePath: string): boolean {
+  return filePath.split(path.sep).includes('subagents');
+}
+
+/**
  * Session indexer for Claude transcript artifacts.
  */
 export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
@@ -92,6 +103,10 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
     filePath: string,
     nameMap: Map<string, string>
   ): Promise<ParsedSession | null> {
+    if (isSubagentTranscript(filePath)) {
+      return null;
+    }
+
     const parsed = await extractFirstValidJsonlData(filePath, (rawData) => {
       const data = rawData as Record<string, unknown>;
       const sessionId = typeof data.sessionId === 'string' ? data.sessionId : undefined;
