@@ -43,7 +43,7 @@
     "desktop:build:client": "vite build --mode desktop",
     "desktop:rebuild": "electron-rebuild --force --only better-sqlite3",
     "desktop:restore-node-abi": "npm rebuild better-sqlite3",
-    "desktop:package": "npm run desktop:build && electron-builder --config electron-builder.config.js && npm run desktop:restore-node-abi",
+    "desktop:package": "npm run desktop:build && electron-builder --config electron-builder.config.js && rm -rf release/mac-arm64 release/mac && npm run desktop:restore-node-abi",
     "release": "./release.sh",
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/fix-node-pty.js",
