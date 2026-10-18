@@ -100,7 +100,20 @@ const INTERNAL_CONTENT_PREFIXES = [
  * user-facing searchable conversation content.
  */
 const CODEX_INTERNAL_CONTENT_PREFIXES = [
+  '<recommended_plugins>',
   '<environment_context>',
+  '<environments_instructions>',
+  '<permissions instructions>',
+  '<collaboration_mode>',
+  '<skills_instructions>',
+  '<user_instructions>',
+  '<current_time_reminder>',
+  '<context_window>',
+  '<context_window_guidance>',
+  '<persistent_mode>',
+  '<subagent_notification>',
+  '<turn_aborted>',
+  '# AGENTS.md instructions for ',
   '<cwd>',
 ] as const;
 

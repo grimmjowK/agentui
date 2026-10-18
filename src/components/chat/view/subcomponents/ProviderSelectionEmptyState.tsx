@@ -4,6 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 
 import { useServerPlatform } from "../../../../hooks/useServerPlatform";
 import { useAgentToggle } from "../../../../hooks/useAgentToggle";
+import { api } from "../../../../utils/api";
 import SessionProviderLogo from "../../../llm-logo-provider/SessionProviderLogo";
 import {
   CLAUDE_MODELS,
@@ -113,6 +114,30 @@ export default function ProviderSelectionEmptyState({
   const { isWindowsServer } = useServerPlatform();
   const { enabledAgents, loaded: agentToggleLoaded } = useAgentToggle();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [liveModelsByProvider, setLiveModelsByProvider] = useState<
+    Partial<Record<LLMProvider, { value: string; label: string }[]>>
+  >({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (['codex', 'claude'] as const).forEach((p) => {
+      if (!enabledAgents[p]) return;
+      api
+        .providerModels(p)
+        .then((res) => res.json())
+        .then((payload) => {
+          if (cancelled) return;
+          const models: { value: string; label: string }[] = payload?.data?.models ?? [];
+          if (models.length > 0) {
+            setLiveModelsByProvider((prev) => ({ ...prev, [p]: models }));
+          }
+        })
+        .catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabledAgents]);
 
   const visibleProviderGroups = useMemo(
     () =>
@@ -120,8 +145,11 @@ export default function ProviderSelectionEmptyState({
         if (isWindowsServer && p.id === "cursor") return false;
         if (!enabledAgents[p.id]) return false;
         return true;
-      }),
-    [isWindowsServer, enabledAgents],
+      }).map((p) => ({
+        ...p,
+        models: liveModelsByProvider[p.id] ?? p.models,
+      })),
+    [isWindowsServer, enabledAgents, liveModelsByProvider],
   );
 
   useEffect(() => {
@@ -148,12 +176,12 @@ export default function ProviderSelectionEmptyState({
   );
 
   const currentModelLabel = useMemo(() => {
-    const config = getModelConfig(provider);
-    const found = config.OPTIONS.find(
+    const options = liveModelsByProvider[provider] ?? getModelConfig(provider).OPTIONS;
+    const found = options.find(
       (o: { value: string; label: string }) => o.value === currentModel,
     );
     return found?.label || currentModel;
-  }, [provider, currentModel]);
+  }, [provider, currentModel, liveModelsByProvider]);
 
   const setModelForProvider = useCallback(
     (providerId: LLMProvider, modelValue: string) => {

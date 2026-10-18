@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { authenticatedFetch } from '../../../utils/api';
+
+import { api, authenticatedFetch } from '../../../utils/api';
 import { CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS, GEMINI_MODELS } from '../../../../shared/modelConstants';
 import type { PendingPermissionRequest, PermissionMode } from '../types/types';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
@@ -91,6 +92,32 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
       })
       .catch((error) => {
         console.error('Error loading Cursor config:', error);
+      });
+  }, [provider]);
+
+  useEffect(() => {
+    if (provider !== 'codex') {
+      return;
+    }
+
+    api.providerModels('codex')
+      .then((response) => response.json())
+      .then((payload) => {
+        const models: Array<{ value: string }> = payload?.data?.models ?? [];
+        if (models.length === 0) {
+          return;
+        }
+        setCodexModel((current) => {
+          if (models.some((m) => m.value === current)) {
+            return current;
+          }
+          const nextModel = models[0].value;
+          localStorage.setItem('codex-model', nextModel);
+          return nextModel;
+        });
+      })
+      .catch((error) => {
+        console.error('Error loading Codex models:', error);
       });
   }, [provider]);
 

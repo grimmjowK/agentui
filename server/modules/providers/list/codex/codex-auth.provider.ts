@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import spawn from 'cross-spawn';
 
+import { resolveCodexExecutablePath } from '@/shared/codex-cli-path.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
@@ -20,8 +21,9 @@ export class CodexProviderAuth implements IProviderAuth {
    * Checks whether Codex is available to the server runtime.
    */
   private checkInstalled(): boolean {
+    const cliPath = resolveCodexExecutablePath(process.env.CODEX_CLI_PATH);
     try {
-      spawn.sync('codex', ['--version'], { stdio: 'ignore', timeout: 5000 });
+      spawn.sync(cliPath, ['--version'], { stdio: 'ignore', timeout: 5000 });
       return true;
     } catch {
       return false;

@@ -59,6 +59,12 @@ export const CURSOR_MODELS = {
  */
 export const CODEX_MODELS = {
   OPTIONS: [
+    { value: "gpt-6-astra", label: "GPT-6-Astra" },
+    { value: "gpt-6-sol", label: "GPT-6-Sol" },
+    { value: "gpt-6-luna", label: "GPT-6-Luna" },
+    { value: "gpt-5.6-sol", label: "GPT-5.6-Sol" },
+    { value: "gpt-5.6-terra", label: "GPT-5.6-Terra" },
+    { value: "gpt-5.6-luna", label: "GPT-5.6-Luna" },
     { value: "gpt-5.5", label: "GPT-5.5" },
     { value: "gpt-5.4", label: "GPT-5.4" },
     { value: "gpt-5.4-mini", label: "GPT-5.4 mini" },
@@ -70,7 +76,7 @@ export const CODEX_MODELS = {
     { value: "o4-mini", label: "O4-mini" },
   ],
 
-  DEFAULT: "gpt-5.4",
+  DEFAULT: "gpt-6-astra",
 };
 
 /**

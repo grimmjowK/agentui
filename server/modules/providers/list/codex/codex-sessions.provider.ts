@@ -19,6 +19,28 @@ type CodexHistoryResult =
       tokenUsage?: unknown;
     };
 
+const CODEX_INTERNAL_USER_PREFIXES = [
+  '<recommended_plugins>',
+  '<environment_context>',
+  '<environments_instructions>',
+  '<permissions instructions>',
+  '<collaboration_mode>',
+  '<skills_instructions>',
+  '<user_instructions>',
+  '<current_time_reminder>',
+  '<context_window>',
+  '<context_window_guidance>',
+  '<persistent_mode>',
+  '<subagent_notification>',
+  '<turn_aborted>',
+  '# AGENTS.md instructions for ',
+] as const;
+
+function isInternalCodexUserText(text: string): boolean {
+  const trimmed = text.trimStart();
+  return CODEX_INTERNAL_USER_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
 function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boolean {
   if (!payload) {
     return false;
@@ -28,7 +50,11 @@ function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boole
     if (payload.kind && payload.kind !== 'plain') {
       return false;
     }
-    return typeof payload.message === 'string' && payload.message.trim().length > 0;
+    return (
+      typeof payload.message === 'string'
+      && payload.message.trim().length > 0
+      && !isInternalCodexUserText(payload.message)
+    );
   }
 
   // Current Codex rollout files persist user input as response_item/message,
@@ -37,12 +63,20 @@ function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boole
     return false;
   }
 
-  return extractCodexTextContent(payload.content).trim().length > 0;
+  return extractCodexTextContent(payload.content, { excludeInternal: true }).trim().length > 0;
 }
 
-function extractCodexTextContent(content: unknown): string {
+function extractCodexTextContent(
+  content: unknown,
+  options?: { excludeInternal?: boolean },
+): string {
+  const excludeInternal = options?.excludeInternal ?? false;
+
   if (!Array.isArray(content)) {
-    return typeof content === 'string' ? content : '';
+    if (typeof content !== 'string') {
+      return '';
+    }
+    return excludeInternal && isInternalCodexUserText(content) ? '' : content;
   }
 
   return content
@@ -56,6 +90,9 @@ function extractCodexTextContent(content: unknown): string {
         (record.type === 'input_text' || record.type === 'output_text' || record.type === 'text')
         && typeof record.text === 'string'
       ) {
+        if (excludeInternal && isInternalCodexUserText(record.text)) {
+          return '';
+        }
         return record.text;
       }
 
@@ -122,7 +159,7 @@ async function getCodexSessionMessages(
             timestamp: entry.timestamp,
             message: {
               role: 'user',
-              content: extractCodexTextContent(entry.payload.content),
+              content: extractCodexTextContent(entry.payload.content, { excludeInternal: true }),
             },
           });
         }
