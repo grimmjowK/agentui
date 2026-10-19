@@ -16,8 +16,8 @@ export class CursorProviderAuth implements IProviderAuth {
    */
   private checkInstalled(): boolean {
     try {
-      spawn.sync('cursor-agent', ['--version'], { stdio: 'ignore', timeout: 5000 });
-      return true;
+      // spawn.sync 找不到命令（ENOENT）或超时不会抛错，只体现在返回值的 error 上
+      return !spawn.sync('cursor-agent', ['--version'], { stdio: 'ignore', timeout: 5000 }).error;
     } catch {
       return false;
     }
