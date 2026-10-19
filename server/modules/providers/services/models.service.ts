@@ -14,7 +14,9 @@ import readline from 'node:readline';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
+import { resolveCodexExecutablePath } from '@/shared/codex-cli-path.js';
 import type { LLMProvider } from '@/shared/types.js';
+
 import {
   CLAUDE_MODELS,
   CODEX_MODELS,
@@ -105,7 +107,8 @@ interface CodexModelRow {
  */
 const listCodexModels = (): Promise<ProviderModel[]> =>
   new Promise((resolve, reject) => {
-    const child = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const codexCliPath = resolveCodexExecutablePath(process.env.CODEX_CLI_PATH);
+    const child = spawn(codexCliPath, ['app-server'], { stdio: ['pipe', 'pipe', 'ignore'] });
     let settled = false;
 
     const done = (err: Error | null, models?: ProviderModel[]) => {

@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import spawn from 'cross-spawn';
 
+import { resolveCodexExecutablePath } from '@/shared/codex-cli-path.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
@@ -20,9 +21,10 @@ export class CodexProviderAuth implements IProviderAuth {
    * Checks whether Codex is available to the server runtime.
    */
   private checkInstalled(): boolean {
+    const cliPath = resolveCodexExecutablePath(process.env.CODEX_CLI_PATH);
     try {
-      spawn.sync('codex', ['--version'], { stdio: 'ignore', timeout: 5000 });
-      return true;
+      // spawn.sync 找不到命令（ENOENT）或超时不会抛错，只体现在返回值的 error 上
+      return !spawn.sync(cliPath, ['--version'], { stdio: 'ignore', timeout: 5000 }).error;
     } catch {
       return false;
     }
