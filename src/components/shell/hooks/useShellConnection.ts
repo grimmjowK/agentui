@@ -55,6 +55,7 @@ export function useShellConnection({
   const [isConnecting, setIsConnecting] = useState(false);
   const connectingRef = useRef(false);
   const disconnectRequested = useRef(false);
+  const terminalStopped = useRef(false);
 
   const handleProcessCompletion = useCallback(
     (output: string) => {
@@ -95,12 +96,26 @@ export function useShellConnection({
         return;
       }
       if (message.type === 'session_released') {
-        window.dispatchEvent(new CustomEvent('codex-session-released', { detail: { sessionId: message.sessionId } }));
-        if (disconnectRequested.current) { disconnectRequested.current = false; closeSocket(); }
+        if (message.provider === 'codex' && message.sessionId) window.dispatchEvent(new CustomEvent('codex-session-released', { detail: { sessionId: message.sessionId } }));
+        if (message.provider === 'codex' || disconnectRequested.current) {
+          terminalStopped.current = true;
+          disconnectRequested.current = false;
+          setIsConnected(false);
+          setIsConnecting(false);
+          connectingRef.current = false;
+          closeSocket();
+        }
         return;
       }
       if (message.type === 'error') {
         terminalRef.current?.writeln(`Error: ${String(message.message)}`);
+        if (message.startupFailed) {
+          terminalStopped.current = true;
+          setIsConnected(false);
+          setIsConnecting(false);
+          connectingRef.current = false;
+          closeSocket();
+        }
         return;
       }
       if (message.type === 'output') {
@@ -179,7 +194,7 @@ export function useShellConnection({
           setIsConnected(false);
           setIsConnecting(false);
           connectingRef.current = false;
-          clearTerminalScreen();
+          if (!terminalStopped.current) clearTerminalScreen();
         };
 
         socket.onerror = () => {
@@ -214,6 +229,7 @@ export function useShellConnection({
       return;
     }
 
+    terminalStopped.current = false;
     connectingRef.current = true;
     setIsConnecting(true);
     connectWebSocket(true);
@@ -236,7 +252,7 @@ export function useShellConnection({
   }, [clearTerminalScreen, closeSocket, isPlainShellRef, selectedSessionRef, setAuthUrl, terminalRef, wsRef]);
 
   useEffect(() => {
-    if (!autoConnect || !isInitialized || isConnecting || isConnected) {
+    if (terminalStopped.current || !autoConnect || !isInitialized || isConnecting || isConnected) {
       return;
     }
 

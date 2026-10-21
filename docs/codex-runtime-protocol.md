@@ -103,3 +103,36 @@ Latest automated checks (2026-10-21): typecheck passed; build passed;
 11 targeted tests passed; lint exited 0 with 341 warnings and no errors;
 OpenSpec strict validation passed. Lint warnings were not mass-fixed.
 These checks do not imply browser or cross-provider acceptance.
+
+## Terminal bootstrap regression (2026-10-21)
+
+The reported `account/read failed during TUI bootstrap` error was reproduced
+without starting a turn: the same App CLI returned `workspace routing discovery
+timed out` from `account/read` after 10,009 ms. In the same process,
+`thread/read` succeeded for an existing root thread. This isolates the failure
+to CLI account/workspace discovery, not missing transcript data or filesystem
+permissions. A successful TUI startup has **not** been revalidated after this
+failure; the upstream account routing timeout remains unresolved.
+
+Existing-terminal preflight now uses `thread/read` rather than loading the
+thread with `thread/resume` in a temporary app-server. This follows the official
+[read-only thread API](https://learn.chatgpt.com/docs/app-server#read-a-stored-thread-without-resuming).
+A child thread is rejected with its parent ID when available, rather than
+silently switching IDs or loading an unloaded v2 child independently. Local
+transcript inspection found one child whose `session_meta` contained both a
+`parent_thread_id` and a `subagent` source, while the AgentUI database exposed
+it as a peer conversation. Codex synchronization now excludes those child
+transcripts and removes stale derived index rows without deleting JSONL history.
+
+AgentUI-managed Codex children also discard ambient `CODEX_THREAD_ID`,
+`CODEX_SESSION_ID`, and sandbox marker variables inherited from a parent Codex
+process. They retain the explicitly selected `CODEX_HOME`. A sanitized native
+TUI launch still reproduced the same `account/read` routing timeout, so this
+environment fix prevents identity contamination but does not claim to resolve
+the upstream routing failure.
+
+When a Codex terminal exits or startup fails, the UI clears its connected state,
+keeps the error visible, and allows explicit reconnect. It does not repeatedly
+autostart a failing TUI. Account routing timeout gets a targeted diagnostic;
+no auth, proxy, or routing configuration is changed. Terminating a failed
+startup is acknowledged, preventing an indefinite wait for a nonexistent PTY.

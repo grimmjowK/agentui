@@ -2,6 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 
+import { buildCodexChildEnv } from './child-env.js';
+
 export type RpcMessage = {
   id?: string | number;
   method?: string;
@@ -25,7 +27,10 @@ export class CodexAppServer extends EventEmitter {
   constructor(executable: string, cwd: string, configRoot?: string) {
     super();
     this.child = spawn(executable, ['app-server', '--listen', 'stdio://'], {
-      cwd, env: { ...process.env, ...(configRoot ? { CODEX_HOME: configRoot } : {}) }, stdio: 'pipe', detached: process.platform !== 'win32',
+      cwd,
+      env: configRoot ? buildCodexChildEnv(configRoot) : { ...process.env },
+      stdio: 'pipe',
+      detached: process.platform !== 'win32',
     });
     this.exited = new Promise((resolve) => this.child.once('close', () => resolve()));
     this.child.once('error', (error) => this.fail(error));

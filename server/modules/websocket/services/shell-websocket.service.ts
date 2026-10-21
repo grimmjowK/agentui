@@ -5,8 +5,13 @@ import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
-import { CodexAppServer } from '@/modules/codex-runtime/index.js';
-import { codexOwnership } from '@/modules/codex-runtime/index.js';
+import {
+  buildCodexChildEnv,
+  CodexAppServer,
+  codexTerminalFailure,
+  codexOwnership,
+  prepareCodexTerminalThread,
+} from '@/modules/codex-runtime/index.js';
 import { getCodexRuntimeInfo, resolveCodexExecutablePath } from '@/shared/codex-cli-path.js';
 import { parseIncomingJsonObject } from '@/shared/utils.js';
 
@@ -347,13 +352,7 @@ export function handleShellConnection(
           try {
             codexOwnership.attach(lease, probe.child.pid);
             await probe.initialize();
-            const result = await probe.request(sessionId ? 'thread/resume' : 'thread/start',
-              sessionId ? { threadId: sessionId } : { cwd: resolvedProjectPath });
-            if (sessionId && result.thread.id !== sessionId) throw new Error('Codex resumed a different thread');
-            if (result.thread.cwd && fs.realpathSync(result.thread.cwd) !== fs.realpathSync(resolvedProjectPath)) {
-              throw new Error('Codex thread belongs to a different project');
-            }
-            sessionId = result.thread.id;
+            sessionId = await prepareCodexTerminalThread(probe, sessionId, resolvedProjectPath);
             codexOwnership.bind(lease, sessionId!);
             data.sessionId = sessionId!;
             data.hasSession = true;
@@ -384,8 +383,7 @@ export function handleShellConnection(
           rows: termRows,
           cwd: resolvedProjectPath,
           env: {
-            ...process.env,
-            ...(runtime ? { CODEX_HOME: runtime.configRoot } : {}),
+            ...(runtime ? buildCodexChildEnv(runtime.configRoot) : process.env),
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
             FORCE_COLOR: '3',
@@ -411,7 +409,9 @@ export function handleShellConnection(
           released,
         });
 
+        let terminalDiagnostic = '';
         shellProcess.onData((chunk) => {
+          if (runtime) terminalDiagnostic = (terminalDiagnostic + dependencies.stripAnsiSequences(chunk)).slice(-16384);
           if (!ptySessionKey) {
             return;
           }
@@ -511,7 +511,11 @@ export function handleShellConnection(
           }
 
           ptySessionsMap.delete(ownedKey);
-          if (session?.ws?.readyState === WebSocket.OPEN) session.ws.send(JSON.stringify({ type: 'session_released', provider, sessionId }));
+          const failure = runtime ? codexTerminalFailure(terminalDiagnostic) : null;
+          if (failure && session?.ws?.readyState === WebSocket.OPEN) {
+            session.ws.send(JSON.stringify({ type: 'error', message: failure, startupFailed: true }));
+          }
+          if (session?.ws?.readyState === WebSocket.OPEN) session.ws.send(JSON.stringify({ type: 'session_released', provider, sessionId, exitCode: exitCode.exitCode }));
           shellProcess = null;
         });
 
@@ -569,6 +573,8 @@ export function handleShellConnection(
           if (session?.ws === ws) {
             session.pty.kill();
             await session.released;
+          } else if (!session) {
+            ws.send(JSON.stringify({ type: 'session_released', provider: data.provider }));
           }
         }
         shellProcess = null;
@@ -576,6 +582,10 @@ export function handleShellConnection(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[ERROR] Shell WebSocket error:', message);
+      if (ws.readyState === WebSocket.OPEN && !shellProcess) {
+        ws.send(JSON.stringify({ type: 'error', message, startupFailed: true }));
+        return;
+      }
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(
           JSON.stringify({
