@@ -353,6 +353,7 @@ export function useChatRealtimeHandlers({
           if (prev.some((r: PendingPermissionRequest) => r.requestId === msg.requestId)) return prev;
           return [...prev, {
             requestId: msg.requestId,
+            provider: msg.provider,
             toolName: msg.toolName || 'UnknownTool',
             input: msg.input,
             context: msg.context,

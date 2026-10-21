@@ -66,6 +66,7 @@ interface UseChatComposerStateArgs {
   setCanAbortSession: (canAbort: boolean) => void;
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
   setIsUserScrolledUp: (isScrolledUp: boolean) => void;
+  pendingPermissionRequests: PendingPermissionRequest[];
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
   onRunInShell?: (command: string) => void;
 }
@@ -142,6 +143,7 @@ export function useChatComposerState({
   setClaudeStatus,
   setIsUserScrolledUp,
   setPendingPermissionRequests,
+  pendingPermissionRequests,
   onRunInShell,
 }: UseChatComposerStateArgs) {
   const [input, setInput] = useState(() => {
@@ -638,6 +640,23 @@ export function useChatComposerState({
       const effectiveSessionId =
         currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
 
+      if (provider === 'codex' && effectiveSessionId) {
+        try {
+          const response = await authenticatedFetch(`/api/providers/codex/runtime?sessionId=${encodeURIComponent(effectiveSessionId)}`);
+          if (!response.ok) throw new Error('Unable to check Codex runtime');
+          const runtime = await response.json();
+          if (runtime.ownership?.busy) {
+            addMessage({ type: 'error', timestamp: new Date(), content: runtime.ownership.owner === 'terminal'
+              ? 'Codex 终端仍占用此会话。请先在终端点击断开，等待退出后再发送；草稿已保留。'
+              : 'Codex 会话仍在运行。请等待完成或先中止，再发送；草稿已保留。' });
+            return;
+          }
+        } catch (error) {
+          addMessage({ type: 'error', timestamp: new Date(), content: String(error) });
+          return;
+        }
+      }
+
       const userMessage: ChatMessage = {
         type: 'user',
         content: displayTextOverrideRef.current ?? currentInput,
@@ -1035,6 +1054,12 @@ export function useChatComposerState({
       }
 
       validIds.forEach((requestId) => {
+        const request = pendingPermissionRequests.find((entry) => entry.requestId === requestId);
+        if (request?.provider === 'codex') {
+          sendMessage({ type: 'codex-permission-response', requestId, sessionId: request.sessionId,
+            decision: decision.updatedInput || (decision.allow ? 'accept' : 'decline') });
+          return;
+        }
         const responseType = provider === 'gemini'
           ? 'gemini-permission-response'
           : 'claude-permission-response';
@@ -1049,14 +1074,14 @@ export function useChatComposerState({
       });
 
       setPendingPermissionRequests((previous) => {
-        const next = previous.filter((request) => !validIds.includes(request.requestId));
+        const next = previous.filter((request) => request.provider === 'codex' || !validIds.includes(request.requestId));
         if (next.length === 0) {
           setClaudeStatus(null);
         }
         return next;
       });
     },
-    [sendMessage, setClaudeStatus, setPendingPermissionRequests],
+    [sendMessage, setClaudeStatus, setPendingPermissionRequests, pendingPermissionRequests, provider],
   );
 
   const [isInputFocused, setIsInputFocused] = useState(false);

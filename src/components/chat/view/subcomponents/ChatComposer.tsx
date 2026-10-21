@@ -371,7 +371,7 @@ export default function ChatComposer({
                         ? 'border-orange-300/60 bg-orange-50 text-orange-700 hover:bg-orange-100 dark:border-orange-600/40 dark:bg-orange-900/15 dark:text-orange-300 dark:hover:bg-orange-900/25'
                         : 'border-primary/20 bg-primary/5 text-primary hover:bg-primary/10'
               }`}
-              title={t('input.clickToChangeMode')}
+              title={provider === 'codex' ? t(`codex.modeDetails.${permissionMode}`, t('input.clickToChangeMode')) : t('input.clickToChangeMode')}
             >
               <div className="flex items-center gap-1.5">
                 <div

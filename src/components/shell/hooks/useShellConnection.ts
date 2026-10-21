@@ -54,6 +54,7 @@ export function useShellConnection({
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const connectingRef = useRef(false);
+  const disconnectRequested = useRef(false);
 
   const handleProcessCompletion = useCallback(
     (output: string) => {
@@ -89,6 +90,19 @@ export function useShellConnection({
         return;
       }
 
+      if (message.type === 'runtime') {
+        terminalRef.current?.writeln(`Codex ${String(message.version)} · ${String(message.executablePath)} · ${String(message.configRoot)}`);
+        return;
+      }
+      if (message.type === 'session_released') {
+        window.dispatchEvent(new CustomEvent('codex-session-released', { detail: { sessionId: message.sessionId } }));
+        if (disconnectRequested.current) { disconnectRequested.current = false; closeSocket(); }
+        return;
+      }
+      if (message.type === 'error') {
+        terminalRef.current?.writeln(`Error: ${String(message.message)}`);
+        return;
+      }
       if (message.type === 'output') {
         const output = typeof message.data === 'string' ? message.data : '';
         handleProcessCompletion(output);
@@ -104,7 +118,7 @@ export function useShellConnection({
         }
       }
     },
-    [handleProcessCompletion, onOutputRef, setAuthUrl, terminalRef],
+    [closeSocket, handleProcessCompletion, onOutputRef, setAuthUrl, terminalRef],
   );
 
   const connectWebSocket = useCallback(
@@ -207,13 +221,19 @@ export function useShellConnection({
 
   const disconnectFromShell = useCallback(() => {
     sendSocketMessage(wsRef.current, { type: 'terminate' });
+    const provider = selectedSessionRef.current?.__provider || localStorage.getItem('selected-provider');
+    if (provider === 'codex' && !isPlainShellRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+      disconnectRequested.current = true;
+      terminalRef.current?.writeln('Waiting for Codex to exit before releasing this session…');
+      return;
+    }
     closeSocket();
     clearTerminalScreen();
     setIsConnected(false);
     setIsConnecting(false);
     connectingRef.current = false;
     setAuthUrl('');
-  }, [clearTerminalScreen, closeSocket, setAuthUrl]);
+  }, [clearTerminalScreen, closeSocket, isPlainShellRef, selectedSessionRef, setAuthUrl, terminalRef, wsRef]);
 
   useEffect(() => {
     if (!autoConnect || !isInitialized || isConnecting || isConnected) {

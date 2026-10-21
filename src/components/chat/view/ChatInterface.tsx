@@ -214,6 +214,7 @@ function ChatInterface({
     setCanAbortSession,
     setClaudeStatus,
     setIsUserScrolledUp,
+    pendingPermissionRequests,
     setPendingPermissionRequests,
     onRunInShell,
   });

@@ -99,7 +99,21 @@
       "bypassPermissions": "Full system access with no restrictions. All commands run automatically with full disk and network access. Use with caution.",
       "plan": "Planning mode - no commands are executed"
     },
-    "technicalDetails": "Technical details"
+    "technicalDetails": "Technical details",
+    "approvals": {
+      "title": "Codex · Permission required",
+      "accept": "Allow once",
+      "acceptForSession": "Allow for session",
+      "decline": "Deny",
+      "cancel": "Cancel operation",
+      "expired": "Expired",
+      "expires": "Expires at {{time}}"
+    },
+    "modeDetails": {
+      "default": "Workspace sandbox; requests approval when needed. Host restrictions still apply.",
+      "acceptEdits": "Workspace sandbox; additional permissions will not be requested (never).",
+      "bypassPermissions": "Full access without approval. Enable only when you explicitly intend this."
+    }
   },
   "gemini": {
     "permissionMode": "Gemini Permission Mode",

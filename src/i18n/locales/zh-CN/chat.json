@@ -99,7 +99,21 @@
       "bypassPermissions": "完全的系统访问，无限制。所有命令自动运行，具有完整的磁盘和网络访问权限。请谨慎使用。",
       "plan": "计划模式 - 不执行任何命令"
     },
-    "technicalDetails": "技术细节"
+    "technicalDetails": "技术细节",
+    "approvals": {
+      "title": "Codex · 需要审批",
+      "accept": "仅允许本次",
+      "acceptForSession": "本会话允许",
+      "decline": "拒绝",
+      "cancel": "取消操作",
+      "expired": "已过期",
+      "expires": "有效期至 {{time}}"
+    },
+    "modeDetails": {
+      "default": "工作区沙盒；需要时申请审批，仍受宿主限制。",
+      "acceptEdits": "工作区沙盒；不申请额外权限（never）。",
+      "bypassPermissions": "无沙盒且无需审批；仅在明确需要时启用。"
+    }
   },
   "gemini": {
     "permissionMode": "Gemini 权限模式",

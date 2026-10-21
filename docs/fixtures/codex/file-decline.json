@@ -1,0 +1,94 @@
+[
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "type": "fileChange",
+        "id": "call_4859918b6ee24bbd9e8fa0a6ffcffaaf",
+        "changes": [
+          {
+            "path": "/tmp/probe/probe.txt",
+            "kind": {
+              "type": "add"
+            },
+            "diff": "APPROVAL_OK\n"
+          }
+        ],
+        "status": "inProgress"
+      },
+      "threadId": "redacted-thread-or-turn",
+      "turnId": "redacted-thread-or-turn",
+      "startedAtMs": 1792507799521
+    },
+    "emittedAtMs": 1792507799521
+  },
+  {
+    "method": "item/fileChange/requestApproval",
+    "id": 0,
+    "params": {
+      "threadId": "redacted-thread-or-turn",
+      "turnId": "redacted-thread-or-turn",
+      "itemId": "call_4859918b6ee24bbd9e8fa0a6ffcffaaf",
+      "startedAtMs": 1792507799524,
+      "reason": null,
+      "grantRoot": null
+    }
+  },
+  {
+    "direction": "client-to-server",
+    "id": 0,
+    "result": {
+      "decision": "decline"
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "type": "fileChange",
+        "id": "call_4859918b6ee24bbd9e8fa0a6ffcffaaf",
+        "changes": [
+          {
+            "path": "/tmp/probe/probe.txt",
+            "kind": {
+              "type": "add"
+            },
+            "diff": "APPROVAL_OK\n"
+          }
+        ],
+        "status": "declined"
+      },
+      "threadId": "redacted-thread-or-turn",
+      "turnId": "redacted-thread-or-turn",
+      "completedAtMs": 1792507799528
+    },
+    "emittedAtMs": 1792507799529
+  },
+  {
+    "method": "turn/completed",
+    "params": {
+      "threadId": "redacted-thread-or-turn",
+      "turn": {
+        "id": "redacted-thread-or-turn",
+        "items": [
+          {
+            "type": "agentMessage",
+            "id": "msg_0186adee7b0c1548016ad77fa106a08191a516b1dbb99b5d99",
+            "text": "The patch was rejected, so `probe.txt` was not created.",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          }
+        ],
+        "itemsView": "summary",
+        "status": "completed",
+        "error": null,
+        "startedAt": 1792507786,
+        "completedAt": 1792507815,
+        "durationMs": 28918
+      }
+    },
+    "emittedAtMs": 1792507815693
+  }
+]

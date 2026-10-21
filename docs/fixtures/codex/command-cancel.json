@@ -1,0 +1,123 @@
+[
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "type": "commandExecution",
+        "id": "call_6eefad2693564735a866f003509a6910",
+        "pluginId": null,
+        "scriptPath": null,
+        "command": "/bin/zsh -lc 'printf APPROVAL_OK > probe.txt'",
+        "cwd": "/tmp/probe",
+        "processId": null,
+        "source": "agent",
+        "status": "inProgress",
+        "commandActions": [
+          {
+            "type": "unknown",
+            "command": "printf APPROVAL_OK > probe.txt"
+          }
+        ],
+        "aggregatedOutput": null,
+        "exitCode": null,
+        "durationMs": null
+      },
+      "threadId": "redacted-thread-or-turn",
+      "turnId": "redacted-thread-or-turn",
+      "startedAtMs": 1792507933402
+    },
+    "emittedAtMs": 1792507933402
+  },
+  {
+    "method": "item/commandExecution/requestApproval",
+    "id": 0,
+    "params": {
+      "kind": "command",
+      "threadId": "redacted-thread-or-turn",
+      "turnId": "redacted-thread-or-turn",
+      "itemId": "call_6eefad2693564735a866f003509a6910",
+      "startedAtMs": 1792507933401,
+      "environmentId": "local",
+      "reason": "May I create the probe file probe.txt?",
+      "command": "/bin/zsh -lc 'printf APPROVAL_OK > probe.txt'",
+      "cwd": "/tmp/probe",
+      "commandActions": [
+        {
+          "type": "unknown",
+          "command": "printf APPROVAL_OK > probe.txt"
+        }
+      ],
+      "proposedExecpolicyAmendment": [
+        "/bin/zsh",
+        "-lc",
+        "printf APPROVAL_OK > probe.txt"
+      ],
+      "availableDecisions": [
+        "accept",
+        {
+          "acceptWithExecpolicyAmendment": {
+            "execpolicy_amendment": [
+              "/bin/zsh",
+              "-lc",
+              "printf APPROVAL_OK > probe.txt"
+            ]
+          }
+        },
+        "cancel"
+      ]
+    }
+  },
+  {
+    "direction": "client-to-server",
+    "id": 0,
+    "result": {
+      "decision": "cancel"
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "type": "commandExecution",
+        "id": "call_6eefad2693564735a866f003509a6910",
+        "pluginId": null,
+        "scriptPath": null,
+        "command": "/bin/zsh -lc 'printf APPROVAL_OK > probe.txt'",
+        "cwd": "/tmp/probe",
+        "processId": null,
+        "source": "agent",
+        "status": "declined",
+        "commandActions": [
+          {
+            "type": "unknown",
+            "command": "printf APPROVAL_OK > probe.txt"
+          }
+        ],
+        "aggregatedOutput": null,
+        "exitCode": null,
+        "durationMs": null
+      },
+      "threadId": "redacted-thread-or-turn",
+      "turnId": "redacted-thread-or-turn",
+      "completedAtMs": 1792507933402
+    },
+    "emittedAtMs": 1792507933403
+  },
+  {
+    "method": "turn/completed",
+    "params": {
+      "threadId": "redacted-thread-or-turn",
+      "turn": {
+        "id": "redacted-thread-or-turn",
+        "items": [],
+        "itemsView": "notLoaded",
+        "status": "interrupted",
+        "error": null,
+        "startedAt": 1792507916,
+        "completedAt": 1792507933,
+        "durationMs": 16529
+      }
+    },
+    "emittedAtMs": 1792507933410
+  }
+]

@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ShieldAlertIcon } from 'lucide-react';
 
 import type { PendingPermissionRequest } from '../../types/types';
@@ -30,6 +31,13 @@ export default function PermissionRequestsBanner({
   handlePermissionDecision,
   handleGrantToolPermission,
 }: PermissionRequestsBannerProps) {
+  const { t } = useTranslation('chat');
+  const [now, setNow] = useState(Date.now());
+  const [submitted, setSubmitted] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   // Filter out plan tool requests — they are handled inline by PlanDisplay
   const filteredRequests = pendingPermissionRequests.filter(
     (r) => r.toolName !== 'ExitPlanMode' && r.toolName !== 'exit_plan_mode'
@@ -42,6 +50,29 @@ export default function PermissionRequestsBanner({
   return (
     <div className="mb-3 space-y-2">
       {filteredRequests.map((request) => {
+        if (request.provider === 'codex') {
+          const context = request.context as { decisions?: string[]; expiresAt?: number } | undefined;
+          const expired = Boolean(context?.expiresAt && context.expiresAt <= now);
+          return (
+            <Confirmation key={request.requestId} approval="pending">
+              <ConfirmationTitle>{t('codex.approvals.title', 'Codex · Permission required')}</ConfirmationTitle>
+              <p className="text-xs text-muted-foreground">{expired ? t('codex.approvals.expired', 'Expired') : t('codex.approvals.expires', { defaultValue: 'Expires at {{time}}', time: context?.expiresAt ? new Date(context.expiresAt).toLocaleTimeString() : '—' })}</p>
+              <pre className="max-h-60 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(request.input, null, 2)}</pre>
+              <ConfirmationActions>
+                {(context?.decisions || ['decline']).map((decision) => (
+                  <ConfirmationAction key={decision} variant="outline"
+                    disabled={expired || submitted.has(request.requestId)}
+                    onClick={() => {
+                      setSubmitted((previous) => new Set(previous).add(request.requestId));
+                      handlePermissionDecision(request.requestId, { updatedInput: decision });
+                    }}>
+                    {t(`codex.approvals.${decision}`, decision)}
+                  </ConfirmationAction>
+                ))}
+              </ConfirmationActions>
+            </Confirmation>
+          );
+        }
         const CustomPanel = getPermissionPanel(request.toolName);
         if (CustomPanel) {
           return (

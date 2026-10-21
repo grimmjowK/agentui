@@ -492,6 +492,17 @@ export function useChatSessionState({
     sessionStore,
   ]);
 
+  useEffect(() => {
+    const onReleased = (event: Event) => {
+      const sessionId = (event as CustomEvent<{ sessionId: string }>).detail.sessionId;
+      if (sessionId === selectedSession?.id && !isLoading) {
+        void sessionStore.refreshFromServer(sessionId, { provider: 'codex' });
+      }
+    };
+    window.addEventListener('codex-session-released', onReleased);
+    return () => window.removeEventListener('codex-session-released', onReleased);
+  }, [selectedSession?.id, isLoading, sessionStore]);
+
   // External message update (e.g. WebSocket reconnect, background refresh)
   useEffect(() => {
     if (!externalMessageUpdate || !selectedSession || !selectedProject) return;
