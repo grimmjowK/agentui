@@ -3,15 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const MAC_APP_CODEX_PATHS = [
-  '/Applications/ChatGPT.app/Contents/Resources/codex',
-  '/Applications/Codex.app/Contents/Resources/codex',
-];
-
 type ResolutionOptions = {
   platform?: NodeJS.Platform;
   searchPath?: string;
-  appPaths?: string[];
 };
 
 function unquote(value: string): string {
@@ -28,7 +22,12 @@ function executable(candidate: string): boolean {
   }
 }
 
-/** Resolve once using the same precedence for chat, PTY, auth and model discovery. */
+/**
+ * 聊天、PTY、认证、模型查询使用同一套解析：CODEX_CLI_PATH（显式）→ PATH 里的 codex。
+ * 不再优先 ChatGPT.app/Codex.app 内置二进制——那是桌面 App 的私有运行时，从外部拉起会出现
+ * account/read 工作区路由超时等问题，且可能与用户终端里的 codex 版本/账号不一致。只认与用户
+ * 终端一致的独立 CLI；需要指向 App 内置版本的用户仍可用 CODEX_CLI_PATH 显式配置。
+ */
 export function resolveCodexExecutablePath(
   configuredPath: string | undefined = process.env.CODEX_CLI_PATH,
   options: ResolutionOptions = {},
@@ -53,13 +52,8 @@ export function resolveCodexExecutablePath(
     if (!resolved || !executable(resolved)) throw new Error(`Codex executable is unavailable: ${explicit}`);
     return resolved;
   }
-  if (platform === 'darwin') {
-    for (const candidate of options.appPaths ?? MAC_APP_CODEX_PATHS) {
-      if (executable(candidate)) return path.resolve(candidate);
-    }
-  }
   const resolved = findOnPath('codex');
-  if (!resolved) throw new Error('Codex executable was not found on PATH');
+  if (!resolved) throw new Error('Codex executable was not found on PATH. Install the Codex CLI (e.g. `npm i -g @openai/codex` or `brew install codex`) or set CODEX_CLI_PATH.');
   return resolved;
 }
 
@@ -127,7 +121,6 @@ export function getCodexRuntimeInfo() {
       status: resolveCodexCapabilityStatus(cached.version),
       additionalPermissions: false,
     },
-    source: process.env.CODEX_CLI_PATH !== undefined ? 'configured'
-      : MAC_APP_CODEX_PATHS.includes(executablePath) ? 'app' : 'path',
+    source: process.env.CODEX_CLI_PATH !== undefined ? 'configured' : 'path',
   };
 }

@@ -6,21 +6,23 @@ import test from 'node:test';
 
 import { resolveCodexExecutablePath, resolveCodexCapabilityStatus, parseCodexVersion } from './codex-cli-path.js';
 
-test('all callers resolve explicit, App and PATH executables without an SDK fallback', (t) => {
+test('all callers resolve explicit or PATH executables; no App fallback', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-path-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 即便存在一个"App 风格"的二进制，没有显式配置时也绝不会被选中——只认 PATH 里的 codex。
   const app = path.join(root, 'App with spaces; literal');
   const cli = path.join(root, 'codex');
   for (const file of [app, cli]) fs.writeFileSync(file, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  const options = { platform: 'darwin' as const, appPaths: [app], searchPath: root };
-  assert.equal(resolveCodexExecutablePath(undefined, options), app);
+  const options = { platform: 'darwin' as const, searchPath: root };
+  assert.equal(resolveCodexExecutablePath(undefined, options), cli);
   assert.equal(resolveCodexExecutablePath(`"${cli}"`, options), cli);
   assert.equal(resolveCodexExecutablePath('codex', options), cli);
   assert.equal(resolveCodexExecutablePath(undefined, { ...options, platform: 'linux' }), cli);
+  // 显式指向 App 二进制仍然可用（保留给需要的人）。
+  assert.equal(resolveCodexExecutablePath(app, options), app);
   assert.throws(() => resolveCodexExecutablePath(path.join(root, 'missing'), options), /unavailable/);
   assert.throws(() => resolveCodexExecutablePath(' ', options), /empty/);
-  fs.chmodSync(app, 0o644);
-  assert.equal(resolveCodexExecutablePath(undefined, options), cli);
+  // PATH 里没有 codex 时报错提示安装 CLI，不再退回任何 App 内置版本。
   fs.unlinkSync(cli);
   assert.throws(() => resolveCodexExecutablePath(undefined, options), /not found/);
 });
