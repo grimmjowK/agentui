@@ -59,3 +59,21 @@ PATH 上找不到 `codex` 时 SHALL 报错并提示安装独立 CLI 或设置 `C
 - **WHEN** 对官方子命令的语义调研完成
 - **THEN** 运行协议文档中有一条明确记录，说明该子命令是否被本系统复用，以及未复用的原因（如语义
   不符或需要更大改动）
+
+### Requirement: resume paginated thread 不触发未实现的全量加载
+系统自身发起的 `thread/resume` SHALL 使用 `excludeTurns: true`（仅取元数据与 live-resume 状态），
+终端 preflight 的 `thread/read` SHALL 保持 metadata-only（不传 `includeTurns`），以避免对 paginated
+格式会话触发已弃用的全量 hydration 及尚未实现的分页读取 API（`thread/items/list`）。当终端原生
+TUI 自身 bootstrap 因该分页读取能力缺失而失败时，系统 SHALL 给出可读的诊断信息，说明该会话的
+分页格式当前 CLI 版本尚不能在终端恢复、聊天仍可用，而不是展示原始报错。
+
+#### Scenario: 聊天 resume 一个 paginated 格式会话
+- **WHEN** 用户在聊天中继续一个使用 paginated 存储格式的已有会话
+- **THEN** 系统以 `excludeTurns: true` 发起 `thread/resume`，不触发 `paginated_threads is not
+  supported yet` 报错，会话历史另行从 rollout 文件读取
+
+#### Scenario: 终端 TUI 因分页读取未实现而启动失败
+- **WHEN** 终端原生 TUI 在 bootstrap 时因 `thread/items/list` 未实现而报
+  `paginated_threads is not supported yet`
+- **THEN** 系统展示可读诊断：该会话为 paginated 格式、当前 CLI 版本尚不能在终端恢复、聊天仍可用、
+  升级 CLI 后再试，而不是展示原始 RPC 报错

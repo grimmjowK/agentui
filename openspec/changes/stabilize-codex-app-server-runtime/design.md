@@ -188,6 +188,32 @@ codex` 是独立安装的 `0.163.0`——**两者不是同一个二进制**。Ap
   明确选择"直接报错提示装 CLI"，且"最后兜底"仍会在 PATH 恰好没有 codex 的机器上重新引入
   "借用 App 私有运行时"的风险。确有需要的用户可用 `CODEX_CLI_PATH` 显式指向 App。
 
+### D7: paginated thread resume 规避 `thread/items/list` 未实现
+
+**背景**：D6 修复后换用 PATH 的 codex 0.163.0，切历史会话到 Shell 又出现新报错
+`thread/resume failed during TUI bootstrap: paginated_threads is not supported yet (-32601)`。
+从本机 codex 二进制的内嵌字符串确认：0.163.0 的 thread 存储有 legacy 与 **paginated** 两种格式；
+paginated thread 的全量历史加载（hydration）已弃用，要求改走分页 API `thread/turns/list` +
+`thread/items/list`，而后者在该版本 **`is not supported yet`**。手动终端 `codex resume` 弹 picker
+走的是 legacy 加载路径所以能开；agentui 非交互 resume 触发了 paginated 分支。
+
+**决策**（只改 agentui 自身控制的 app-server 调用）：
+- 聊天 `queryCodex` 的 `thread/resume` 加 `excludeTurns: true`（schema 合法参数，官方对 paginated
+  thread 的推荐做法），只取元数据与 live-resume 状态；历史 agentui 另行从 `~/.codex` rollout 读取。
+- 终端 preflight `prepareCodexTerminalThread` 的 `thread/read` 保持 metadata-only（不传
+  `includeTurns`），加注释禁止将来误加。
+- `codexTerminalFailure` 识别该报错，给出可读诊断（会话为分页格式、终端暂不能恢复、聊天仍可用）。
+
+**诚实的能力边界**：终端那条报错来自 **PTY 里的原生 TUI**（`codex resume <id>`），TUI 内部自己
+调 app-server，agentui **无法替它注入 `excludeTurns`**。因此 agentui 修好的是自身的聊天 resume
+与 preflight；终端原生 TUI 对 paginated thread 的恢复，受限于 CLI 尚未实现 `thread/items/list`，
+只能等 CLI 修复或把终端改为 app-server 驱动（上一轮用户未选的大改）。本决策把终端这类失败从
+原始报错降级为可读诊断，不假装已解决。
+
+**考虑过的替代方案**：
+- 把终端改成 app-server 驱动、不再拉原生 TUI：能彻底绕过（agentui 自己 resume 时可带
+  `excludeTurns` 并分页读取）。工作量大、改变"终端页是什么"，留作后续方向，本次不做。
+
 ## Risks / Trade-offs
 
 - **[风险] 降低版本门禁后，某个未来 Codex 版本的协议发生破坏性变更（如移除某个审批方法）**

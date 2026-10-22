@@ -193,3 +193,21 @@ schema，与上文 0.155-alpha 的实测记录对照（本节为新增记录，�
 
 记为后续可选项：若将来要支持 SSH/远程接入或减少多会话的进程开销，可重新评估基于单例 daemon +
 proxy 的架构，届时需要单独设计 per-thread 写入互斥如何在共享 daemon 上成立。
+
+## paginated thread resume 规避（2026-10-22, 0.163.0）
+
+切历史会话到 Shell 报 `thread/resume failed during TUI bootstrap: paginated_threads is not
+supported yet (-32601)`。本机 codex 二进制内嵌字符串确认根因：0.163.0 的 thread 存储有 legacy
+与 paginated 两种格式；paginated thread 的全量 hydration 已弃用，要求走分页 API
+`thread/turns/list` + `thread/items/list`，而 `thread/items/list is not supported yet`。手动
+`codex resume` 弹 picker 走 legacy 加载路径能开；agentui 非交互 resume 触发 paginated 分支。
+
+agentui 侧规避（仅限自身发起的 app-server 调用）：
+- 聊天 `thread/resume` 带 `excludeTurns: true`（ThreadResumeParams 合法字段，官方对 paginated
+  thread 的推荐做法），只取元数据 + live-resume 状态；历史另从 rollout 文件读取。
+- 终端 preflight `thread/read` 保持 metadata-only（不传 `includeTurns`）。
+- `codexTerminalFailure` 识别该报错，降级为可读诊断。
+
+能力边界：终端报错来自 PTY 里原生 TUI 自己的 `thread/resume`，agentui 无法替它注入
+`excludeTurns`。终端对 paginated thread 的恢复受限于 CLI 尚未实现 `thread/items/list`，需等 CLI
+修复或将终端改为 app-server 驱动。

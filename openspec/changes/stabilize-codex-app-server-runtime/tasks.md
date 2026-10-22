@@ -35,6 +35,20 @@
       `which codex` 用的是同一个二进制，历史会话切 Shell 能正常 resume，不再超时
       【需用户手动跑应用验证】
 
+## 2c. paginated thread resume 规避（D7）
+
+- [x] 2c.1 `queryCodex` 的 `thread/resume` 加 `excludeTurns: true`（metadata-only），避开
+      paginated thread 全量 hydration 触发的 `paginated_threads is not supported yet`
+- [x] 2c.2 `prepareCodexTerminalThread` 的 `thread/read` 保持 metadata-only，加注释禁止将来
+      误加 `includeTurns:true`
+- [x] 2c.3 `codexTerminalFailure` 识别 `paginated_threads is not supported yet` /
+      `paginated threads require thread/items/list` 报错，给出可读诊断（会话为分页格式、
+      终端暂不能恢复、聊天仍可用）
+- [x] 2c.4 为 2c.3 补测试（`terminal-failure.test.ts`）
+- [ ] 2c.5 在那台 Mac 上验证：聊天能 resume 之前报 paginated 错误的会话；终端遇到同类会话时
+      显示可读诊断而非原始报错【需用户手动跑应用验证；终端原生 TUI 的 resume 受限于 CLI
+      尚未实现分页读取，agentui 无法替 TUI 注入 excludeTurns】
+
 ## 3. 审批决定兼容性（D3）
 
 - [x] 3.1 用本机 `codex app-server generate-json-schema` 重新生成协议 schema，对比分支

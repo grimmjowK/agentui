@@ -26,6 +26,9 @@
 - 去除 macOS 上 **ChatGPT.app / Codex.app 内置 codex 优先**的解析策略，运行来源统一为
   `CODEX_CLI_PATH` → PATH 的 `codex`（与 Claude 一致）；修复 agentui 偷偷拉起 App 私有运行时、
   与用户终端 codex 不是同一个二进制、导致 `account/read` 工作区路由超时的问题。
+- 聊天 `thread/resume` 加 `excludeTurns: true`、终端 preflight `thread/read` 保持 metadata-only，
+  规避 paginated 格式会话触发 `paginated_threads is not supported yet`（CLI 尚未实现分页读取 API）；
+  终端原生 TUI 对该类会话的恢复受限于 CLI、agentui 无法代注入参数，降级为可读诊断而非原始报错。
 - 为 `CodexOwnership` 增加锁的**存活判定失败时的只读安全恢复**：在当前"双重进程身份核对"基础上，
   为长期无法确认対方是否存活的异常锁补充一个可配置的 TTL 兜底与明确的管理端点/CLI，减少对直接删除
   磁盘目录的依赖；不绕过现有的双重身份校验这一安全设计。
