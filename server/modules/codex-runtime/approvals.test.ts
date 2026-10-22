@@ -64,6 +64,32 @@ test('expiry cancels advertised command operation and cannot be approved later',
   assert.equal(approvals.decide(id, 'u', 't', 'accept'), false);
 });
 
+test('decision set filtering keeps supported choices and falls back to decline when emptied', () => {
+  const approvals = new CodexApprovals();
+  const cards: Record<string, any>[] = [];
+  const notify = (message: Record<string, any>) => { if (message.kind === 'permission_request') cards.push(message); };
+
+  // 正常候选集合：原样保留受支持的简单枚举。
+  approvals.add({ userId: 'u', threadId: 't', turnId: 'turn', instanceId: 'r1',
+    request: { id: 1, method: 'item/commandExecution/requestApproval', params: { availableDecisions: ['accept', 'cancel'] } },
+    reply: () => {}, notify });
+  assert.deepEqual(cards.at(-1)?.context.decisions, ['accept', 'cancel']);
+
+  // 候选集合被过滤后仍非空：丢掉不支持的对象型决定，保留简单枚举。
+  approvals.add({ userId: 'u', threadId: 't', turnId: 'turn', instanceId: 'r2',
+    request: { id: 2, method: 'item/commandExecution/requestApproval',
+      params: { availableDecisions: ['accept', { acceptWithExecpolicyAmendment: { execpolicy_amendment: [] } }, 'decline'] } },
+    reply: () => {}, notify });
+  assert.deepEqual(cards.at(-1)?.context.decisions, ['accept', 'decline']);
+
+  // 候选集合被过滤后为空：只提供不支持的对象型决定 → 回退为仅拒绝，不产出空卡片。
+  approvals.add({ userId: 'u', threadId: 't', turnId: 'turn', instanceId: 'r3',
+    request: { id: 3, method: 'item/commandExecution/requestApproval',
+      params: { availableDecisions: [{ acceptWithExecpolicyAmendment: { execpolicy_amendment: [] } }] } },
+    reply: () => {}, notify });
+  assert.deepEqual(cards.at(-1)?.context.decisions, ['decline']);
+});
+
 test('actual recorded command fixture does not expose unadvertised decisions or widen exec policy', async () => {
   const fs = await import('node:fs');
   const fixture = JSON.parse(fs.readFileSync(new URL('../../../docs/fixtures/codex/command-accept.json', import.meta.url), 'utf8'));

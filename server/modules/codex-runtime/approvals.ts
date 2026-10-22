@@ -27,9 +27,17 @@ export class CodexApprovals {
     const method = options.request.method!;
     const isPermissions = method === 'item/permissions/requestApproval';
     const advertised = options.request.params?.availableDecisions;
-    const decisions = isPermissions ? ['accept', 'decline']
+    // 仅支持简单枚举决定；对象型决定（acceptWithExecpolicyAmendment、applyNetworkPolicyAmendment，
+    // 见 docs/codex-runtime-protocol.md 0.163.0 记录）需要额外 UI 展示策略修正内容，暂不支持而过滤掉。
+    let decisions = isPermissions ? ['accept', 'decline']
       : Array.isArray(advertised) ? advertised.filter((d) => ['accept', 'acceptForSession', 'decline', 'cancel'].includes(d))
         : ['accept', 'decline', 'cancel'];
+    // 过滤后为空（请求只提供了不支持的对象型决定）时，回退为仅拒绝，避免产出无可选项的审批卡片。
+    if (decisions.length === 0) {
+      console.warn(`Codex approval ${method} advertised only unsupported decisions; falling back to decline.`,
+        { advertised });
+      decisions = ['decline'];
+    }
     const message = {
       kind: 'permission_request', provider: 'codex', sessionId: options.threadId,
       requestId, toolName: method, input: { ...options.request.params, item: options.item },
