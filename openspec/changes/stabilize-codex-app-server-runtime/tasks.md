@@ -23,6 +23,18 @@
 - [ ] 2.5 在本机用 homebrew `0.163.0` 和 ChatGPT.app `0.155.0-alpha.9.2` 分别手动验证
       聊天能正常进入 app-server 协议（不再被版本门禁拦截）【需用户手动跑应用验证，见收尾说明】
 
+## 2b. 运行来源去除 App 优先（D6）
+
+- [x] 2b.1 在 `server/shared/codex-cli-path.ts` 中删除 `MAC_APP_CODEX_PATHS` 与 darwin App
+      优先分支，解析顺序改为 `CODEX_CLI_PATH` → PATH 的 `codex`；PATH 找不到时报错提示安装
+      CLI 或设置 `CODEX_CLI_PATH`，不退回 App 内置版本
+- [x] 2b.2 `getCodexRuntimeInfo().source` 简化为 `configured | path`（去掉 `app`，无消费者）
+- [x] 2b.3 更新 `codex-cli-path.test.ts`：存在 App 风格二进制时不被自动选中、显式 `CODEX_CLI_PATH`
+      指向 App 仍可用、PATH 无 codex 时报错
+- [ ] 2b.4 在那台出现 account/read 超时的 Mac 上验证：去掉 App 优先后，agentui 与终端
+      `which codex` 用的是同一个二进制，历史会话切 Shell 能正常 resume，不再超时
+      【需用户手动跑应用验证】
+
 ## 3. 审批决定兼容性（D3）
 
 - [x] 3.1 用本机 `codex app-server generate-json-schema` 重新生成协议 schema，对比分支

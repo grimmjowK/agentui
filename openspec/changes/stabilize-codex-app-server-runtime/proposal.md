@@ -23,6 +23,9 @@
 
 - 将版本门禁从精确字符串匹配改为**最低版本号比较**（semver 风格），未达标版本降级为警告 + 继续运行，
   而不是硬性拒绝；不可解析的版本号视为不支持并明确报错（而非静默放行）。
+- 去除 macOS 上 **ChatGPT.app / Codex.app 内置 codex 优先**的解析策略，运行来源统一为
+  `CODEX_CLI_PATH` → PATH 的 `codex`（与 Claude 一致）；修复 agentui 偷偷拉起 App 私有运行时、
+  与用户终端 codex 不是同一个二进制、导致 `account/read` 工作区路由超时的问题。
 - 为 `CodexOwnership` 增加锁的**存活判定失败时的只读安全恢复**：在当前"双重进程身份核对"基础上，
   为长期无法确认対方是否存活的异常锁补充一个可配置的 TTL 兜底与明确的管理端点/CLI，减少对直接删除
   磁盘目录的依赖；不绕过现有的双重身份校验这一安全设计。
@@ -45,8 +48,8 @@
 
 ### Modified Capabilities
 
-- `codex-runtime`: 版本兼容判定从精确匹配改为最低版本比较 + 降级警告；运行来源诊断补充新发现的
-  `daemon`/`proxy` 子命令调研结论。
+- `codex-runtime`: 版本兼容判定从精确匹配改为最低版本比较 + 降级警告；运行来源去除 App 优先、
+  统一为显式配置 → PATH；运行来源诊断补充新发现的 `daemon`/`proxy` 子命令调研结论。
 - `codex-interactive-approvals`: 审批决定集合补充 0.163.0 上新出现的决定类型（或明确记录过滤理由）；
   审批生命周期补充"决定类型不被支持时如何降级"的行为；审批卡片的展示补充"与 Claude 审批视觉
   一致、不得使用裸 JSON 转储"的要求。
@@ -54,7 +57,7 @@
 
 ## Impact
 
-- 后端：`server/shared/codex-cli-path.ts`（版本比较逻辑）、`server/modules/codex-runtime/ownership.ts`
+- 后端：`server/shared/codex-cli-path.ts`（版本比较逻辑 + 去除 App 优先）、`server/modules/codex-runtime/ownership.ts`
   （锁恢复路径）、`server/modules/codex-runtime/approvals.ts`（决定类型兼容）、
   `docs/codex-runtime-protocol.md`（协议实测记录更新）。
 - 前端：`src/components/chat/view/subcomponents/PermissionRequestsBanner.tsx`（Codex 审批卡片

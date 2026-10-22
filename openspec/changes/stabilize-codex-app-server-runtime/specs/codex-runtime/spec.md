@@ -29,6 +29,25 @@
 - **WHEN** 用户改变可执行文件配置而已有会话仍存活
 - **THEN** 系统提示需要结束旧运行再重连，新的聊天和终端均使用新配置，不在运行中替换程序
 
+### Requirement: 所有 Codex 入口共享运行来源
+系统 SHALL 对聊天、Codex 终端、认证和模型查询使用相同的可执行文件解析结果及 Codex 配置根目录，
+解析顺序为显式配置（`CODEX_CLI_PATH`）优先、其次系统 PATH 上的 `codex`；SHALL NOT 自动优先选择
+桌面 App（ChatGPT.app / Codex.app）内置的 codex 二进制。显式配置无效时 SHALL 报错而非静默替换；
+PATH 上找不到 `codex` 时 SHALL 报错并提示安装独立 CLI 或设置 `CODEX_CLI_PATH`，不得退回任何 App
+内置版本。
+
+#### Scenario: 本机同时存在 App 内置与 PATH 的 codex
+- **WHEN** 机器上既有 ChatGPT.app 内置 codex，又有 PATH 上独立安装的 codex，且未显式配置路径
+- **THEN** 所有入口选择 PATH 上的 codex（与用户终端 `which codex` 一致），不选择 App 内置二进制
+
+#### Scenario: 仅安装了 App、PATH 无独立 codex
+- **WHEN** 机器上只有 ChatGPT.app，PATH 上没有独立的 codex，且未设置 `CODEX_CLI_PATH`
+- **THEN** 系统报告找不到 codex 并提示安装 CLI 或设置 `CODEX_CLI_PATH`，不自动借用 App 内置二进制
+
+#### Scenario: 显式指向 App 内置二进制
+- **WHEN** 用户通过 `CODEX_CLI_PATH` 显式指向 App 内置的 codex
+- **THEN** 系统使用该显式路径，保留给确有需要的用户
+
 ## ADDED Requirements
 
 ### Requirement: 官方共享运行机制有调研记录

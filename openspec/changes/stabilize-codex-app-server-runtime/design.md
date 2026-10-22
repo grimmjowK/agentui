@@ -162,6 +162,32 @@ Claude 审批的兜底布局（`ShieldAlertIcon` + "Permission required" 标题 
   Codex 的 `toolName` 是 RPC 方法名、需要额外的注册映射。留给后续独立变更，本变更先用兜底
   布局把"难看"降到"和 Claude 一致"。
 
+### D6: 去除 ChatGPT.app 优先，运行来源只认独立 CLI
+
+**背景**：一台测试 Mac 上出现"终端 `codex resume <id>` 能开、agentui 里切 Shell 报
+`account/read failed: workspace routing discovery timed out (-32603)`"。排查发现
+`resolveCodexExecutablePath` 在 macOS 上 **ChatGPT.app 内置 codex 优先**（原分支 `cf78bb84`
+就带的策略），于是 agentui 实际拉起的是 App 内置的 `0.155.0-alpha.9.2`，而用户终端 `which
+codex` 是独立安装的 `0.163.0`——**两者不是同一个二进制**。App 内置 codex 是桌面 App 的私有
+运行时，从外部用用户的 `~/.codex` 环境拉起时，它的 `account/read` 工作区路由发现超时。
+
+**决策**：删除 `MAC_APP_CODEX_PATHS` 与 darwin App 优先分支。解析顺序统一为
+`CODEX_CLI_PATH`（显式）→ PATH 上的 `codex`，与 Claude 完全一致。PATH 上找不到时报错并提示
+安装独立 CLI 或设置 `CODEX_CLI_PATH`，不退回 App 内置版本。`getCodexRuntimeInfo().source`
+相应简化为 `configured | path`（`app` 枚举值无任何消费者，顺手移除）。
+
+**理由**：
+- Claude 从无此类问题，正因为它只认 PATH/显式配置的单一 CLI；Codex 要真正对齐就必须去掉 App
+  优先。这也是用户多轮反复提出的诉求（"像 Claude 一样只访问 CLI"）。
+- App 内置二进制与用户终端里的 codex 在版本、账号/workspace 配置、网络路由上都可能不一致，
+  偷偷借用它正是本次超时的根源。报错提示装 CLI 比静默用一个行为异常的二进制更诚实。
+- 影响面极小：`MAC_APP_CODEX_PATHS` 只在该文件内被引用，`source: 'app'` 无消费者。
+
+**考虑过的替代方案**：
+- App 降为最后兜底（`CODEX_CLI_PATH` → PATH → App）：保留只装 App 用户的可用性。否决——用户
+  明确选择"直接报错提示装 CLI"，且"最后兜底"仍会在 PATH 恰好没有 codex 的机器上重新引入
+  "借用 App 私有运行时"的风险。确有需要的用户可用 `CODEX_CLI_PATH` 显式指向 App。
+
 ## Risks / Trade-offs
 
 - **[风险] 降低版本门禁后，某个未来 Codex 版本的协议发生破坏性变更（如移除某个审批方法）**
