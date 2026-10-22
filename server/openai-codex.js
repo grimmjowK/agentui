@@ -127,8 +127,11 @@ export async function queryCodex(command, options = {}, writer) {
       cwd, ...mapPermissionModeToCodexOptions(options.permissionMode), approvalsReviewer: 'user',
       ...(model ? { model } : {}),
     };
+    // paginated thread 的全量 hydration 已 deprecated（0.163.0），resume 时带 excludeTurns:true
+    // 只取元数据与 live-resume 状态，避免触发 "paginated_threads is not supported yet"。
+    // 历史记录 agentui 另行从 ~/.codex rollout 文件读取，不依赖这里的 turns。
     const result = await rpc.request(threadId ? 'thread/resume' : 'thread/start',
-      threadId ? { ...threadOptions, threadId } : threadOptions);
+      threadId ? { ...threadOptions, threadId, excludeTurns: true } : threadOptions);
     if (threadId && result.thread.cwd && fs.realpathSync(result.thread.cwd) !== fs.realpathSync(cwd)) throw new Error('Codex thread belongs to a different project');
     if (threadId && result.thread.id !== threadId) throw new Error('Codex resumed a different thread');
     threadId = result.thread.id;
