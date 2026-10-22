@@ -1,5 +1,12 @@
 # Codex runtime protocol verification
 
+> 本文档记录两批工作：
+> 1. `unify-codex-runtime-and-approvals` 变更在 0.155-alpha 上的初始协议实测（下方"Tested runtime"
+>    起至"Application adapter smoke test"）。
+> 2. `stabilize-codex-app-server-runtime` 变更在 0.163.0 上的稳定性修复（文末"0.163.0 schema
+>    addendum"与"daemon / proxy 子命令调研"两节）：版本门禁改最低版本比较、审批决定过滤兜底、
+>    异常锁诊断与显式恢复、daemon/proxy 调研。两个变更范围不同，审阅时请按节区分。
+
 ## Tested runtime
 
 2026-10-20, macOS 27.0.1 arm64. Executable:
@@ -136,3 +143,53 @@ keeps the error visible, and allows explicit reconnect. It does not repeatedly
 autostart a failing TUI. Account routing timeout gets a targeted diagnostic;
 no auth, proxy, or routing configuration is changed. Terminating a failed
 startup is acknowledged, preventing an indefinite wait for a nonexistent PTY.
+
+## 0.163.0 schema addendum (2026-10-22)
+
+本机 homebrew `codex-cli 0.163.0` 用 `codex app-server generate-json-schema` 重新生成协议
+schema，与上文 0.155-alpha 的实测记录对照（本节为新增记录，不替换上文历史）。
+
+### 版本门禁调整
+
+原实现用精确字符串 `codex-cli 0.155.0-alpha.9` 判定 `protocol-tested`，导致本机 ChatGPT.app
+实际回报的 `0.155.0-alpha.9.2` 与 homebrew `0.163.0` 都被判为 `unverified` 并被 `queryCodex`
+直接拒绝。现改为最低已验证版本比较（基线 `0.155.0`，忽略 `-alpha.N` 预发布后缀），新增
+`unsupported` 状态（版本号无法解析）。`unsupported` 仍拒绝进入聊天；`unverified`（低于基线但
+可解析，或非 darwin 平台）改为继续尝试运行并发一条 `warning` 级 `task_notification`。
+
+### 审批决定类型差异
+
+| 审批方法 | 0.163.0 schema 的决定集合 | agentui 处理 |
+|---|---|---|
+| `item/commandExecution/requestApproval` | `accept` / `acceptForSession` / `decline` / `cancel` + 对象型 `acceptWithExecpolicyAmendment` / `applyNetworkPolicyAmendment` | 仅支持四个简单枚举；两个对象型决定需要额外 UI 展示策略修正内容，暂不支持而过滤 |
+| `item/fileChange/requestApproval` | `accept` / `acceptForSession` / `decline` / `cancel` | 同上，仅简单枚举 |
+| `item/permissions/requestApproval` | 回复体为 `permissions` / `scope` / `strictAutoReview` | 维持 `accept`→授予请求的 permissions、`decline`→空 permissions |
+
+对象型决定（`acceptWithExecpolicyAmendment`、`applyNetworkPolicyAmendment`）继续过滤，理由：
+它们携带"建议的 execpolicy / 网络策略修正"，需要专门 UI 让用户审阅修正内容后再决定是否采纳，
+超出本次范围，也符合原 proposal「不默认放宽权限」。新增兜底：当某请求 `availableDecisions` 经
+过滤后为空（只提供了对象型决定），回退为仅 `['decline']` 并记录一条告警日志，避免产出无可选项
+的审批卡片。
+
+## daemon / proxy 子命令调研（2026-10-22, 0.163.0）
+
+`codex app-server` 在 0.163.0 新增了 `daemon` 和 `proxy` 两个子命令（0.155-alpha 时期没有），
+本机 `--help` 实测结论：
+
+- `daemon`：管理**单例**的本地 app-server 后台进程，子命令为 `bootstrap`（为 SSH 场景安装
+  常驻管理）、`start`/`stop`/`restart`、`update`、`enable-remote-control`/`disable-remote-control`、
+  `version`。定位是"一台机器一个常驻 app-server + 远程/SSH 控制"的进程生命周期管理。
+- `proxy`：把 stdio 字节代理到**正在运行的** app-server 控制 socket（`--sock <path>`）。定位是
+  "多个 client 连到同一个 daemon"的连接转发。
+
+**结论：本变更不复用，`ownership.ts` 自建锁保留。** 理由：
+1. `daemon`/`proxy` 解决的是"进程共享与远程接入"，不是"同一 thread 同时只有一个写入端"。它们
+   没有暴露 per-thread 的写入互斥语义——多个 client 通过 proxy 连到同一个 daemon 后，谁能写
+   某个 thread 仍需上层自己约束，正是 `ownership.ts` 在做的事。
+2. `daemon` 是单例全局进程，与 agentui 现有"按 userId/project/thread 隔离、每个受管 thread 一个
+   app-server 子进程"的模型不一致，切换过去是架构级改动。
+3. `ownership.ts` 的双重进程身份校验 + 原子回收已覆盖异常退出边界；用 daemon 替换需要同等严谨地
+   验证其并发语义，超出本变更"修复合并即不可用问题"的范围。
+
+记为后续可选项：若将来要支持 SSH/远程接入或减少多会话的进程开销，可重新评估基于单例 daemon +
+proxy 的架构，届时需要单独设计 per-thread 写入互斥如何在共享 daemon 上成立。
