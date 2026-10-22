@@ -67,6 +67,44 @@ export function resolveCodexConfigRoot(): string {
   return path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'));
 }
 
+/**
+ * 最低已验证的 app-server 协议版本。
+ * 协议基线实测于 0.155.0-alpha.9（见 docs/codex-runtime-protocol.md）；达到或高于此版本
+ * 视为已验证，低于此版本仍尝试运行但标记为未验证并向用户告警。比较时忽略 `-alpha.N` 等
+ * 预发布后缀，只看 major.minor.patch。
+ */
+const MIN_VERIFIED_CODEX_VERSION: readonly [number, number, number] = [0, 155, 0];
+
+/** 从 `codex-cli X.Y.Z[-prerelease]` 中提取可比较的 (major, minor, patch)；无法解析返回 null。 */
+export function parseCodexVersion(raw: string): [number, number, number] | null {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(raw);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function compareVersion(a: readonly [number, number, number], b: readonly [number, number, number]): number {
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+/**
+ * 判定运行协议兼容状态：
+ * - `unsupported`：版本号无法解析，视为不支持（queryCodex 会拒绝进入聊天）。
+ * - `unverified`：版本可解析但低于最低已验证版本，或平台未经协议实测；仍尝试运行并告警。
+ * - `protocol-tested`：版本达到最低已验证版本且平台为 darwin。
+ */
+export function resolveCodexCapabilityStatus(
+  rawVersion: string,
+  platform: NodeJS.Platform = process.platform,
+): 'protocol-tested' | 'unverified' | 'unsupported' {
+  const parsed = parseCodexVersion(rawVersion);
+  if (!parsed) return 'unsupported';
+  if (platform !== 'darwin') return 'unverified';
+  return compareVersion(parsed, MIN_VERIFIED_CODEX_VERSION) >= 0 ? 'protocol-tested' : 'unverified';
+}
+
 const versions = new Map<string, { stamp: string; version: string }>();
 
 export function getCodexRuntimeInfo() {
@@ -86,7 +124,7 @@ export function getCodexRuntimeInfo() {
     version: cached.version,
     configRoot: resolveCodexConfigRoot(),
     capabilities: {
-      status: cached.version === 'codex-cli 0.155.0-alpha.9' && process.platform === 'darwin' ? 'protocol-tested' : 'unverified',
+      status: resolveCodexCapabilityStatus(cached.version),
       additionalPermissions: false,
     },
     source: process.env.CODEX_CLI_PATH !== undefined ? 'configured'

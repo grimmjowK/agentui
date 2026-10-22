@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { resolveCodexExecutablePath } from './codex-cli-path.js';
+import { resolveCodexExecutablePath, resolveCodexCapabilityStatus, parseCodexVersion } from './codex-cli-path.js';
 
 test('all callers resolve explicit, App and PATH executables without an SDK fallback', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-path-'));
@@ -36,14 +36,34 @@ test('runtime cache invalidates when the selected executable or configuration ro
     fs.rmSync(root, { recursive: true, force: true });
   });
   const file = path.join(root, 'codex $(literal); with spaces');
-  fs.writeFileSync(file, '#!/bin/sh\necho codex-cli-test-1\n', { mode: 0o755 });
+  fs.writeFileSync(file, '#!/bin/sh\necho codex-cli 0.155.0-alpha.1\n', { mode: 0o755 });
   process.env.CODEX_CLI_PATH = file;
   process.env.CODEX_HOME = root;
-  assert.equal(getCodexRuntimeInfo().version, 'codex-cli-test-1');
-  fs.writeFileSync(file, '#!/bin/sh\necho codex-cli-test-22\n');
+  assert.equal(getCodexRuntimeInfo().version, 'codex-cli 0.155.0-alpha.1');
+  fs.writeFileSync(file, '#!/bin/sh\necho codex-cli 0.163.0\n');
   process.env.CODEX_HOME = path.join(root, 'another-config');
   const runtime = getCodexRuntimeInfo();
-  assert.equal(runtime.version, 'codex-cli-test-22');
+  assert.equal(runtime.version, 'codex-cli 0.163.0');
   assert.equal(runtime.configRoot, process.env.CODEX_HOME);
-  assert.equal(runtime.capabilities.status, 'unverified');
+  // 平台相关：darwin 上 0.163.0 >= 0.155.0 为 protocol-tested，其它平台为 unverified。
+  assert.equal(runtime.capabilities.status, process.platform === 'darwin' ? 'protocol-tested' : 'unverified');
+});
+
+test('version parsing extracts major.minor.patch and rejects unparseable strings', () => {
+  assert.deepEqual(parseCodexVersion('codex-cli 0.163.0'), [0, 163, 0]);
+  assert.deepEqual(parseCodexVersion('codex-cli 0.155.0-alpha.9.2'), [0, 155, 0]);
+  assert.equal(parseCodexVersion('codex-cli-test-22'), null);
+  assert.equal(parseCodexVersion(''), null);
+});
+
+test('capability status gates on a minimum verified version, not exact match', () => {
+  // 达到或高于最低已验证版本 + darwin → protocol-tested（含带补丁号的预发布版本）。
+  assert.equal(resolveCodexCapabilityStatus('codex-cli 0.155.0-alpha.9.2', 'darwin'), 'protocol-tested');
+  assert.equal(resolveCodexCapabilityStatus('codex-cli 0.163.0', 'darwin'), 'protocol-tested');
+  // 低于最低已验证版本但可解析 → unverified（仍尝试运行）。
+  assert.equal(resolveCodexCapabilityStatus('codex-cli 0.154.9', 'darwin'), 'unverified');
+  // 非 darwin 平台未经协议实测 → unverified。
+  assert.equal(resolveCodexCapabilityStatus('codex-cli 0.163.0', 'linux'), 'unverified');
+  // 版本号无法解析 → unsupported。
+  assert.equal(resolveCodexCapabilityStatus('codex-cli-test-22', 'darwin'), 'unsupported');
 });

@@ -51,8 +51,9 @@ export async function queryCodex(command, options = {}, writer) {
     pendingRuns.add(state);
     const runtime = getCodexRuntimeInfo();
     state.runtime = runtime;
-    if (runtime.capabilities.status !== 'protocol-tested') {
-      throw new Error(`Codex ${runtime.version} at ${runtime.executablePath} has not passed the app-server protocol baseline. See docs/codex-runtime-protocol.md; no exec fallback is used.`);
+    // 版本号无法解析才硬性拒绝；低于最低已验证版本（unverified）仍尝试运行并告警。
+    if (runtime.capabilities.status === 'unsupported') {
+      throw new Error(`Codex ${runtime.version} at ${runtime.executablePath} 的版本号无法解析，无法确认 app-server 协议兼容性。见 docs/codex-runtime-protocol.md；不使用 exec 回退。`);
     }
     const cwd = options.cwd || options.projectPath || process.cwd();
     lease = codexOwnership.acquire({ configRoot: runtime.configRoot, threadId, projectPath: cwd, userId: state.userId, owner: 'chat' });
@@ -136,6 +137,10 @@ export async function queryCodex(command, options = {}, writer) {
     activeCodexSessions.set(threadId, state);
     if (!options.sessionId) emit({ kind: 'session_created', newSessionId: threadId });
     emit({ kind: 'task_notification', status: 'info', summary: `Codex ${runtime.version} · ${runtime.executablePath}` });
+    if (runtime.capabilities.status === 'unverified') {
+      emit({ kind: 'task_notification', status: 'warning',
+        summary: `Codex ${runtime.version} 未通过 app-server 协议基线验证（见 docs/codex-runtime-protocol.md），功能可能不稳定。` });
+    }
     if (state.interrupted) throw new Error('Codex run cancelled');
     const turn = await rpc.request('turn/start', {
       threadId, input: [{ type: 'text', text: command, text_elements: [] }],
