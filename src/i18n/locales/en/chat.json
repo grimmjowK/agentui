@@ -107,7 +107,10 @@
       "decline": "Deny",
       "cancel": "Cancel operation",
       "expired": "Expired",
-      "expires": "Expires at {{time}}"
+      "expires": "Expires at {{time}}",
+      "cwd": "Working directory",
+      "files": "Files",
+      "viewDetails": "View request details"
     },
     "modeDetails": {
       "default": "Workspace sandbox; requests approval when needed. Host restrictions still apply.",

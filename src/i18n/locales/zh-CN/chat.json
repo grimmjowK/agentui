@@ -107,7 +107,10 @@
       "decline": "拒绝",
       "cancel": "取消操作",
       "expired": "已过期",
-      "expires": "有效期至 {{time}}"
+      "expires": "有效期至 {{time}}",
+      "cwd": "工作目录",
+      "files": "文件",
+      "viewDetails": "查看请求详情"
     },
     "modeDetails": {
       "default": "工作区沙盒；需要时申请审批，仍受宿主限制。",
