@@ -640,23 +640,6 @@ export function useChatComposerState({
       const effectiveSessionId =
         currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
 
-      if (provider === 'codex' && effectiveSessionId) {
-        try {
-          const response = await authenticatedFetch(`/api/providers/codex/runtime?sessionId=${encodeURIComponent(effectiveSessionId)}`);
-          if (!response.ok) throw new Error('Unable to check Codex runtime');
-          const runtime = await response.json();
-          if (runtime.ownership?.busy) {
-            addMessage({ type: 'error', timestamp: new Date(), content: runtime.ownership.owner === 'terminal'
-              ? 'Codex 终端仍占用此会话。请先在终端点击断开，等待退出后再发送；草稿已保留。'
-              : 'Codex 会话仍在运行。请等待完成或先中止，再发送；草稿已保留。' });
-            return;
-          }
-        } catch (error) {
-          addMessage({ type: 'error', timestamp: new Date(), content: String(error) });
-          return;
-        }
-      }
-
       const userMessage: ChatMessage = {
         type: 'user',
         content: displayTextOverrideRef.current ?? currentInput,
@@ -676,6 +659,25 @@ export function useChatComposerState({
 
       setIsUserScrolledUp(false);
       setTimeout(() => scrollToBottom(), 100);
+
+      const savedDraft = currentInput;
+      setInput('');
+      inputValueRef.current = '';
+      resetCommandMenuState();
+      setAttachedImages([]);
+      setUploadingImages(new Map());
+      setImageErrors(new Map());
+      setIsTextareaExpanded(false);
+      setThinkingMode('none');
+
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+
+      const restoreDraft = () => {
+        setInput(savedDraft);
+        inputValueRef.current = savedDraft;
+      };
 
       if (!effectiveSessionId && !selectedSession?.id) {
         if (typeof window !== 'undefined') {
@@ -787,6 +789,7 @@ export function useChatComposerState({
       }
 
       if (!sent) {
+        restoreDraft();
         setIsLoading(false);
         setCanAbortSession(false);
         setClaudeStatus(null);
@@ -799,19 +802,6 @@ export function useChatComposerState({
           timestamp: new Date(),
         });
         return;
-      }
-
-      setInput('');
-      inputValueRef.current = '';
-      resetCommandMenuState();
-      setAttachedImages([]);
-      setUploadingImages(new Map());
-      setImageErrors(new Map());
-      setIsTextareaExpanded(false);
-      setThinkingMode('none');
-
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
       }
 
       safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);

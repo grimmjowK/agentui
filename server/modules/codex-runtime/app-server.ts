@@ -119,7 +119,7 @@ export class CodexAppServer extends EventEmitter {
         else this.child.kill(signal);
       } catch { /* The process already exited. */ }
     };
-    if (await wait(1000)) return;
+    if (await wait(50)) return;
     kill('SIGTERM');
     if (await wait(2000)) return;
     kill('SIGKILL');

@@ -36,9 +36,14 @@ export function resolveCodexExecutablePath(
   const searchPath = options.searchPath ?? process.env.PATH ?? '';
   const explicit = configuredPath === undefined ? '' : unquote(configuredPath);
   if (configuredPath !== undefined && !explicit) throw new Error('CODEX_CLI_PATH is empty');
-  const findOnPath = (command: string) => {
+  const isLocalNodeModulesBin = (directory: string) => {
+    const normalized = path.resolve(directory).replace(/\\/g, '/').replace(/\/+$/, '');
+    return normalized.endsWith('/node_modules/.bin') && !normalized.includes('/lib/node_modules/');
+  };
+  const findOnPath = (command: string, skipLocalNodeModules = false) => {
     const extensions = platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
     for (const directory of searchPath.split(path.delimiter).filter(Boolean)) {
+      if (skipLocalNodeModules && isLocalNodeModulesBin(directory)) continue;
       for (const extension of extensions) {
         const candidate = path.resolve(directory, command + extension);
         if (executable(candidate)) return candidate;
@@ -48,11 +53,11 @@ export function resolveCodexExecutablePath(
   };
   if (explicit) {
     const resolved = explicit.includes('/') || explicit.includes('\\')
-      ? path.resolve(explicit) : findOnPath(explicit);
+      ? path.resolve(explicit) : (findOnPath(explicit, true) ?? findOnPath(explicit, false));
     if (!resolved || !executable(resolved)) throw new Error(`Codex executable is unavailable: ${explicit}`);
     return resolved;
   }
-  const resolved = findOnPath('codex');
+  const resolved = findOnPath('codex', true);
   if (!resolved) throw new Error('Codex executable was not found on PATH. Install the Codex CLI (e.g. `npm i -g @openai/codex` or `brew install codex`) or set CODEX_CLI_PATH.');
   return resolved;
 }

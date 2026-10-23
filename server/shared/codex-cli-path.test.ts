@@ -22,8 +22,19 @@ test('all callers resolve explicit or PATH executables; no App fallback', (t) =>
   assert.equal(resolveCodexExecutablePath(app, options), app);
   assert.throws(() => resolveCodexExecutablePath(path.join(root, 'missing'), options), /unavailable/);
   assert.throws(() => resolveCodexExecutablePath(' ', options), /empty/);
-  // PATH 里没有 codex 时报错提示安装 CLI，不再退回任何 App 内置版本。
+  // npm run dev 注入的本地 node_modules/.bin 即使排在 PATH 最前面也应被跳过，优先取系统 PATH 的 codex。
+  const localBin = path.join(root, 'workspace', 'node_modules', '.bin');
+  fs.mkdirSync(localBin, { recursive: true });
+  const staleLocalCodex = path.join(localBin, 'codex');
+  fs.writeFileSync(staleLocalCodex, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const npmInjectedOptions = { platform: 'darwin' as const, searchPath: [localBin, root].join(path.delimiter) };
+  assert.equal(resolveCodexExecutablePath(undefined, npmInjectedOptions), cli);
+  assert.equal(resolveCodexExecutablePath('codex', npmInjectedOptions), cli);
+  // 显式指向本地 node_modules/.bin/codex 路径时仍可使用。
+  assert.equal(resolveCodexExecutablePath(staleLocalCodex, npmInjectedOptions), staleLocalCodex);
+  // PATH 里没有系统 codex（仅剩本地 node_modules/.bin）时报错提示安装 CLI，不再借用残留依赖或 App 内置版本。
   fs.unlinkSync(cli);
+  assert.throws(() => resolveCodexExecutablePath(undefined, npmInjectedOptions), /not found/);
   assert.throws(() => resolveCodexExecutablePath(undefined, options), /not found/);
 });
 

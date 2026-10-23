@@ -40,6 +40,8 @@ function processIdentity(pid: number | undefined): string | null | undefined {
   return undefined;
 }
 
+const SELF_PROCESS_STARTED_AT = processIdentity(process.pid) || undefined;
+
 /**
  * 把 processIdentity 的裸结果归纳为三态结论，与 claim() 里的 gone 判定保持同一套语义：
  * - confirmed-exited：PID 已消失（ESRCH），或 PID 被复用成了另一个进程（身份签名与记录不符）。
@@ -62,6 +64,10 @@ export class CodexOwnership {
     if (!fs.existsSync(directory)) return { busy: false, owner: null };
     try {
       const record = JSON.parse(fs.readFileSync(path.join(directory, 'owner.json'), 'utf8'));
+      const serverGone = identityVerdict(record.serverPid, record.serverStartedAt) === 'confirmed-exited';
+      const childGone = identityVerdict(record.pid, record.startedAt) === 'confirmed-exited';
+      if (serverGone && childGone) return { busy: false, owner: null };
+      if (!serverGone && record.pid && childGone) return { busy: false, owner: null };
       return { busy: true, owner: record.owner === 'terminal' ? 'terminal' : 'chat' };
     } catch { return { busy: true, owner: 'unknown' }; }
   }
@@ -70,7 +76,7 @@ export class CodexOwnership {
     if (owner.userId === null) throw new Error('Codex requires an authenticated user');
     const token = randomUUID();
     const directory = this.directory(owner.configRoot, owner.threadId || `pending:${token}`);
-    const lease = { ...owner, token, directory, claimedAt: new Date().toISOString(), serverPid: process.pid, serverStartedAt: processIdentity(process.pid) || undefined };
+    const lease = { ...owner, token, directory, claimedAt: new Date().toISOString(), serverPid: process.pid, serverStartedAt: SELF_PROCESS_STARTED_AT };
     this.claim(lease);
     this.leases.set(token, lease);
     return lease;
@@ -90,7 +96,8 @@ export class CodexOwnership {
       try { existing = JSON.parse(fs.readFileSync(path.join(lease.directory, 'owner.json'), 'utf8')); } catch { /* Incomplete claim remains locked. */ }
       const serverGone = identityVerdict(existing.serverPid, existing.serverStartedAt) === 'confirmed-exited';
       const childGone = identityVerdict(existing.pid, existing.startedAt) === 'confirmed-exited';
-      if (serverGone && childGone) {
+      const sameServerDeadChild = existing.serverPid === process.pid && Boolean(existing.pid) && childGone;
+      if ((serverGone && childGone) || sameServerDeadChild) {
         // Serialize recovery, then re-check the generation before moving it.
         fs.mkdirSync(path.join(lease.directory, 'recovering'));
         const current = JSON.parse(fs.readFileSync(path.join(lease.directory, 'owner.json'), 'utf8'));

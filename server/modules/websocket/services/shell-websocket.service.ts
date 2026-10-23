@@ -101,6 +101,51 @@ export function markShellSessionStale(sessionId: string): void {
   }
 }
 
+/**
+ * 终止指定 sessionId 的所有存活终端 PTY 进程并等待其完全退出（用于 Codex 聊天与终端无缝切换）。
+ */
+export async function terminateShellSessionsBySessionId(sessionId: string): Promise<boolean> {
+  if (!sessionId) {
+    return false;
+  }
+  const matchingEntries: PtySessionEntry[] = [];
+  for (const entry of ptySessionsMap.values()) {
+    if (entry.sessionId === sessionId) {
+      matchingEntries.push(entry);
+    }
+  }
+  if (matchingEntries.length === 0) {
+    return false;
+  }
+  await Promise.all(
+    matchingEntries.map(async (session) => {
+      if (session.timeoutId) {
+        clearTimeout(session.timeoutId);
+      }
+      try {
+        session.pty.kill();
+      } catch { /* already exited */ }
+      const forceKillTimer = setTimeout(() => {
+        try {
+          session.pty.kill('SIGTERM');
+        } catch { /* already exited */ }
+      }, 200);
+      const sigkillTimer = setTimeout(() => {
+        try {
+          session.pty.kill('SIGKILL');
+        } catch { /* already exited */ }
+      }, 1000);
+      try {
+        await session.released;
+      } finally {
+        clearTimeout(forceKillTimer);
+        clearTimeout(sigkillTimer);
+      }
+    }),
+  );
+  return true;
+}
+
 type ShellCommandResult = {
   command: string;
   mode: 'plain' | 'new' | 'resume';
@@ -116,6 +161,8 @@ type ShellWebSocketDependencies = {
   shouldAutoOpenUrlFromOutput: (content: string) => boolean;
   /** 该 sessionId 当前是否有聊天页的 SDK 会话在跑。 */
   isChatSessionActive: (sessionId: string, provider: string) => boolean;
+  /** 停止该 sessionId 正在运行的聊天会话并等待释放锁。 */
+  stopChatSession?: (sessionId: string, provider: string, userId?: string | number | null) => Promise<boolean>;
 };
 
 /**
@@ -305,14 +352,12 @@ export function handleShellConnection(
           );
 
           if (existingSession.buffer.length > 0) {
-            existingSession.buffer.forEach((bufferedData) => {
-              ws.send(
-                JSON.stringify({
-                  type: 'output',
-                  data: bufferedData,
-                })
-              );
-            });
+            ws.send(
+              JSON.stringify({
+                type: 'output',
+                data: existingSession.buffer.join(''),
+              })
+            );
           }
 
           existingSession.ws = ws;
@@ -346,6 +391,14 @@ export function handleShellConnection(
 
         let lease: ReturnType<typeof codexOwnership.acquire> | undefined;
         if (runtime) {
+          if (sessionId) {
+            if (dependencies.isChatSessionActive(sessionId, 'codex') && dependencies.stopChatSession) {
+              await dependencies.stopChatSession(sessionId, 'codex', userId);
+            }
+            if (hasLiveShellSession(sessionId)) {
+              await terminateShellSessionsBySessionId(sessionId);
+            }
+          }
           lease = codexOwnership.acquire({ configRoot: runtime.configRoot, threadId: sessionId,
             projectPath: resolvedProjectPath, userId, owner: 'terminal' });
           const probe = new CodexAppServer(runtime.executablePath, resolvedProjectPath, runtime.configRoot);
@@ -572,7 +625,22 @@ export function handleShellConnection(
           const session = ptySessionsMap.get(ptySessionKey);
           if (session?.ws === ws) {
             session.pty.kill();
-            await session.released;
+            const forceKillTimer = setTimeout(() => {
+              try {
+                session.pty.kill('SIGTERM');
+              } catch { /* already exited */ }
+            }, 300);
+            const sigkillTimer = setTimeout(() => {
+              try {
+                session.pty.kill('SIGKILL');
+              } catch { /* already exited */ }
+            }, 1500);
+            try {
+              await session.released;
+            } finally {
+              clearTimeout(forceKillTimer);
+              clearTimeout(sigkillTimer);
+            }
           } else if (!session) {
             ws.send(JSON.stringify({ type: 'session_released', provider: data.provider }));
           }
@@ -608,6 +676,27 @@ export function handleShellConnection(
     }
 
     session.ws = null;
+    let isCodexSession = false;
+    try {
+      const parsedKey = JSON.parse(ptySessionKey);
+      isCodexSession = Array.isArray(parsedKey) && parsedKey[1] === 'codex';
+    } catch { /* ignore */ }
+
+    if (isCodexSession) {
+      if (session.timeoutId) {
+        clearTimeout(session.timeoutId);
+      }
+      try {
+        session.pty.kill();
+      } catch { /* already exited */ }
+      setTimeout(() => {
+        try {
+          session.pty.kill('SIGTERM');
+        } catch { /* already exited */ }
+      }, 200);
+      return;
+    }
+
     session.timeoutId = setTimeout(() => {
       session.pty.kill();
       // onExit confirms release and removes the entry.

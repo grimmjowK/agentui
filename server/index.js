@@ -37,6 +37,7 @@ import {
 import {
     queryCodex,
     abortCodexSession,
+    stopCodexSessionAndWait,
     shutdownCodexSessions,
     resolveCodexApproval,
     reconnectCodexSession,
@@ -149,6 +150,12 @@ const wss = createWebSocketServer(server, {
             if (provider === 'codex') return isCodexSessionActive(sessionId);
             if (provider === 'gemini') return isGeminiSessionActive(sessionId);
             return isClaudeSDKSessionActive(sessionId);
+        },
+        stopChatSession: async (sessionId, provider, userId) => {
+            if (provider === 'codex') {
+                return stopCodexSessionAndWait(sessionId, userId);
+            }
+            return false;
         },
     },
     getPluginPort,

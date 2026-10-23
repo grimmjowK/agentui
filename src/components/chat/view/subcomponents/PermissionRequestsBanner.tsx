@@ -68,14 +68,20 @@ export default function PermissionRequestsBanner({
   const { t } = useTranslation('chat');
   const [now, setNow] = useState(Date.now());
   const [submitted, setSubmitted] = useState<Set<string>>(new Set());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
   // Filter out plan tool requests — they are handled inline by PlanDisplay
   const filteredRequests = pendingPermissionRequests.filter(
     (r) => r.toolName !== 'ExitPlanMode' && r.toolName !== 'exit_plan_mode'
   );
+  const hasExpiringCodexRequest = filteredRequests.some(
+    (r) => r.provider === 'codex' && Boolean((r.context as { expiresAt?: number } | undefined)?.expiresAt),
+  );
+
+  useEffect(() => {
+    if (!hasExpiringCodexRequest) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasExpiringCodexRequest]);
 
   if (!filteredRequests.length) {
     return null;

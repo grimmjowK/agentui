@@ -16,15 +16,25 @@ type ClaudeCredentialsStatus = {
   error?: string;
 };
 
+const installedCache = new Map<string, boolean>();
+
 export class ClaudeProviderAuth implements IProviderAuth {
   /**
    * Checks whether the Claude Code CLI is available on this host.
    */
   private checkInstalled(): boolean {
     const cliPath = resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH);
+    const cached = installedCache.get(cliPath);
+    if (cached !== undefined) {
+      return cached;
+    }
     try {
       // spawn.sync 找不到命令（ENOENT）或超时不会抛错，只体现在返回值的 error 上
-      return !spawn.sync(cliPath, ['--version'], { stdio: 'ignore', timeout: 5000 }).error;
+      const installed = !spawn.sync(cliPath, ['--version'], { stdio: 'ignore', timeout: 5000 }).error;
+      if (installed) {
+        installedCache.set(cliPath, true);
+      }
+      return installed;
     } catch {
       return false;
     }

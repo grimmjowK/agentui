@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { CodexAppServer } from './modules/codex-runtime/index.js';
 import { codexOwnership } from './modules/codex-runtime/index.js';
 import { codexApprovals } from './modules/codex-runtime/index.js';
+import { terminateShellSessionsBySessionId } from './modules/websocket/services/shell-websocket.service.js';
 import { getCodexRuntimeInfo } from './shared/codex-cli-path.js';
 import { createNormalizedMessage } from './shared/utils.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
@@ -39,6 +40,8 @@ export async function queryCodex(command, options = {}, writer) {
   const completion = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
   // Failure can arrive during initialization, before completion is awaited.
   void completion.catch(() => {});
+  let resolveReleased;
+  state.released = new Promise((resolve) => { resolveReleased = resolve; });
   let startupTimer;
   let interruptTimer;
   let lease;
@@ -56,6 +59,9 @@ export async function queryCodex(command, options = {}, writer) {
       throw new Error(`Codex ${runtime.version} at ${runtime.executablePath} 的版本号无法解析，无法确认 app-server 协议兼容性。见 docs/codex-runtime-protocol.md；不使用 exec 回退。`);
     }
     const cwd = options.cwd || options.projectPath || process.cwd();
+    if (threadId) {
+      await terminateShellSessionsBySessionId(threadId);
+    }
     lease = codexOwnership.acquire({ configRoot: runtime.configRoot, threadId, projectPath: cwd, userId: state.userId, owner: 'chat' });
     const rpc = new CodexAppServer(runtime.executablePath, cwd, runtime.configRoot);
     codexOwnership.attach(lease, rpc.child.pid);
@@ -88,19 +94,52 @@ export async function queryCodex(command, options = {}, writer) {
         const item = params.item;
         if (!item) return;
         items.set(item.id, item);
-        if (item.type === 'agentMessage' && method === 'item/completed') {
+        const isCompleted = method === 'item/completed';
+        if (item.type === 'agentMessage' && isCompleted) {
           if (streamed.has(item.id)) emit({ kind: 'stream_end' });
           emit({ id: item.id, kind: 'text', role: 'assistant', content: item.text || '' });
         } else if (item.type === 'commandExecution') {
-          emit({ id: item.id, kind: 'tool_use', toolId: item.id, toolName: 'Bash',
+          const isError = isCompleted && (item.status === 'failed' || item.status === 'declined' || (typeof item.exitCode === 'number' && item.exitCode !== 0));
+          emit({
+            id: item.id, kind: 'tool_use', toolId: item.id, toolName: 'Bash',
             toolInput: { command: item.command, cwd: item.cwd }, output: item.aggregatedOutput,
-            exitCode: item.exitCode, status: item.status });
+            exitCode: item.exitCode, status: item.status,
+            ...(isCompleted ? {
+              toolResult: {
+                content: item.aggregatedOutput || (isError ? `Exit code ${item.exitCode ?? 1}` : ''),
+                isError,
+              },
+            } : {}),
+          });
         } else if (item.type === 'fileChange') {
-          emit({ id: item.id, kind: 'tool_use', toolId: item.id, toolName: 'FileChanges',
-            toolInput: item.changes, status: item.status });
+          const isError = isCompleted && (item.status === 'failed' || item.status === 'declined');
+          emit({
+            id: item.id, kind: 'tool_use', toolId: item.id, toolName: 'FileChanges',
+            toolInput: item.changes, status: item.status,
+            ...(isCompleted ? {
+              toolResult: {
+                content: isError ? `File changes ${item.status}` : 'Applied file changes',
+                isError,
+              },
+            } : {}),
+          });
         } else if (item.type === 'mcpToolCall') {
-          emit({ id: item.id, kind: 'tool_use', toolId: item.id, toolName: `${item.server}/${item.tool}`,
-            toolInput: item.arguments, output: item.result, status: item.status, isError: Boolean(item.error) });
+          const isError = Boolean(item.error) || (isCompleted && item.status === 'failed');
+          const resultContent = item.error
+            ? (typeof item.error === 'string' ? item.error : JSON.stringify(item.error))
+            : item.result !== undefined
+              ? (typeof item.result === 'string' ? item.result : JSON.stringify(item.result))
+              : '';
+          emit({
+            id: item.id, kind: 'tool_use', toolId: item.id, toolName: `${item.server}/${item.tool}`,
+            toolInput: item.arguments, output: item.result, status: item.status, isError,
+            ...(isCompleted ? {
+              toolResult: {
+                content: resultContent,
+                isError,
+              },
+            } : {}),
+          });
         }
       }
       if (method === 'thread/tokenUsage/updated') {
@@ -174,6 +213,7 @@ export async function queryCodex(command, options = {}, writer) {
     if (activeCodexSessions.get(threadId) === state) activeCodexSessions.delete(threadId);
     pendingRuns.delete(state);
     if (lease) codexOwnership.release(lease);
+    resolveReleased?.();
     if (terminalMessage) emit(terminalMessage);
   }
 }
@@ -200,6 +240,19 @@ export function abortCodexSession(sessionId, userId) {
     void state.rpc.request('turn/interrupt', { threadId: sessionId, turnId: state.turnId }, 5000)
       .catch(() => state.rpc.close());
   } else void state.rpc?.close();
+  return true;
+}
+
+export async function stopCodexSessionAndWait(sessionId, userId) {
+  const state = activeCodexSessions.get(sessionId);
+  if (!state) return false;
+  if (userId !== undefined && userId !== null && String(state.userId) !== String(userId)) return false;
+  if (!state.finished) {
+    state.interrupted = true;
+    codexApprovals.clear(state.instanceId);
+    void state.rpc?.close();
+  }
+  await state.released;
   return true;
 }
 

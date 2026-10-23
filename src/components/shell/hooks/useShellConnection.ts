@@ -21,6 +21,7 @@ type UseShellConnectionOptions = {
   onProcessCompleteRef: MutableRefObject<((exitCode: number) => void) | null | undefined>;
   isInitialized: boolean;
   autoConnect: boolean;
+  isActive?: boolean;
   closeSocket: () => void;
   clearTerminalScreen: () => void;
   setAuthUrl: (nextAuthUrl: string) => void;
@@ -30,9 +31,12 @@ type UseShellConnectionOptions = {
 type UseShellConnectionResult = {
   isConnected: boolean;
   isConnecting: boolean;
+  startupError: string | null;
   closeSocket: () => void;
   connectToShell: () => void;
   disconnectFromShell: () => void;
+  releaseForBackground: () => void;
+  reconnectForSessionChange: () => void;
 };
 
 export function useShellConnection({
@@ -46,6 +50,7 @@ export function useShellConnection({
   onProcessCompleteRef,
   isInitialized,
   autoConnect,
+  isActive = true,
   closeSocket,
   clearTerminalScreen,
   setAuthUrl,
@@ -53,8 +58,10 @@ export function useShellConnection({
 }: UseShellConnectionOptions): UseShellConnectionResult {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
   const connectingRef = useRef(false);
   const disconnectRequested = useRef(false);
+  const pendingReconnect = useRef(false);
   const terminalStopped = useRef(false);
 
   const handleProcessCompletion = useCallback(
@@ -98,19 +105,29 @@ export function useShellConnection({
       if (message.type === 'session_released') {
         if (message.provider === 'codex' && message.sessionId) window.dispatchEvent(new CustomEvent('codex-session-released', { detail: { sessionId: message.sessionId } }));
         if (message.provider === 'codex' || disconnectRequested.current) {
-          terminalStopped.current = true;
+          const shouldReconnect = pendingReconnect.current;
+          pendingReconnect.current = false;
+          if (shouldReconnect) {
+            terminalStopped.current = false;
+          }
           disconnectRequested.current = false;
           setIsConnected(false);
           setIsConnecting(false);
           connectingRef.current = false;
           closeSocket();
+          if (shouldReconnect) {
+            clearTerminalScreen();
+          }
         }
         return;
       }
       if (message.type === 'error') {
-        terminalRef.current?.writeln(`Error: ${String(message.message)}`);
+        const errorText = String(message.message ?? '');
+        terminalRef.current?.writeln(`Error: ${errorText}`);
         if (message.startupFailed) {
+          pendingReconnect.current = false;
           terminalStopped.current = true;
+          setStartupError(errorText);
           setIsConnected(false);
           setIsConnecting(false);
           connectingRef.current = false;
@@ -133,15 +150,11 @@ export function useShellConnection({
         }
       }
     },
-    [closeSocket, handleProcessCompletion, onOutputRef, setAuthUrl, terminalRef],
+    [clearTerminalScreen, closeSocket, handleProcessCompletion, onOutputRef, setAuthUrl, terminalRef],
   );
 
   const connectWebSocket = useCallback(
-    (isConnectionLocked = false) => {
-      if ((connectingRef.current && !isConnectionLocked) || isConnecting || isConnected) {
-        return;
-      }
-
+    () => {
       try {
         const wsUrl = getShellWebSocketUrl();
         if (!wsUrl) {
@@ -151,17 +164,24 @@ export function useShellConnection({
         }
 
         connectingRef.current = true;
+        setIsConnecting(true);
 
         const socket = new WebSocket(wsUrl);
         wsRef.current = socket;
 
         socket.onopen = () => {
+          if (wsRef.current && wsRef.current !== socket) {
+            return;
+          }
           setIsConnected(true);
           setIsConnecting(false);
           connectingRef.current = false;
           setAuthUrl('');
 
           window.setTimeout(() => {
+            if (wsRef.current && wsRef.current !== socket) {
+              return;
+            }
             const currentTerminal = terminalRef.current;
             const currentFitAddon = fitAddonRef.current;
             const currentProject = selectedProjectRef.current;
@@ -186,11 +206,23 @@ export function useShellConnection({
         };
 
         socket.onmessage = (event) => {
+          if (wsRef.current && wsRef.current !== socket) {
+            return;
+          }
           const rawPayload = typeof event.data === 'string' ? event.data : String(event.data ?? '');
           handleSocketMessage(rawPayload);
         };
 
         socket.onclose = () => {
+          if (wsRef.current && wsRef.current !== socket) {
+            return;
+          }
+          const shouldReconnect = pendingReconnect.current;
+          if (shouldReconnect) {
+            pendingReconnect.current = false;
+            disconnectRequested.current = false;
+            terminalStopped.current = false;
+          }
           setIsConnected(false);
           setIsConnecting(false);
           connectingRef.current = false;
@@ -198,6 +230,9 @@ export function useShellConnection({
         };
 
         socket.onerror = () => {
+          if (wsRef.current && wsRef.current !== socket) {
+            return;
+          }
           setIsConnected(false);
           setIsConnecting(false);
           connectingRef.current = false;
@@ -213,8 +248,6 @@ export function useShellConnection({
       fitAddonRef,
       handleSocketMessage,
       initialCommandRef,
-      isConnected,
-      isConnecting,
       isPlainShellRef,
       selectedProjectRef,
       selectedSessionRef,
@@ -225,23 +258,85 @@ export function useShellConnection({
   );
 
   const connectToShell = useCallback(() => {
-    if (!isInitialized || isConnected || isConnecting || connectingRef.current) {
+    if (!isInitialized) {
+      return;
+    }
+    const activeSocket = wsRef.current;
+    if (
+      !disconnectRequested.current &&
+      activeSocket &&
+      (activeSocket.readyState === WebSocket.OPEN || activeSocket.readyState === WebSocket.CONNECTING)
+    ) {
       return;
     }
 
+    if (activeSocket) {
+      closeSocket();
+    }
+    disconnectRequested.current = false;
     terminalStopped.current = false;
-    connectingRef.current = true;
-    setIsConnecting(true);
-    connectWebSocket(true);
-  }, [connectWebSocket, isConnected, isConnecting, isInitialized]);
+    pendingReconnect.current = false;
+    setStartupError(null);
+    connectWebSocket();
+  }, [closeSocket, connectWebSocket, isInitialized, wsRef]);
+
+  const notifyCodexSessionReleased = useCallback(() => {
+    const currentSession = selectedSessionRef.current;
+    if (!currentSession?.id) {
+      return;
+    }
+    const provider = currentSession.__provider || localStorage.getItem('selected-provider') || 'claude';
+    if (provider === 'codex') {
+      const sessionId = currentSession.id;
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('codex-session-released', { detail: { sessionId } }));
+      }, 300);
+    }
+  }, [selectedSessionRef]);
 
   const disconnectFromShell = useCallback(() => {
-    sendSocketMessage(wsRef.current, { type: 'terminate' });
-    const provider = selectedSessionRef.current?.__provider || localStorage.getItem('selected-provider');
-    if (provider === 'codex' && !isPlainShellRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
-      disconnectRequested.current = true;
-      terminalRef.current?.writeln('Waiting for Codex to exit before releasing this session…');
-      return;
+    pendingReconnect.current = false;
+    terminalStopped.current = true;
+    if (wsRef.current) {
+      sendSocketMessage(wsRef.current, { type: 'terminate' });
+      notifyCodexSessionReleased();
+    }
+    closeSocket();
+    clearTerminalScreen();
+    setIsConnected(false);
+    setIsConnecting(false);
+    connectingRef.current = false;
+    disconnectRequested.current = false;
+    setAuthUrl('');
+  }, [clearTerminalScreen, closeSocket, notifyCodexSessionReleased, setAuthUrl, wsRef]);
+
+  /**
+   * 离开「终端」切回「聊天」Tab 时自动释放后台终端进程，但不标记为手动停止（切回终端 Tab 时仍自动重连）。
+   */
+  const releaseForBackground = useCallback(() => {
+    pendingReconnect.current = false;
+    terminalStopped.current = false;
+    if (wsRef.current) {
+      sendSocketMessage(wsRef.current, { type: 'terminate' });
+      notifyCodexSessionReleased();
+    }
+    closeSocket();
+    clearTerminalScreen();
+    setIsConnected(false);
+    setIsConnecting(false);
+    connectingRef.current = false;
+    disconnectRequested.current = false;
+    setAuthUrl('');
+  }, [clearTerminalScreen, closeSocket, notifyCodexSessionReleased, setAuthUrl, wsRef]);
+
+  const reconnectForSessionChange = useCallback(() => {
+    setStartupError(null);
+    terminalStopped.current = false;
+    pendingReconnect.current = false;
+    disconnectRequested.current = false;
+    const activeSocket = wsRef.current;
+    if (activeSocket && (activeSocket.readyState === WebSocket.OPEN || activeSocket.readyState === WebSocket.CONNECTING)) {
+      sendSocketMessage(activeSocket, { type: 'terminate' });
     }
     closeSocket();
     clearTerminalScreen();
@@ -249,21 +344,24 @@ export function useShellConnection({
     setIsConnecting(false);
     connectingRef.current = false;
     setAuthUrl('');
-  }, [clearTerminalScreen, closeSocket, isPlainShellRef, selectedSessionRef, setAuthUrl, terminalRef, wsRef]);
+  }, [clearTerminalScreen, closeSocket, setAuthUrl, wsRef]);
 
   useEffect(() => {
-    if (terminalStopped.current || !autoConnect || !isInitialized || isConnecting || isConnected) {
+    if (!isActive || terminalStopped.current || !autoConnect || !isInitialized || isConnecting || isConnected) {
       return;
     }
 
     connectToShell();
-  }, [autoConnect, connectToShell, isConnected, isConnecting, isInitialized]);
+  }, [autoConnect, connectToShell, isActive, isConnected, isConnecting, isInitialized]);
 
   return {
     isConnected,
     isConnecting,
+    startupError,
     closeSocket,
     connectToShell,
     disconnectFromShell,
+    releaseForBackground,
+    reconnectForSessionChange,
   };
 }

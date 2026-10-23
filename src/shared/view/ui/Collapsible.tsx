@@ -79,6 +79,13 @@ CollapsibleTrigger.displayName = 'CollapsibleTrigger';
 const CollapsibleContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, children, ...props }, ref) => {
     const { open } = useCollapsible();
+    const [hasOpened, setHasOpened] = React.useState(open);
+
+    React.useEffect(() => {
+      if (open) {
+        setHasOpened(true);
+      }
+    }, [open]);
 
     return (
       <div
@@ -92,7 +99,7 @@ const CollapsibleContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes
         {...props}
       >
         <div className="overflow-hidden">
-          {children}
+          {(open || hasOpened) ? children : null}
         </div>
       </div>
     );

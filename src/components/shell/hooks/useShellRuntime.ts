@@ -13,6 +13,7 @@ export function useShellRuntime({
   isPlainShell,
   minimal,
   autoConnect,
+  isActive = true,
   isRestarting,
   onProcessComplete,
   onOutputRef,
@@ -105,7 +106,7 @@ export function useShellRuntime({
     closeSocket,
   });
 
-  const { isConnected, isConnecting, connectToShell, disconnectFromShell } = useShellConnection({
+  const { isConnected, isConnecting, startupError, connectToShell, disconnectFromShell, releaseForBackground, reconnectForSessionChange } = useShellConnection({
     wsRef,
     terminalRef,
     fitAddonRef,
@@ -116,11 +117,22 @@ export function useShellRuntime({
     onProcessCompleteRef,
     isInitialized,
     autoConnect,
+    isActive,
     closeSocket,
     clearTerminalScreen,
     setAuthUrl: setCurrentAuthUrl,
     onOutputRef,
   });
+
+  useEffect(() => {
+    if (isActive || !isConnected || isPlainShell) {
+      return;
+    }
+    const provider = selectedSession?.__provider || localStorage.getItem('selected-provider');
+    if (provider === 'codex') {
+      releaseForBackground();
+    }
+  }, [isActive, isConnected, isPlainShell, releaseForBackground, selectedSession?.__provider]);
 
   useEffect(() => {
     if (!isRestarting) {
@@ -143,19 +155,21 @@ export function useShellRuntime({
   useEffect(() => {
     const currentSessionId = selectedSession?.id ?? null;
     if (lastSessionIdRef.current !== currentSessionId && isInitialized) {
-      disconnectFromShell();
+      reconnectForSessionChange();
     }
 
     lastSessionIdRef.current = currentSessionId;
-  }, [disconnectFromShell, isInitialized, selectedSession?.id]);
+  }, [isInitialized, reconnectForSessionChange, selectedSession?.id]);
 
   return {
     terminalContainerRef,
     terminalRef,
+    fitAddonRef,
     wsRef,
     isConnected,
     isInitialized,
     isConnecting,
+    startupError,
     authUrl,
     authUrlVersion,
     connectToShell,

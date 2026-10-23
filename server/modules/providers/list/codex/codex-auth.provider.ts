@@ -15,6 +15,8 @@ type CodexCredentialsStatus = {
   error?: string;
 };
 
+const installedCache = new Map<string, boolean>();
+
 export class CodexProviderAuth implements IProviderAuth {
   /**
    * Checks whether Codex is available to the server runtime.
@@ -22,9 +24,17 @@ export class CodexProviderAuth implements IProviderAuth {
   private checkInstalled(): boolean {
     try {
       const cliPath = resolveCodexExecutablePath(process.env.CODEX_CLI_PATH);
+      const cached = installedCache.get(cliPath);
+      if (cached !== undefined) {
+        return cached;
+      }
       // spawn.sync reports missing commands and timeouts through its result.
       const result = spawn.sync(cliPath, ['--version'], { stdio: 'ignore', timeout: 5000 });
-      return !result.error && result.status === 0;
+      const installed = !result.error && result.status === 0;
+      if (installed) {
+        installedCache.set(cliPath, true);
+      }
+      return installed;
     } catch {
       return false;
     }

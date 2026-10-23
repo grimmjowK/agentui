@@ -56,20 +56,39 @@ export default function UserMessageIndex({
     const container = scrollContainerRef.current;
     if (!container) return;
 
+    let rafId: number | null = null;
     const updateBarStyle = () => {
-      const rect = container.getBoundingClientRect();
-      setBarStyle({ position: 'fixed', top: rect.top, left: rect.left, height: rect.height, zIndex: 10 });
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        const rect = container.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+          setBarStyle((prev) => (prev === null ? null : null));
+          setHovered((prev) => (prev === null ? null : null));
+          return;
+        }
+        setBarStyle((prev) => {
+          if (
+            prev &&
+            prev.top === rect.top &&
+            prev.left === rect.left &&
+            prev.height === rect.height
+          ) {
+            return prev;
+          }
+          return { position: 'fixed', top: rect.top, left: rect.left, height: rect.height, zIndex: 10 };
+        });
+      });
     };
 
     updateBarStyle();
     const observer = new ResizeObserver(updateBarStyle);
     observer.observe(container);
-    window.addEventListener('scroll', updateBarStyle, true);
     window.addEventListener('resize', updateBarStyle);
 
     return () => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
       observer.disconnect();
-      window.removeEventListener('scroll', updateBarStyle, true);
       window.removeEventListener('resize', updateBarStyle);
     };
   }, [scrollContainerRef]);

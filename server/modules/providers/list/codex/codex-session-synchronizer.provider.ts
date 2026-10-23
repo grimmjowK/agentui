@@ -52,12 +52,16 @@ export function parseCodexSessionMetadata(rawData: unknown): ParsedSession | nul
 export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly provider = 'codex' as const;
   private readonly codexHome = resolveCodexConfigRoot();
+  private subagentsCleaned = false;
 
   /**
    * Scans ~/.codex/sessions and upserts discovered sessions into DB.
    */
   async synchronize(since?: Date): Promise<number> {
-    await this.removeIndexedSubagents();
+    if (!since || !this.subagentsCleaned) {
+      await this.removeIndexedSubagents();
+      this.subagentsCleaned = true;
+    }
     const nameMap = await buildLookupMap(path.join(this.codexHome, 'session_index.jsonl'), 'id', 'thread_name');
     const files = await findFilesRecursivelyCreatedAfter(
       path.join(this.codexHome, 'sessions'),

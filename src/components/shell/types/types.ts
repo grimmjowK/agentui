@@ -47,6 +47,7 @@ export type UseShellRuntimeOptions = {
   isPlainShell: boolean;
   minimal: boolean;
   autoConnect: boolean;
+  isActive?: boolean;
   isRestarting: boolean;
   onProcessComplete?: ((exitCode: number) => void) | null;
   onOutputRef?: MutableRefObject<(() => void) | null>;
@@ -67,10 +68,12 @@ export type ShellSharedRefs = {
 export type UseShellRuntimeResult = {
   terminalContainerRef: RefObject<HTMLDivElement>;
   terminalRef: MutableRefObject<Terminal | null>;
+  fitAddonRef: MutableRefObject<FitAddon | null>;
   wsRef: MutableRefObject<WebSocket | null>;
   isConnected: boolean;
   isInitialized: boolean;
   isConnecting: boolean;
+  startupError: string | null;
   authUrl: string;
   authUrlVersion: number;
   connectToShell: () => void;

@@ -51,6 +51,7 @@ const FALLBACKS: Record<LLMProvider, { OPTIONS: ProviderModel[] }> = {
 };
 
 const cache = new Map<string, { expiresAt: number; value: ProviderModelList }>();
+const inFlight = new Map<string, Promise<ProviderModelList>>();
 
 const withTimeout = async <T>(task: Promise<T>, label: string): Promise<T> => {
   let timer: NodeJS.Timeout | undefined;
@@ -146,22 +147,40 @@ export const providerModelsService = {
       return fallbackFor(provider);
     }
 
-    let result: ProviderModelList;
-    try {
-      const models = await withTimeout(
-        provider === 'claude' ? listClaudeModels() : listCodexModels(),
-        provider,
-      );
-      result = models.length > 0
-        ? { provider, source: 'live', models }
-        : fallbackFor(provider, '实时清单为空');
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      console.warn(`[models] ${provider} 实时模型清单获取失败，回落到内置清单:`, reason);
-      result = fallbackFor(provider, reason);
+    if (!refresh) {
+      const existingRequest = inFlight.get(cacheKey);
+      if (existingRequest) {
+        return existingRequest;
+      }
     }
 
-    cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, value: result });
-    return result;
+    const requestPromise = (async (): Promise<ProviderModelList> => {
+      let result: ProviderModelList;
+      try {
+        const models = await withTimeout(
+          provider === 'claude' ? listClaudeModels() : listCodexModels(),
+          provider,
+        );
+        result = models.length > 0
+          ? { provider, source: 'live', models }
+          : fallbackFor(provider, '实时清单为空');
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn(`[models] ${provider} 实时模型清单获取失败，回落到内置清单:`, reason);
+        result = fallbackFor(provider, reason);
+      }
+
+      cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, value: result });
+      return result;
+    })();
+
+    inFlight.set(cacheKey, requestPromise);
+    try {
+      return await requestPromise;
+    } finally {
+      if (inFlight.get(cacheKey) === requestPromise) {
+        inFlight.delete(cacheKey);
+      }
+    }
   },
 };
