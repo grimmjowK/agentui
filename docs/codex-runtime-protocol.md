@@ -72,11 +72,14 @@ uses danger-full-access/never only after explicit selection. App approval
 cannot override host restrictions. Unknown approval methods fail closed.
 
 Each managed thread has a claim under `CODEX_HOME/agentui-runs`, independent
-of UI user and project aliases. Disconnecting a WebSocket does not release it.
-Chat releases only after app-server exit; terminal releases on PTY exit. A
-second tab cannot take over a connected PTY. Wait for an active chat to finish
-or stop it; explicitly disconnect the terminal before sending in chat. Terminal
-release signals a history refresh without clearing the chat draft.
+of UI user and project aliases. Chat releases after app-server exit; terminal
+releases on PTY exit (or when the Codex terminal WebSocket disconnects / tab
+switches to background). A second tab cannot take over an actively connected PTY.
+Switching from chat to terminal automatically stops an active chat run and waits
+for ownership release before starting the terminal; sending in chat automatically
+terminates any active terminal PTY for that thread and waits for release before
+starting the chat turn. Terminal release signals a history refresh without
+clearing the chat draft.
 
 Unclean server restarts intentionally retain the disk claim. The error gives
 the exact claim directory. Inspect its owner.json and verify the recorded

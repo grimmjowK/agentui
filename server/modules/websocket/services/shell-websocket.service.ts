@@ -334,11 +334,14 @@ export function handleShellConnection(
           }
         }
 
-        const existingSession = isLoginCommand ? null : ptySessionsMap.get(ptySessionKey);
+        const candidateSession = isLoginCommand ? null : ptySessionsMap.get(ptySessionKey);
+        if (candidateSession?.ws && candidateSession.ws !== ws && candidateSession.ws.readyState === WebSocket.OPEN) {
+          throw new Error('This terminal is connected in another tab. Disconnect that tab first.');
+        }
+        // Codex 会话在 WS 断开时会立即销毁 PTY；仍在 ptySessionsMap 中但已无活跃 WS 的条目是正在退出的旧进程，
+        // 不能复用，需走下方 terminateShellSessionsBySessionId 等待其彻底退出并释放锁后再拉起新进程。
+        const existingSession = runtime ? null : candidateSession;
         if (existingSession) {
-          if (existingSession.ws && existingSession.ws !== ws && existingSession.ws.readyState === WebSocket.OPEN) {
-            throw new Error('This terminal is connected in another tab. Disconnect that tab first.');
-          }
           shellProcess = existingSession.pty;
           if (existingSession.timeoutId) {
             clearTimeout(existingSession.timeoutId);
@@ -391,12 +394,13 @@ export function handleShellConnection(
 
         let lease: ReturnType<typeof codexOwnership.acquire> | undefined;
         if (runtime) {
-          if (sessionId) {
-            if (dependencies.isChatSessionActive(sessionId, 'codex') && dependencies.stopChatSession) {
-              await dependencies.stopChatSession(sessionId, 'codex', userId);
+          const targetSessionId = sessionId || candidateSession?.sessionId || null;
+          if (targetSessionId) {
+            if (dependencies.isChatSessionActive(targetSessionId, 'codex') && dependencies.stopChatSession) {
+              await dependencies.stopChatSession(targetSessionId, 'codex', userId);
             }
-            if (hasLiveShellSession(sessionId)) {
-              await terminateShellSessionsBySessionId(sessionId);
+            if (hasLiveShellSession(targetSessionId)) {
+              await terminateShellSessionsBySessionId(targetSessionId);
             }
           }
           lease = codexOwnership.acquire({ configRoot: runtime.configRoot, threadId: sessionId,
