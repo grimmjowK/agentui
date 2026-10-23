@@ -66,8 +66,11 @@ export class CodexOwnership {
       const record = JSON.parse(fs.readFileSync(path.join(directory, 'owner.json'), 'utf8'));
       const serverGone = identityVerdict(record.serverPid, record.serverStartedAt) === 'confirmed-exited';
       const childGone = identityVerdict(record.pid, record.startedAt) === 'confirmed-exited';
-      if (serverGone && childGone) return { busy: false, owner: null };
-      if (!serverGone && record.pid && childGone) return { busy: false, owner: null };
+      const sameServerOrphan = record.serverPid === process.pid
+        && (!record.token || !this.leases.has(record.token))
+        && Boolean(record.pid)
+        && childGone;
+      if ((serverGone && childGone) || sameServerOrphan) return { busy: false, owner: null };
       return { busy: true, owner: record.owner === 'terminal' ? 'terminal' : 'chat' };
     } catch { return { busy: true, owner: 'unknown' }; }
   }
@@ -96,8 +99,11 @@ export class CodexOwnership {
       try { existing = JSON.parse(fs.readFileSync(path.join(lease.directory, 'owner.json'), 'utf8')); } catch { /* Incomplete claim remains locked. */ }
       const serverGone = identityVerdict(existing.serverPid, existing.serverStartedAt) === 'confirmed-exited';
       const childGone = identityVerdict(existing.pid, existing.startedAt) === 'confirmed-exited';
-      const sameServerDeadChild = existing.serverPid === process.pid && Boolean(existing.pid) && childGone;
-      if ((serverGone && childGone) || sameServerDeadChild) {
+      const sameServerOrphan = existing.serverPid === process.pid
+        && (!existing.token || !this.leases.has(existing.token))
+        && Boolean(existing.pid)
+        && childGone;
+      if ((serverGone && childGone) || sameServerOrphan) {
         // Serialize recovery, then re-check the generation before moving it.
         fs.mkdirSync(path.join(lease.directory, 'recovering'));
         const current = JSON.parse(fs.readFileSync(path.join(lease.directory, 'owner.json'), 'utf8'));

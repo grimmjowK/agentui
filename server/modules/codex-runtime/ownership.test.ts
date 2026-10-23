@@ -22,6 +22,11 @@ test('claims exclude chat/terminal and users, survive restart, and release only 
   const pending = manager.acquire({ ...owner, threadId: null });
   manager.bind(pending, 'thread');
   assert.throws(() => manager.acquire(owner), /owned by chat/);
+  // 终端 preflight 过渡期：临时 probe 子进程已退出（PID 不存在），但 lease 仍在内存持有、尚未切换 attach 到正式 PTY，
+  // 此时 status() 仍应报告 busy，并发 acquire() 也不得误判为孤儿锁抢占。
+  manager.attach(pending, 2 ** 22);
+  assert.deepEqual(manager.status(configRoot, 'thread'), { busy: true, owner: 'chat' });
+  assert.throws(() => manager.acquire(owner), /owned by chat/);
   manager.release(pending);
 });
 
