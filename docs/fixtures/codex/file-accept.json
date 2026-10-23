@@ -1,0 +1,94 @@
+[
+  {
+    "method": "item/started",
+    "params": {
+      "item": {
+        "type": "fileChange",
+        "id": "exec-redacted-thread-or-turn",
+        "changes": [
+          {
+            "path": "/tmp/probe/probe.txt",
+            "kind": {
+              "type": "add"
+            },
+            "diff": "APPROVAL_OK\n"
+          }
+        ],
+        "status": "inProgress"
+      },
+      "threadId": "redacted-thread-or-turn",
+      "turnId": "redacted-thread-or-turn",
+      "startedAtMs": 1792479426510
+    },
+    "emittedAtMs": 1792479426510
+  },
+  {
+    "method": "item/fileChange/requestApproval",
+    "id": 0,
+    "params": {
+      "threadId": "redacted-thread-or-turn",
+      "turnId": "redacted-thread-or-turn",
+      "itemId": "exec-redacted-thread-or-turn",
+      "startedAtMs": 1792479426510,
+      "reason": null,
+      "grantRoot": null
+    }
+  },
+  {
+    "direction": "client-to-server",
+    "id": 0,
+    "result": {
+      "decision": "accept"
+    }
+  },
+  {
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "type": "fileChange",
+        "id": "exec-redacted-thread-or-turn",
+        "changes": [
+          {
+            "path": "/tmp/probe/probe.txt",
+            "kind": {
+              "type": "add"
+            },
+            "diff": "APPROVAL_OK\n"
+          }
+        ],
+        "status": "completed"
+      },
+      "threadId": "redacted-thread-or-turn",
+      "turnId": "redacted-thread-or-turn",
+      "completedAtMs": 1792479426564
+    },
+    "emittedAtMs": 1792479426564
+  },
+  {
+    "method": "turn/completed",
+    "params": {
+      "threadId": "redacted-thread-or-turn",
+      "turn": {
+        "id": "redacted-thread-or-turn",
+        "items": [
+          {
+            "type": "agentMessage",
+            "id": "msg_0fae5d3220f0daa3016ad710c920a88199bde406d53a68124d",
+            "text": "DONE",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          }
+        ],
+        "itemsView": "summary",
+        "status": "completed",
+        "error": null,
+        "startedAt": 1792479393,
+        "completedAt": 1792479437,
+        "durationMs": 43523
+      }
+    },
+    "emittedAtMs": 1792479437370
+  }
+]

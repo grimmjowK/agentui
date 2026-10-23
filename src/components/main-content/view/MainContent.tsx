@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import ChatInterface from '../../chat/view/ChatInterface';
 import FileTree from '../../file-tree/view/FileTree';
@@ -88,6 +88,14 @@ function MainContent({
     }
   }, [selectedProject, currentProject?.projectId, setCurrentProject]);
 
+  const [hasVisitedShell, setHasVisitedShell] = useState(activeTab === 'shell');
+
+  useEffect(() => {
+    if (activeTab === 'shell') {
+      setHasVisitedShell(true);
+    }
+  }, [activeTab]);
+
   useEffect(() => {
     if (!shouldShowTasksTab && activeTab === 'tasks') {
       setActiveTab('chat');
@@ -159,8 +167,8 @@ function MainContent({
             </div>
           )}
 
-          {activeTab === 'shell' && (
-            <div className="h-full w-full overflow-hidden">
+          {(activeTab === 'shell' || hasVisitedShell) && (
+            <div className={`h-full w-full overflow-hidden ${activeTab === 'shell' ? 'block' : 'hidden'}`}>
               <StandaloneShell
                 project={selectedProject}
                 session={selectedSession}

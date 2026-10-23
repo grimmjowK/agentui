@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { shutdownShellSessions } from './modules/websocket/services/shell-websocket.service.js';
 // Load environment variables before other imports execute
 import './load-env.js';
 import fs, { promises as fsPromises } from 'fs';
@@ -36,6 +37,10 @@ import {
 import {
     queryCodex,
     abortCodexSession,
+    stopCodexSessionAndWait,
+    shutdownCodexSessions,
+    resolveCodexApproval,
+    reconnectCodexSession,
     isCodexSessionActive,
     getActiveCodexSessions,
 } from './openai-codex.js';
@@ -114,6 +119,8 @@ const wss = createWebSocketServer(server, {
         queryClaudeSDK,
         spawnCursor,
         queryCodex,
+        resolveCodexApproval,
+        reconnectCodexSession,
         spawnGemini,
         abortClaudeSDKSession,
         abortCursorSession,
@@ -143,6 +150,12 @@ const wss = createWebSocketServer(server, {
             if (provider === 'codex') return isCodexSessionActive(sessionId);
             if (provider === 'gemini') return isGeminiSessionActive(sessionId);
             return isClaudeSDKSessionActive(sessionId);
+        },
+        stopChatSession: async (sessionId, provider, userId) => {
+            if (provider === 'codex') {
+                return stopCodexSessionAndWait(sessionId, userId);
+            }
+            return false;
         },
     },
     getPluginPort,
@@ -1446,6 +1459,8 @@ async function startServer() {
         await closeSessionsWatcher();
         // Clean up plugin processes on shutdown
         const shutdownPlugins = async () => {
+            await shutdownCodexSessions();
+  await shutdownShellSessions();
             await stopAllPlugins();
             process.exit(0);
         };

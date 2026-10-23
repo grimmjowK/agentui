@@ -138,7 +138,11 @@ dev-debug.log
 
 # Git worktrees
 .worktrees/
-/docs/
+/docs/*
+!/docs/codex-runtime-protocol.md
+!/docs/fixtures/
+/docs/fixtures/*
+!/docs/fixtures/codex/
 /.venv/
 __pycache__/
 *.pyc

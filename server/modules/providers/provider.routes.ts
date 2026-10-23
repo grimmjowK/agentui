@@ -2,6 +2,8 @@ import express, { type Request, type Response } from 'express';
 
 import multer from 'multer';
 
+import { codexOwnership } from '@/modules/codex-runtime/index.js';
+import { getCodexRuntimeInfo } from '@/shared/codex-cli-path.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerModelsService } from '@/modules/providers/services/models.service.js';
@@ -12,6 +14,12 @@ import type { LLMProvider, McpScope, McpTransport, UpsertProviderMcpServerInput 
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
 const router = express.Router();
+
+router.get('/codex/runtime', asyncHandler(async (req: Request, res: Response) => {
+  const runtime = getCodexRuntimeInfo();
+  const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : null;
+  res.json({ ...runtime, ownership: sessionId ? codexOwnership.status(runtime.configRoot, sessionId) : { busy: false } });
+}));
 
 const readPathParam = (value: unknown, name: string): string => {
   if (typeof value === 'string') {

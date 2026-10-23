@@ -5,6 +5,14 @@ import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
+import {
+  buildCodexChildEnv,
+  CodexAppServer,
+  codexTerminalFailure,
+  codexOwnership,
+  prepareCodexTerminalThread,
+} from '@/modules/codex-runtime/index.js';
+import { getCodexRuntimeInfo, resolveCodexExecutablePath } from '@/shared/codex-cli-path.js';
 import { parseIncomingJsonObject } from '@/shared/utils.js';
 
 type ShellIncomingMessage = {
@@ -32,6 +40,7 @@ type PtySessionEntry = {
    * 进程内存里的历史已经落后。见 `markShellSessionStale`。
    */
   stale: boolean;
+  released?: Promise<void>;
 };
 
 const ptySessionsMap = new Map<string, PtySessionEntry>();
@@ -92,9 +101,56 @@ export function markShellSessionStale(sessionId: string): void {
   }
 }
 
+/**
+ * 终止指定 sessionId 的所有存活终端 PTY 进程并等待其完全退出（用于 Codex 聊天与终端无缝切换）。
+ */
+export async function terminateShellSessionsBySessionId(sessionId: string): Promise<boolean> {
+  if (!sessionId) {
+    return false;
+  }
+  const matchingEntries: PtySessionEntry[] = [];
+  for (const entry of ptySessionsMap.values()) {
+    if (entry.sessionId === sessionId) {
+      matchingEntries.push(entry);
+    }
+  }
+  if (matchingEntries.length === 0) {
+    return false;
+  }
+  await Promise.all(
+    matchingEntries.map(async (session) => {
+      if (session.timeoutId) {
+        clearTimeout(session.timeoutId);
+      }
+      try {
+        session.pty.kill();
+      } catch { /* already exited */ }
+      const forceKillTimer = setTimeout(() => {
+        try {
+          session.pty.kill('SIGTERM');
+        } catch { /* already exited */ }
+      }, 200);
+      const sigkillTimer = setTimeout(() => {
+        try {
+          session.pty.kill('SIGKILL');
+        } catch { /* already exited */ }
+      }, 1000);
+      try {
+        await session.released;
+      } finally {
+        clearTimeout(forceKillTimer);
+        clearTimeout(sigkillTimer);
+      }
+    }),
+  );
+  return true;
+}
+
 type ShellCommandResult = {
   command: string;
   mode: 'plain' | 'new' | 'resume';
+  executable?: string;
+  args?: string[];
 };
 
 type ShellWebSocketDependencies = {
@@ -105,6 +161,8 @@ type ShellWebSocketDependencies = {
   shouldAutoOpenUrlFromOutput: (content: string) => boolean;
   /** 该 sessionId 当前是否有聊天页的 SDK 会话在跑。 */
   isChatSessionActive: (sessionId: string, provider: string) => boolean;
+  /** 停止该 sessionId 正在运行的聊天会话并等待释放锁。 */
+  stopChatSession?: (sessionId: string, provider: string, userId?: string | number | null) => Promise<boolean>;
 };
 
 /**
@@ -170,21 +228,10 @@ function buildShellCommand(
   }
 
   if (provider === 'codex') {
-    // The embedded terminal must not stop on Codex's interactive update
-    // prompt; otherwise a resumed session appears to have no history.
-    const codexExecutable = process.env.CODEX_CLI_PATH
-      || (fs.existsSync('/opt/homebrew/bin/codex') ? '/opt/homebrew/bin/codex' : 'codex');
-    const codexCommand = `${codexExecutable} -c check_for_update_on_startup=false`;
-    if (hasSession && sessionId) {
-      if (os.platform() === 'win32') {
-        return {
-          command: `${codexCommand} resume "${sessionId}"; if ($LASTEXITCODE -ne 0) { ${codexCommand} }`,
-          mode: 'resume',
-        };
-      }
-      return { command: `${codexCommand} resume "${sessionId}" || ${codexCommand}`, mode: 'resume' };
-    }
-    return { command: codexCommand, mode: 'new' };
+    const executable = resolveCodexExecutablePath();
+    const args = ['-c', 'check_for_update_on_startup=false'];
+    if (hasSession && sessionId) args.push('resume', sessionId);
+    return { command: executable, executable, args, mode: hasSession && sessionId ? 'resume' : 'new' };
   }
 
   if (provider === 'gemini') {
@@ -228,7 +275,8 @@ function buildShellCommand(
  */
 export function handleShellConnection(
   ws: WebSocket,
-  dependencies: ShellWebSocketDependencies
+  dependencies: ShellWebSocketDependencies,
+  userId: string | number | null = null
 ): void {
   console.log('[INFO] Shell websocket connected');
 
@@ -236,6 +284,7 @@ export function handleShellConnection(
   let ptySessionKey: string | null = null;
   let urlDetectionBuffer = '';
   const announcedAuthUrls = new Set<string>();
+  let initializing = false;
 
   ws.on('message', async (rawMessage) => {
     try {
@@ -245,8 +294,11 @@ export function handleShellConnection(
       }
 
       if (data.type === 'init') {
+        if (initializing || shellProcess) return;
+        initializing = true;
+        try {
         const projectPath = readString(data.projectPath, process.cwd());
-        const sessionId = readString(data.sessionId) || null;
+        let sessionId = readString(data.sessionId) || null;
         const hasSession = readBoolean(data.hasSession);
         const provider = readString(data.provider, 'claude');
         const initialCommand = readString(data.initialCommand);
@@ -268,7 +320,8 @@ export function handleShellConnection(
           isPlainShell && initialCommand
             ? `_cmd_${Buffer.from(initialCommand).toString('base64').slice(0, 16)}`
             : '';
-        ptySessionKey = `${projectPath}_${sessionId ?? 'default'}${commandSuffix}`;
+        const runtime = provider === 'codex' && !isPlainShell ? getCodexRuntimeInfo() : null;
+        ptySessionKey = JSON.stringify([userId, provider, path.resolve(projectPath), sessionId, runtime, commandSuffix]);
 
         if (isLoginCommand) {
           const oldSession = ptySessionsMap.get(ptySessionKey);
@@ -281,7 +334,13 @@ export function handleShellConnection(
           }
         }
 
-        const existingSession = isLoginCommand ? null : ptySessionsMap.get(ptySessionKey);
+        const candidateSession = isLoginCommand ? null : ptySessionsMap.get(ptySessionKey);
+        if (candidateSession?.ws && candidateSession.ws !== ws && candidateSession.ws.readyState === WebSocket.OPEN) {
+          throw new Error('This terminal is connected in another tab. Disconnect that tab first.');
+        }
+        // Codex 会话在 WS 断开时会立即销毁 PTY；仍在 ptySessionsMap 中但已无活跃 WS 的条目是正在退出的旧进程，
+        // 不能复用，需走下方 terminateShellSessionsBySessionId 等待其彻底退出并释放锁后再拉起新进程。
+        const existingSession = runtime ? null : candidateSession;
         if (existingSession) {
           shellProcess = existingSession.pty;
           if (existingSession.timeoutId) {
@@ -296,14 +355,12 @@ export function handleShellConnection(
           );
 
           if (existingSession.buffer.length > 0) {
-            existingSession.buffer.forEach((bufferedData) => {
-              ws.send(
-                JSON.stringify({
-                  type: 'output',
-                  data: bufferedData,
-                })
-              );
-            });
+            ws.send(
+              JSON.stringify({
+                type: 'output',
+                data: existingSession.buffer.join(''),
+              })
+            );
           }
 
           existingSession.ws = ws;
@@ -335,6 +392,39 @@ export function handleShellConnection(
           return;
         }
 
+        let lease: ReturnType<typeof codexOwnership.acquire> | undefined;
+        if (runtime) {
+          const targetSessionId = sessionId || candidateSession?.sessionId || null;
+          if (targetSessionId) {
+            if (dependencies.isChatSessionActive(targetSessionId, 'codex') && dependencies.stopChatSession) {
+              await dependencies.stopChatSession(targetSessionId, 'codex', userId);
+            }
+            if (hasLiveShellSession(targetSessionId)) {
+              await terminateShellSessionsBySessionId(targetSessionId);
+            }
+          }
+          lease = codexOwnership.acquire({ configRoot: runtime.configRoot, threadId: sessionId,
+            projectPath: resolvedProjectPath, userId, owner: 'terminal' });
+          const probe = new CodexAppServer(runtime.executablePath, resolvedProjectPath, runtime.configRoot);
+          try {
+            codexOwnership.attach(lease, probe.child.pid);
+            await probe.initialize();
+            sessionId = await prepareCodexTerminalThread(probe, sessionId, resolvedProjectPath);
+            codexOwnership.bind(lease, sessionId!);
+            data.sessionId = sessionId!;
+            data.hasSession = true;
+          } catch (error) {
+            await probe.close();
+            codexOwnership.release(lease);
+            throw error;
+          }
+          await probe.close();
+          if (ws.readyState !== WebSocket.OPEN) {
+            codexOwnership.release(lease);
+            return;
+          }
+          ws.send(JSON.stringify({ type: 'runtime', ...runtime, sessionId }));
+        }
         const shellCommandResult = buildShellCommand(data, dependencies);
         const shellCommand = shellCommandResult.command;
         const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
@@ -343,20 +433,29 @@ export function handleShellConnection(
         const termCols = readNumber(data.cols, 80);
         const termRows = readNumber(data.rows, 24);
 
-        shellProcess = pty.spawn(shell, shellArgs, {
+        try {
+        shellProcess = pty.spawn(shellCommandResult.executable ?? shell, shellCommandResult.args ?? shellArgs, {
           name: 'xterm-256color',
           cols: termCols,
           rows: termRows,
           cwd: resolvedProjectPath,
           env: {
-            ...process.env,
+            ...(runtime ? buildCodexChildEnv(runtime.configRoot) : process.env),
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
             FORCE_COLOR: '3',
           },
         });
 
-        ptySessionsMap.set(ptySessionKey, {
+        } catch (error) {
+          if (lease) codexOwnership.release(lease);
+          throw error;
+        }
+        if (lease) codexOwnership.attach(lease, shellProcess.pid);
+        const ownedKey = ptySessionKey;
+        let releaseProcess!: () => void;
+        const released = new Promise<void>((resolve) => { releaseProcess = resolve; });
+        ptySessionsMap.set(ownedKey, {
           pty: shellProcess,
           ws,
           buffer: [],
@@ -364,14 +463,17 @@ export function handleShellConnection(
           projectPath,
           sessionId,
           stale: false,
+          released,
         });
 
+        let terminalDiagnostic = '';
         shellProcess.onData((chunk) => {
+          if (runtime) terminalDiagnostic = (terminalDiagnostic + dependencies.stripAnsiSequences(chunk)).slice(-16384);
           if (!ptySessionKey) {
             return;
           }
 
-          const session = ptySessionsMap.get(ptySessionKey);
+          const session = ptySessionsMap.get(ownedKey);
           if (!session) {
             return;
           }
@@ -443,11 +545,13 @@ export function handleShellConnection(
         });
 
         shellProcess.onExit((exitCode) => {
+          if (lease) codexOwnership.release(lease);
+          releaseProcess();
           if (!ptySessionKey) {
             return;
           }
 
-          const session = ptySessionsMap.get(ptySessionKey);
+          const session = ptySessionsMap.get(ownedKey);
           if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
             session.ws.send(
               JSON.stringify({
@@ -463,7 +567,12 @@ export function handleShellConnection(
             clearTimeout(session.timeoutId);
           }
 
-          ptySessionsMap.delete(ptySessionKey);
+          ptySessionsMap.delete(ownedKey);
+          const failure = runtime ? codexTerminalFailure(terminalDiagnostic) : null;
+          if (failure && session?.ws?.readyState === WebSocket.OPEN) {
+            session.ws.send(JSON.stringify({ type: 'error', message: failure, startupFailed: true }));
+          }
+          if (session?.ws?.readyState === WebSocket.OPEN) session.ws.send(JSON.stringify({ type: 'session_released', provider, sessionId, exitCode: exitCode.exitCode }));
           shellProcess = null;
         });
 
@@ -498,10 +607,11 @@ export function handleShellConnection(
           );
         }
         return;
+        } finally { initializing = false; }
       }
 
       if (data.type === 'input') {
-        if (shellProcess) {
+        if (shellProcess && ptySessionKey && ptySessionsMap.get(ptySessionKey)?.ws === ws) {
           shellProcess.write(readString(data.data));
         }
         return;
@@ -517,9 +627,26 @@ export function handleShellConnection(
       if (data.type === 'terminate') {
         if (ptySessionKey) {
           const session = ptySessionsMap.get(ptySessionKey);
-          if (session) {
+          if (session?.ws === ws) {
             session.pty.kill();
-            ptySessionsMap.delete(ptySessionKey);
+            const forceKillTimer = setTimeout(() => {
+              try {
+                session.pty.kill('SIGTERM');
+              } catch { /* already exited */ }
+            }, 300);
+            const sigkillTimer = setTimeout(() => {
+              try {
+                session.pty.kill('SIGKILL');
+              } catch { /* already exited */ }
+            }, 1500);
+            try {
+              await session.released;
+            } finally {
+              clearTimeout(forceKillTimer);
+              clearTimeout(sigkillTimer);
+            }
+          } else if (!session) {
+            ws.send(JSON.stringify({ type: 'session_released', provider: data.provider }));
           }
         }
         shellProcess = null;
@@ -527,6 +654,10 @@ export function handleShellConnection(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[ERROR] Shell WebSocket error:', message);
+      if (ws.readyState === WebSocket.OPEN && !shellProcess) {
+        ws.send(JSON.stringify({ type: 'error', message, startupFailed: true }));
+        return;
+      }
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(
           JSON.stringify({
@@ -544,18 +675,47 @@ export function handleShellConnection(
     }
 
     const session = ptySessionsMap.get(ptySessionKey);
-    if (!session) {
+    if (!session || session.ws !== ws) {
       return;
     }
 
     session.ws = null;
+    let isCodexSession = false;
+    try {
+      const parsedKey = JSON.parse(ptySessionKey);
+      isCodexSession = Array.isArray(parsedKey) && parsedKey[1] === 'codex';
+    } catch { /* ignore */ }
+
+    if (isCodexSession) {
+      if (session.timeoutId) {
+        clearTimeout(session.timeoutId);
+      }
+      try {
+        session.pty.kill();
+      } catch { /* already exited */ }
+      setTimeout(() => {
+        try {
+          session.pty.kill('SIGTERM');
+        } catch { /* already exited */ }
+      }, 200);
+      return;
+    }
+
     session.timeoutId = setTimeout(() => {
       session.pty.kill();
-      ptySessionsMap.delete(ptySessionKey as string);
+      // onExit confirms release and removes the entry.
     }, PTY_SESSION_TIMEOUT);
   });
 
   ws.on('error', (error) => {
     console.error('[ERROR] Shell WebSocket error:', error);
   });
+}
+
+export async function shutdownShellSessions(): Promise<void> {
+  await Promise.all([...ptySessionsMap.values()].map(async (session) => {
+    if (session.timeoutId) clearTimeout(session.timeoutId);
+    session.pty.kill();
+    await session.released;
+  }));
 }

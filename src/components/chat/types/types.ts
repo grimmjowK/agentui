@@ -88,6 +88,7 @@ export interface PermissionGrantResult {
 }
 
 export interface PendingPermissionRequest {
+  provider?: string;
   requestId: string;
   toolName: string;
   input?: unknown;

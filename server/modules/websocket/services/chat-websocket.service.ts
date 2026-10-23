@@ -58,6 +58,8 @@ function warnOnConcurrentShellSession(
 }
 
 type ChatWebSocketDependencies = {
+  resolveCodexApproval: (requestId: string, userId: string | number | null, threadId: string, decision: unknown) => boolean;
+  reconnectCodexSession: (sessionId: string, writer: WebSocketWriter) => boolean;
   queryClaudeSDK: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnCursor: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   queryCodex: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
@@ -160,7 +162,7 @@ export function handleChatConnection(
       }
 
       if (messageType === 'codex-command') {
-        warnOnConcurrentShellSession(data.options?.sessionId, 'codex', writer);
+
         await dependencies.queryCodex(data.command ?? '', data.options, writer);
         return;
       }
@@ -192,7 +194,8 @@ export function handleChatConnection(
         if (provider === 'cursor') {
           success = dependencies.abortCursorSession(sessionId);
         } else if (provider === 'codex') {
-          success = dependencies.abortCodexSession(sessionId);
+          if (dependencies.reconnectCodexSession(sessionId, writer)) success = dependencies.abortCodexSession(sessionId);
+          if (success) return; // Runtime emits the sole cancellation terminal event.
         } else if (provider === 'gemini') {
           success = dependencies.abortGeminiSession(sessionId);
         } else {
@@ -209,6 +212,14 @@ export function handleChatConnection(
             provider,
           })
         );
+        return;
+      }
+
+      if (messageType === 'codex-permission-response') {
+        const ok = dependencies.resolveCodexApproval(String(data.requestId || ''), writer.userId,
+          String(data.sessionId || ''), data.decision);
+        if (!ok) writer.send(createNormalizedMessage({ kind: 'task_notification', provider: 'codex',
+          sessionId: String(data.sessionId || ''), status: 'warning', summary: 'Approval is no longer valid or does not belong to this session.' }));
         return;
       }
 
@@ -248,7 +259,7 @@ export function handleChatConnection(
         if (provider === 'cursor') {
           isActive = dependencies.isCursorSessionActive(sessionId);
         } else if (provider === 'codex') {
-          isActive = dependencies.isCodexSessionActive(sessionId);
+          isActive = dependencies.reconnectCodexSession(sessionId, writer);
         } else if (provider === 'gemini') {
           isActive = dependencies.isGeminiSessionActive(sessionId);
         } else {

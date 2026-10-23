@@ -54,10 +54,12 @@ export default function Shell({
   const {
     terminalContainerRef,
     terminalRef,
+    fitAddonRef,
     wsRef,
     isConnected,
     isInitialized,
     isConnecting,
+    startupError,
     authUrl,
     authUrlVersion,
     connectToShell,
@@ -71,6 +73,7 @@ export default function Shell({
     isPlainShell,
     minimal,
     autoConnect,
+    isActive,
     isRestarting,
     onProcessComplete,
     onOutputRef,
@@ -163,6 +166,14 @@ export default function Shell({
     }
 
     const focusTerminal = () => {
+      if (fitAddonRef.current && terminalRef.current) {
+        fitAddonRef.current.fit();
+        sendSocketMessage(wsRef.current, {
+          type: 'resize',
+          cols: terminalRef.current.cols,
+          rows: terminalRef.current.rows,
+        });
+      }
       terminalRef.current?.focus();
     };
 
@@ -173,7 +184,7 @@ export default function Shell({
       window.cancelAnimationFrame(animationFrameId);
       window.clearTimeout(timeoutId);
     };
-  }, [isActive, isConnected, isInitialized, terminalRef]);
+  }, [fitAddonRef, isActive, isConnected, isInitialized, terminalRef, wsRef]);
 
   const sendInput = useCallback(
     (data: string) => {
@@ -227,7 +238,7 @@ export default function Shell({
 
   const sessionDisplayName = useMemo(() => getSessionDisplayName(selectedSession), [selectedSession]);
   const sessionDisplayNameShort = useMemo(
-    () => (sessionDisplayName ? sessionDisplayName.slice(0, 30) : null),
+    () => (sessionDisplayName ? (sessionDisplayName.length > 30 ? `${sessionDisplayName.slice(0, 30)}...` : sessionDisplayName) : null),
     [sessionDisplayName],
   );
   const sessionDisplayNameLong = useMemo(
@@ -327,6 +338,7 @@ export default function Shell({
             connectLabel={t('shell.actions.connect')}
             connectTitle={t('shell.actions.connectTitle')}
             connectingLabel={t('shell.connecting')}
+            errorMessage={startupError}
             onConnect={connectToShell}
           />
         )}

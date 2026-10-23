@@ -36,16 +36,22 @@ export default function ShellHeader({
   return (
     <div className="flex-shrink-0 border-b border-gray-700 bg-gray-800 px-4 py-2">
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+        <div className="flex min-w-0 items-center space-x-2.5">
+          <div
+            className={`h-2 w-2 flex-shrink-0 rounded-full ${
+              isConnected ? 'bg-emerald-500' : 'bg-gray-500'
+            }`}
+          />
 
           {hasSession && sessionDisplayNameShort && (
-            <span className="text-xs text-blue-300">({sessionDisplayNameShort}...)</span>
+            <span className="truncate rounded bg-gray-700/70 px-2 py-0.5 text-xs font-medium text-gray-200">
+              {sessionDisplayNameShort}
+            </span>
           )}
 
           {!hasSession && <span className="text-xs text-gray-400">{statusNewSessionText}</span>}
 
-          {!isInitialized && <span className="text-xs text-yellow-400">{statusInitializingText}</span>}
+          {!isInitialized && <span className="text-xs text-amber-400">{statusInitializingText}</span>}
 
           {isRestarting && <span className="text-xs text-blue-400">{statusRestartingText}</span>}
         </div>

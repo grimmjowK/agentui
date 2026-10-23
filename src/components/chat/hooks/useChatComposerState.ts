@@ -66,6 +66,7 @@ interface UseChatComposerStateArgs {
   setCanAbortSession: (canAbort: boolean) => void;
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
   setIsUserScrolledUp: (isScrolledUp: boolean) => void;
+  pendingPermissionRequests: PendingPermissionRequest[];
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
   onRunInShell?: (command: string) => void;
 }
@@ -142,6 +143,7 @@ export function useChatComposerState({
   setClaudeStatus,
   setIsUserScrolledUp,
   setPendingPermissionRequests,
+  pendingPermissionRequests,
   onRunInShell,
 }: UseChatComposerStateArgs) {
   const [input, setInput] = useState(() => {
@@ -658,6 +660,25 @@ export function useChatComposerState({
       setIsUserScrolledUp(false);
       setTimeout(() => scrollToBottom(), 100);
 
+      const savedDraft = currentInput;
+      setInput('');
+      inputValueRef.current = '';
+      resetCommandMenuState();
+      setAttachedImages([]);
+      setUploadingImages(new Map());
+      setImageErrors(new Map());
+      setIsTextareaExpanded(false);
+      setThinkingMode('none');
+
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+
+      const restoreDraft = () => {
+        setInput(savedDraft);
+        inputValueRef.current = savedDraft;
+      };
+
       if (!effectiveSessionId && !selectedSession?.id) {
         if (typeof window !== 'undefined') {
           // Reset stale pending IDs from previous interrupted runs before creating a new one.
@@ -768,6 +789,7 @@ export function useChatComposerState({
       }
 
       if (!sent) {
+        restoreDraft();
         setIsLoading(false);
         setCanAbortSession(false);
         setClaudeStatus(null);
@@ -780,19 +802,6 @@ export function useChatComposerState({
           timestamp: new Date(),
         });
         return;
-      }
-
-      setInput('');
-      inputValueRef.current = '';
-      resetCommandMenuState();
-      setAttachedImages([]);
-      setUploadingImages(new Map());
-      setImageErrors(new Map());
-      setIsTextareaExpanded(false);
-      setThinkingMode('none');
-
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
       }
 
       safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
@@ -1035,6 +1044,12 @@ export function useChatComposerState({
       }
 
       validIds.forEach((requestId) => {
+        const request = pendingPermissionRequests.find((entry) => entry.requestId === requestId);
+        if (request?.provider === 'codex') {
+          sendMessage({ type: 'codex-permission-response', requestId, sessionId: request.sessionId,
+            decision: decision.updatedInput || (decision.allow ? 'accept' : 'decline') });
+          return;
+        }
         const responseType = provider === 'gemini'
           ? 'gemini-permission-response'
           : 'claude-permission-response';
@@ -1049,14 +1064,14 @@ export function useChatComposerState({
       });
 
       setPendingPermissionRequests((previous) => {
-        const next = previous.filter((request) => !validIds.includes(request.requestId));
+        const next = previous.filter((request) => request.provider === 'codex' || !validIds.includes(request.requestId));
         if (next.length === 0) {
           setClaudeStatus(null);
         }
         return next;
       });
     },
-    [sendMessage, setClaudeStatus, setPendingPermissionRequests],
+    [sendMessage, setClaudeStatus, setPendingPermissionRequests, pendingPermissionRequests, provider],
   );
 
   const [isInputFocused, setIsInputFocused] = useState(false);

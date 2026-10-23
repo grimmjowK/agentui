@@ -10,6 +10,22 @@ export const calculateDiff = (oldStr: string, newStr: string): DiffLine[] => {
   const oldLines = oldStr.split('\n');
   const newLines = newStr.split('\n');
 
+  // Guard against O(N*M) main-thread freezes on large file writes/patches.
+  if (oldLines.length * newLines.length > 250_000) {
+    const fastDiff: DiffLine[] = [];
+    for (let i = 0; i < oldLines.length; i += 1) {
+      if (oldLines[i] !== undefined && (oldStr.length > 0 || oldLines.length > 1)) {
+        fastDiff.push({ type: 'removed', content: oldLines[i], lineNum: i + 1 });
+      }
+    }
+    for (let i = 0; i < newLines.length; i += 1) {
+      if (newLines[i] !== undefined && (newStr.length > 0 || newLines.length > 1)) {
+        fastDiff.push({ type: 'added', content: newLines[i], lineNum: i + 1 });
+      }
+    }
+    return fastDiff;
+  }
+
   // Use LCS alignment so insertions/deletions don't cascade into a full-file "changed" diff.
   const lcsTable: number[][] = Array.from({ length: oldLines.length + 1 }, () =>
     new Array<number>(newLines.length + 1).fill(0),

@@ -1,461 +1,269 @@
-/**
- * OpenAI Codex SDK Integration
- * =============================
- *
- * This module provides integration with the OpenAI Codex SDK for non-interactive
- * chat sessions. It mirrors the pattern used in claude-sdk.js for consistency.
- *
- * ## Usage
- *
- * - queryCodex(command, options, ws) - Execute a prompt with streaming via WebSocket
- * - abortCodexSession(sessionId) - Cancel an active session
- * - isCodexSessionActive(sessionId) - Check if a session is running
- * - getActiveCodexSessions() - List all active sessions
- */
-
-import { Codex } from '@openai/codex-sdk';
-
-import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
-import { sessionsService } from './modules/providers/services/sessions.service.js';
-import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
-import { resolveCodexExecutablePath } from './shared/codex-cli-path.js';
+/** Codex chat runtime: app-server JSON-RPC, with explicit approval replies. */
+import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { CodexAppServer } from './modules/codex-runtime/index.js';
+import { codexOwnership } from './modules/codex-runtime/index.js';
+import { codexApprovals } from './modules/codex-runtime/index.js';
+import { terminateShellSessionsBySessionId } from './modules/websocket/services/shell-websocket.service.js';
+import { getCodexRuntimeInfo } from './shared/codex-cli-path.js';
 import { createNormalizedMessage } from './shared/utils.js';
+import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 
-// Track active sessions
 const activeCodexSessions = new Map();
-
-/**
- * Transform Codex SDK event to WebSocket message format
- * @param {object} event - SDK event
- * @returns {object} - Transformed event for WebSocket
- */
-function transformCodexEvent(event) {
-  // Map SDK event types to a consistent format
-  switch (event.type) {
-    case 'item.started':
-    case 'item.updated':
-    case 'item.completed':
-      const item = event.item;
-      if (!item) {
-        return { type: event.type, item: null };
-      }
-
-      // Transform based on item type
-      switch (item.type) {
-        case 'agent_message':
-          return {
-            type: 'item',
-            itemType: 'agent_message',
-            message: {
-              role: 'assistant',
-              content: item.text
-            }
-          };
-
-        case 'reasoning':
-          return {
-            type: 'item',
-            itemType: 'reasoning',
-            message: {
-              role: 'assistant',
-              content: item.text,
-              isReasoning: true
-            }
-          };
-
-        case 'command_execution':
-          return {
-            type: 'item',
-            itemType: 'command_execution',
-            command: item.command,
-            output: item.aggregated_output,
-            exitCode: item.exit_code,
-            status: item.status
-          };
-
-        case 'file_change':
-          return {
-            type: 'item',
-            itemType: 'file_change',
-            changes: item.changes,
-            status: item.status
-          };
-
-        case 'mcp_tool_call':
-          return {
-            type: 'item',
-            itemType: 'mcp_tool_call',
-            server: item.server,
-            tool: item.tool,
-            arguments: item.arguments,
-            result: item.result,
-            error: item.error,
-            status: item.status
-          };
-
-        case 'web_search':
-          return {
-            type: 'item',
-            itemType: 'web_search',
-            query: item.query
-          };
-
-        case 'todo_list':
-          return {
-            type: 'item',
-            itemType: 'todo_list',
-            items: item.items
-          };
-
-        case 'error':
-          return {
-            type: 'item',
-            itemType: 'error',
-            message: {
-              role: 'error',
-              content: item.message
-            }
-          };
-
-        default:
-          return {
-            type: 'item',
-            itemType: item.type,
-            item: item
-          };
-      }
-
-    case 'turn.started':
-      return {
-        type: 'turn_started'
-      };
-
-    case 'turn.completed':
-      return {
-        type: 'turn_complete',
-        usage: event.usage
-      };
-
-    case 'turn.failed':
-      return {
-        type: 'turn_failed',
-        error: event.error
-      };
-
-    case 'thread.started':
-      return {
-        type: 'thread_started',
-        threadId: event.thread_id || event.id
-      };
-
-    case 'error':
-      return {
-        type: 'error',
-        message: event.message
-      };
-
-    default:
-      return {
-        type: event.type,
-        data: event
-      };
-  }
+const pendingRuns = new Set();
+function notifySafely(notify, payload) {
+  try { notify(payload); } catch (error) { console.warn('Codex notification delivery failed:', error.message); }
 }
 
-/**
- * Map permission mode to Codex SDK options
- * @param {string} permissionMode - 'default', 'acceptEdits', or 'bypassPermissions'
- * @returns {object} - { sandboxMode, approvalPolicy }
- */
-function mapPermissionModeToCodexOptions(permissionMode) {
-  switch (permissionMode) {
-    case 'acceptEdits':
-      return {
-        sandboxMode: 'workspace-write',
-        approvalPolicy: 'never'
-      };
-    case 'bypassPermissions':
-      return {
-        sandboxMode: 'danger-full-access',
-        approvalPolicy: 'never'
-      };
-    case 'default':
-    default:
-      return {
-        sandboxMode: 'workspace-write',
-        approvalPolicy: 'on-request'
-      };
-  }
+export function mapPermissionModeToCodexOptions(mode) {
+  if (mode === 'bypassPermissions') return { sandbox: 'danger-full-access', approvalPolicy: 'never' };
+  if (mode === 'acceptEdits') return { sandbox: 'workspace-write', approvalPolicy: 'never' };
+  return { sandbox: 'workspace-write', approvalPolicy: 'on-request' };
 }
 
-/**
- * Execute a Codex query with streaming
- * @param {string} command - The prompt to send
- * @param {object} options - Options including cwd, sessionId, model, permissionMode
- * @param {WebSocket|object} ws - WebSocket connection or response writer
- */
-export async function queryCodex(command, options = {}, ws) {
-  const {
-    sessionId,
-    sessionSummary,
-    cwd,
-    projectPath,
-    model,
-    permissionMode = 'default'
-  } = options;
+function send(writer, message) {
+  const normalized = createNormalizedMessage({ provider: 'codex', ...message });
+  if (writer.isWebSocketWriter || writer.isSSEStreamWriter) writer.send(normalized);
+  else if (writer.readyState === undefined || writer.readyState === 1) writer.send(JSON.stringify(normalized));
+}
 
-  const workingDirectory = cwd || projectPath || process.cwd();
-  const { sandboxMode, approvalPolicy } = mapPermissionModeToCodexOptions(permissionMode);
-
-  let codex;
-  let thread;
-  let capturedSessionId = sessionId;
-  let sessionCreatedSent = false;
-  let terminalFailure = null;
-  const abortController = new AbortController();
-
+export async function queryCodex(command, options = {}, writer) {
+  let threadId = options.sessionId || null;
+  const state = {
+    instanceId: randomUUID(), writer, userId: writer.userId ?? null,
+    rpc: null, turnId: null, status: 'running', startedAt: new Date().toISOString(),
+    interrupted: false, finished: false,
+  };
+  const emit = (message) => send(state.writer, { sessionId: threadId, ...message });
+  let finish;
+  let fail;
+  const completion = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+  // Failure can arrive during initialization, before completion is awaited.
+  void completion.catch(() => {});
+  let resolveReleased;
+  state.released = new Promise((resolve) => { resolveReleased = resolve; });
+  let startupTimer;
+  let interruptTimer;
+  let lease;
+  let terminalMessage;
+  const items = new Map();
+  const streamed = new Set();
   try {
-    // Initialize Codex SDK
-    const codexCliPath = resolveCodexExecutablePath(process.env.CODEX_CLI_PATH);
-    codex = new Codex(codexCliPath !== 'codex' ? { codexPathOverride: codexCliPath } : {});
-
-    // Thread options with sandbox and approval settings
-    const threadOptions = {
-      workingDirectory,
-      skipGitRepoCheck: true,
-      sandboxMode,
-      approvalPolicy,
-      model
-    };
-
-    // Start or resume thread
-    if (sessionId) {
-      thread = codex.resumeThread(sessionId, threadOptions);
-    } else {
-      thread = codex.startThread(threadOptions);
+    if (threadId && activeCodexSessions.has(threadId)) throw new Error('Codex session is already running');
+    if (threadId) activeCodexSessions.set(threadId, state);
+    pendingRuns.add(state);
+    const runtime = getCodexRuntimeInfo();
+    state.runtime = runtime;
+    // 版本号无法解析才硬性拒绝；低于最低已验证版本（unverified）仍尝试运行并告警。
+    if (runtime.capabilities.status === 'unsupported') {
+      throw new Error(`Codex ${runtime.version} at ${runtime.executablePath} 的版本号无法解析，无法确认 app-server 协议兼容性。见 docs/codex-runtime-protocol.md；不使用 exec 回退。`);
     }
-
-    const registerSession = (id) => {
-      if (!id) {
+    const cwd = options.cwd || options.projectPath || process.cwd();
+    if (threadId) {
+      await terminateShellSessionsBySessionId(threadId);
+    }
+    lease = codexOwnership.acquire({ configRoot: runtime.configRoot, threadId, projectPath: cwd, userId: state.userId, owner: 'chat' });
+    const rpc = new CodexAppServer(runtime.executablePath, cwd, runtime.configRoot);
+    codexOwnership.attach(lease, rpc.child.pid);
+    state.rpc = rpc;
+    rpc.on('failure', (error) => { if (!state.finished) fail(error); });
+    rpc.on('request', (request) => {
+      const params = request.params || {};
+      const supported = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'];
+      if (!supported.includes(request.method) || state.userId === null || params.threadId !== threadId
+        || (state.turnId && params.turnId !== state.turnId) || state.interrupted || state.finished) {
+        rpc.send({ id: request.id, error: { code: -32601, message: 'Unsupported or invalid Codex approval request' } });
+        fail(new Error(`Unsupported or invalid Codex request: ${request.method}`));
         return;
       }
-      activeCodexSessions.set(id, {
-        thread,
-        codex,
-        status: 'running',
-        abortController,
-        startedAt: new Date().toISOString()
+      codexApprovals.add({
+        userId: state.userId, threadId, turnId: params.turnId, instanceId: state.instanceId,
+        request, item: items.get(params.itemId), notify: emit,
+        reply: (result) => rpc.send({ id: request.id, result }),
       });
-    };
-
-    // Existing sessions can be tracked immediately; new sessions are tracked after thread.started.
-    if (capturedSessionId) {
-      registerSession(capturedSessionId);
-    }
-
-    // Execute with streaming
-    const streamedTurn = await thread.runStreamed(command, {
-      signal: abortController.signal
     });
-
-    for await (const event of streamedTurn.events) {
-      // Capture thread/session id lazily from the stream (Codex emits this asynchronously).
-      if (event.type === 'thread.started') {
-        const discoveredSessionId = event.thread_id || event.id || null;
-        if (discoveredSessionId && !capturedSessionId) {
-          capturedSessionId = discoveredSessionId;
-          registerSession(capturedSessionId);
-
-          if (ws.setSessionId && typeof ws.setSessionId === 'function') {
-            ws.setSessionId(capturedSessionId);
-          }
-
-          if (!sessionId && !sessionCreatedSent) {
-            sessionCreatedSent = true;
-            sendMessage(ws, createNormalizedMessage({ kind: 'session_created', newSessionId: capturedSessionId, sessionId: capturedSessionId, provider: 'codex' }));
-          }
+    rpc.on('notification', ({ method, params = {} }) => {
+      if (params.threadId && params.threadId !== threadId) return;
+      if (state.finished) return;
+      if (method === 'turn/started') state.turnId = params.turn.id;
+      if (method === 'item/agentMessage/delta') {
+        streamed.add(params.itemId);
+        emit({ kind: 'stream_delta', content: params.delta });
+      }
+      if (method === 'item/started' || method === 'item/completed') {
+        const item = params.item;
+        if (!item) return;
+        items.set(item.id, item);
+        const isCompleted = method === 'item/completed';
+        if (item.type === 'agentMessage' && isCompleted) {
+          if (streamed.has(item.id)) emit({ kind: 'stream_end' });
+          emit({ id: item.id, kind: 'text', role: 'assistant', content: item.text || '' });
+        } else if (item.type === 'commandExecution') {
+          const isError = isCompleted && (item.status === 'failed' || item.status === 'declined' || (typeof item.exitCode === 'number' && item.exitCode !== 0));
+          emit({
+            id: item.id, kind: 'tool_use', toolId: item.id, toolName: 'Bash',
+            toolInput: { command: item.command, cwd: item.cwd }, output: item.aggregatedOutput,
+            exitCode: item.exitCode, status: item.status,
+            ...(isCompleted ? {
+              toolResult: {
+                content: item.aggregatedOutput || (isError ? `Exit code ${item.exitCode ?? 1}` : ''),
+                isError,
+              },
+            } : {}),
+          });
+        } else if (item.type === 'fileChange') {
+          const isError = isCompleted && (item.status === 'failed' || item.status === 'declined');
+          emit({
+            id: item.id, kind: 'tool_use', toolId: item.id, toolName: 'FileChanges',
+            toolInput: item.changes, status: item.status,
+            ...(isCompleted ? {
+              toolResult: {
+                content: isError ? `File changes ${item.status}` : 'Applied file changes',
+                isError,
+              },
+            } : {}),
+          });
+        } else if (item.type === 'mcpToolCall') {
+          const isError = Boolean(item.error) || (isCompleted && item.status === 'failed');
+          const resultContent = item.error
+            ? (typeof item.error === 'string' ? item.error : JSON.stringify(item.error))
+            : item.result !== undefined
+              ? (typeof item.result === 'string' ? item.result : JSON.stringify(item.result))
+              : '';
+          emit({
+            id: item.id, kind: 'tool_use', toolId: item.id, toolName: `${item.server}/${item.tool}`,
+            toolInput: item.arguments, output: item.result, status: item.status, isError,
+            ...(isCompleted ? {
+              toolResult: {
+                content: resultContent,
+                isError,
+              },
+            } : {}),
+          });
         }
       }
-
-      // Check if session was aborted
-      if (abortController.signal.aborted) {
-        break;
+      if (method === 'thread/tokenUsage/updated') {
+        const total = params.tokenUsage?.total;
+        if (total) emit({ kind: 'status', text: 'token_budget', tokenBudget: {
+          used: total.totalTokens, total: params.tokenUsage.modelContextWindow,
+        } });
       }
-      if (capturedSessionId) {
-        const session = activeCodexSessions.get(capturedSessionId);
-        if (session?.status === 'aborted') {
-          break;
-        }
+      if (method === 'turn/completed') {
+        state.turnId = params.turn.id;
+        finish(params.turn);
       }
-
-      if (event.type === 'item.started' || event.type === 'item.updated') {
-        continue;
-      }
-
-      const transformed = transformCodexEvent(event);
-
-      // Normalize the transformed event into NormalizedMessage(s) via adapter
-      const normalizedMsgs = sessionsService.normalizeMessage('codex', transformed, capturedSessionId || sessionId || null);
-      for (const msg of normalizedMsgs) {
-        sendMessage(ws, msg);
-      }
-
-      if (event.type === 'turn.failed' && !terminalFailure) {
-        terminalFailure = event.error || new Error('Turn failed');
-        notifyRunFailed({
-          userId: ws?.userId || null,
-          provider: 'codex',
-          sessionId: capturedSessionId || sessionId || null,
-          sessionName: sessionSummary,
-          error: terminalFailure
-        });
-      }
-
-      // Extract and send token usage if available (normalized to match Claude format)
-      if (event.type === 'turn.completed' && event.usage) {
-        const totalTokens = (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0);
-        sendMessage(ws, createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: { used: totalTokens, total: 200000 }, sessionId: capturedSessionId || sessionId || null, provider: 'codex' }));
-      }
+      if (method === 'error' && !params.willRetry) fail(new Error(params.error?.message || 'Codex run failed'));
+    });
+    startupTimer = setTimeout(() => { fail(new Error('Codex startup timed out')); void rpc.close(); }, 60000);
+    state.onInterrupt = () => { interruptTimer = setTimeout(() => { void rpc.close(); }, 7000); };
+    await rpc.initialize();
+    let model = options.model;
+    if (!threadId && !model) {
+      const models = await rpc.request('model/list');
+      model = models.data?.find((entry) => entry.isDefault)?.model;
     }
-
-    // Send completion event
-    if (!terminalFailure) {
-      sendMessage(ws, createNormalizedMessage({
-        kind: 'complete',
-        actualSessionId: capturedSessionId || thread.id || sessionId || null,
-        sessionId: capturedSessionId || sessionId || null,
-        provider: 'codex'
-      }));
-      notifyRunStopped({
-        userId: ws?.userId || null,
-        provider: 'codex',
-        sessionId: capturedSessionId || sessionId || null,
-        sessionName: sessionSummary,
-        stopReason: 'completed'
-      });
+    const threadOptions = {
+      cwd, ...mapPermissionModeToCodexOptions(options.permissionMode), approvalsReviewer: 'user',
+      ...(model ? { model } : {}),
+    };
+    // paginated thread 的全量 hydration 已 deprecated（0.163.0），resume 时带 excludeTurns:true
+    // 只取元数据与 live-resume 状态，避免触发 "paginated_threads is not supported yet"。
+    // 历史记录 agentui 另行从 ~/.codex rollout 文件读取，不依赖这里的 turns。
+    const result = await rpc.request(threadId ? 'thread/resume' : 'thread/start',
+      threadId ? { ...threadOptions, threadId, excludeTurns: true } : threadOptions);
+    if (threadId && result.thread.cwd && fs.realpathSync(result.thread.cwd) !== fs.realpathSync(cwd)) throw new Error('Codex thread belongs to a different project');
+    if (threadId && result.thread.id !== threadId) throw new Error('Codex resumed a different thread');
+    threadId = result.thread.id;
+    codexOwnership.bind(lease, threadId);
+    state.writer.setSessionId?.(threadId);
+    activeCodexSessions.set(threadId, state);
+    if (!options.sessionId) emit({ kind: 'session_created', newSessionId: threadId });
+    emit({ kind: 'task_notification', status: 'info', summary: `Codex ${runtime.version} · ${runtime.executablePath}` });
+    if (runtime.capabilities.status === 'unverified') {
+      emit({ kind: 'task_notification', status: 'warning',
+        summary: `Codex ${runtime.version} 未通过 app-server 协议基线验证（见 docs/codex-runtime-protocol.md），功能可能不稳定。` });
     }
-
+    if (state.interrupted) throw new Error('Codex run cancelled');
+    const turn = await rpc.request('turn/start', {
+      threadId, input: [{ type: 'text', text: command, text_elements: [] }],
+    });
+    state.turnId = turn.turn.id;
+    clearTimeout(startupTimer);
+    const outcome = await completion;
+    if (outcome.status === 'failed') throw new Error(outcome.error?.message || 'Codex turn failed');
+    state.interrupted ||= outcome.status === 'interrupted';
+    state.finished = true;
+    terminalMessage = { kind: 'complete', actualSessionId: threadId, aborted: state.interrupted };
+    notifySafely(notifyRunStopped, { userId: state.userId, provider: 'codex', sessionId: threadId,
+      sessionName: options.sessionSummary, stopReason: state.interrupted ? 'aborted' : 'completed' });
   } catch (error) {
-    const session = capturedSessionId ? activeCodexSessions.get(capturedSessionId) : null;
-    const wasAborted =
-      session?.status === 'aborted' ||
-      error?.name === 'AbortError' ||
-      String(error?.message || '').toLowerCase().includes('aborted');
-
-    if (!wasAborted) {
-      console.error('[Codex] Error:', error);
-
-      // Check if Codex SDK is available for a clearer error message
-      const installed = await providerAuthService.isProviderInstalled('codex');
-      const errorContent = !installed
-        ? 'Codex CLI is not configured. Please set up authentication first.' + providerAuthService.cliLookupPathHint()
-        : error.message;
-
-      sendMessage(ws, createNormalizedMessage({ kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'codex' }));
-      if (!terminalFailure) {
-        notifyRunFailed({
-          userId: ws?.userId || null,
-          provider: 'codex',
-          sessionId: capturedSessionId || sessionId || null,
-          sessionName: sessionSummary,
-          error
-        });
-      }
+    state.finished = true;
+    if (state.interrupted) terminalMessage = { kind: 'complete', aborted: true };
+    else {
+      terminalMessage = { kind: 'error', content: error.message };
+      notifySafely(notifyRunFailed, { userId: state.userId, provider: 'codex', sessionId: threadId,
+        sessionName: options.sessionSummary, error });
     }
-
   } finally {
-    // Update session status
-    if (capturedSessionId) {
-      const session = activeCodexSessions.get(capturedSessionId);
-      if (session) {
-        session.status = session.status === 'aborted' ? 'aborted' : 'completed';
-      }
-    }
+    clearTimeout(startupTimer);
+    clearTimeout(interruptTimer);
+    state.finished = true;
+    codexApprovals.clear(state.instanceId);
+    await state.rpc?.close();
+    if (activeCodexSessions.get(threadId) === state) activeCodexSessions.delete(threadId);
+    pendingRuns.delete(state);
+    if (lease) codexOwnership.release(lease);
+    resolveReleased?.();
+    if (terminalMessage) emit(terminalMessage);
   }
 }
 
-/**
- * Abort an active Codex session
- * @param {string} sessionId - Session ID to abort
- * @returns {boolean} - Whether abort was successful
- */
-export function abortCodexSession(sessionId) {
-  const session = activeCodexSessions.get(sessionId);
+export function resolveCodexApproval(requestId, userId, threadId, decision) {
+  return codexApprovals.decide(requestId, userId, threadId, decision);
+}
 
-  if (!session) {
-    return false;
-  }
-
-  session.status = 'aborted';
-  try {
-    session.abortController?.abort();
-  } catch (error) {
-    console.warn(`[Codex] Failed to abort session ${sessionId}:`, error);
-  }
-
+export function reconnectCodexSession(sessionId, writer) {
+  const state = activeCodexSessions.get(sessionId);
+  if (!state || state.userId === null || String(state.userId) !== String(writer.userId)) return false;
+  state.writer = writer;
+  codexApprovals.replay(writer.userId, sessionId, (message) => send(writer, message));
   return true;
 }
 
-/**
- * Check if a session is active
- * @param {string} sessionId - Session ID to check
- * @returns {boolean} - Whether session is active
- */
-export function isCodexSessionActive(sessionId) {
-  const session = activeCodexSessions.get(sessionId);
-  return session?.status === 'running';
+export function abortCodexSession(sessionId, userId) {
+  const state = activeCodexSessions.get(sessionId);
+  if (!state || state.finished || (userId !== undefined && String(state.userId) !== String(userId))) return false;
+  state.interrupted = true;
+  state.onInterrupt?.();
+  codexApprovals.clear(state.instanceId);
+  if (state.turnId) {
+    void state.rpc.request('turn/interrupt', { threadId: sessionId, turnId: state.turnId }, 5000)
+      .catch(() => state.rpc.close());
+  } else void state.rpc?.close();
+  return true;
 }
 
-/**
- * Get all active sessions
- * @returns {Array} - Array of active session info
- */
+export async function stopCodexSessionAndWait(sessionId, userId) {
+  const state = activeCodexSessions.get(sessionId);
+  if (!state) return false;
+  if (userId !== undefined && userId !== null && String(state.userId) !== String(userId)) return false;
+  if (!state.finished) {
+    state.interrupted = true;
+    codexApprovals.clear(state.instanceId);
+    void state.rpc?.close();
+  }
+  await state.released;
+  return true;
+}
+
+export function isCodexSessionActive(sessionId) { return activeCodexSessions.has(sessionId); }
 export function getActiveCodexSessions() {
-  const sessions = [];
-
-  for (const [id, session] of activeCodexSessions.entries()) {
-    if (session.status === 'running') {
-      sessions.push({
-        id,
-        status: session.status,
-        startedAt: session.startedAt
-      });
-    }
-  }
-
-  return sessions;
+  return [...activeCodexSessions].map(([id, state]) => ({ id, status: state.status, startedAt: state.startedAt }));
 }
-
-/**
- * Helper to send message via WebSocket or writer
- * @param {WebSocket|object} ws - WebSocket or response writer
- * @param {object} data - Data to send
- */
-function sendMessage(ws, data) {
-  try {
-    if (ws.isSSEStreamWriter || ws.isWebSocketWriter) {
-      // Writer handles stringification (SSEStreamWriter or WebSocketWriter)
-      ws.send(data);
-    } else if (typeof ws.send === 'function') {
-      // Raw WebSocket - stringify here
-      ws.send(JSON.stringify(data));
-    }
-  } catch (error) {
-    console.error('[Codex] Error sending message:', error);
-  }
+export async function shutdownCodexSessions() {
+  await Promise.all([...pendingRuns].map(async (state) => {
+    state.interrupted = true;
+    codexApprovals.clear(state.instanceId);
+    await state.rpc?.close();
+  }));
 }
-
-// Clean up old completed sessions periodically
-setInterval(() => {
-  const now = Date.now();
-  const maxAge = 30 * 60 * 1000; // 30 minutes
-
-  for (const [id, session] of activeCodexSessions.entries()) {
-    if (session.status !== 'running') {
-      const startedAt = new Date(session.startedAt).getTime();
-      if (now - startedAt > maxAge) {
-        activeCodexSessions.delete(id);
-      }
-    }
-  }
-}, 5 * 60 * 1000); // Every 5 minutes

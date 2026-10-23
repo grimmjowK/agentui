@@ -8,13 +8,12 @@
  * Cursor / Gemini 目前没有可用的列举接口，直接走静态清单。
  */
 
-import { spawn } from 'node:child_process';
-import readline from 'node:readline';
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
-import { resolveCodexExecutablePath } from '@/shared/codex-cli-path.js';
+import { CodexAppServer } from '@/modules/codex-runtime/index.js';
+import { getCodexRuntimeInfo } from '@/shared/codex-cli-path.js';
 import type { LLMProvider } from '@/shared/types.js';
 
 import {
@@ -51,7 +50,8 @@ const FALLBACKS: Record<LLMProvider, { OPTIONS: ProviderModel[] }> = {
   gemini: GEMINI_MODELS,
 };
 
-const cache = new Map<LLMProvider, { expiresAt: number; value: ProviderModelList }>();
+const cache = new Map<string, { expiresAt: number; value: ProviderModelList }>();
+const inFlight = new Map<string, Promise<ProviderModelList>>();
 
 const withTimeout = async <T>(task: Promise<T>, label: string): Promise<T> => {
   let timer: NodeJS.Timeout | undefined;
@@ -102,71 +102,23 @@ interface CodexModelRow {
   hidden?: boolean;
 }
 
-/**
- * Codex：npm 包 @openai/codex-sdk 没有列举接口，走 `codex app-server` 的 JSON-RPC。
- */
-const listCodexModels = (): Promise<ProviderModel[]> =>
-  new Promise((resolve, reject) => {
-    const codexCliPath = resolveCodexExecutablePath(process.env.CODEX_CLI_PATH);
-    const child = spawn(codexCliPath, ['app-server'], { stdio: ['pipe', 'pipe', 'ignore'] });
-    let settled = false;
-
-    const done = (err: Error | null, models?: ProviderModel[]) => {
-      if (settled) return;
-      settled = true;
-      try { child.kill(); } catch { /* 已退出 */ }
-      if (err) reject(err);
-      else resolve(models ?? []);
-    };
-
-    const send = (payload: unknown) => {
-      try { child.stdin.write(`${JSON.stringify(payload)}\n`); } catch { /* 进程已退出，交给 error/close */ }
-    };
-
-    child.once('error', (err) => done(err));
-    child.once('close', (code) => done(new Error(`codex app-server 退出 (code=${code})，无法获取模型列表`)));
-
-    readline.createInterface({ input: child.stdout }).on('line', (line) => {
-      let message: { id?: number; result?: { data?: CodexModelRow[] }; error?: { message?: string } };
-      try {
-        message = JSON.parse(line);
-      } catch {
-        return; // app-server 也会打印非 JSON 的日志行
-      }
-
-      if (message.id === 0) {
-        send({ jsonrpc: '2.0', method: 'initialized', params: {} });
-        send({ jsonrpc: '2.0', id: 1, method: 'model/list', params: {} });
-        return;
-      }
-
-      if (message.id !== 1) return;
-
-      if (message.error) {
-        done(new Error(message.error.message || 'model/list 返回错误'));
-        return;
-      }
-
-      const rows = Array.isArray(message.result?.data) ? message.result.data : [];
-      done(
-        null,
-        rows
-          .filter((row) => row.hidden !== true)
-          .map((row) => {
-            const value = row.id || row.model || '';
-            return { value, label: row.displayName || value, description: row.description || undefined };
-          })
-          .filter((model) => model.value),
-      );
-    });
-
-    send({
-      jsonrpc: '2.0',
-      id: 0,
-      method: 'initialize',
-      params: { clientInfo: { name: 'cloudcli', title: 'CloudCLI UI', version: '1.0.0' } },
-    });
-  });
+/** Uses the same managed stdio runtime as chat, with a bounded lifecycle. */
+const listCodexModels = async (): Promise<ProviderModel[]> => {
+  const runtime = getCodexRuntimeInfo();
+  const rpc = new CodexAppServer(runtime.executablePath, process.cwd(), runtime.configRoot);
+  const timer = setTimeout(() => { void rpc.close(); }, LOOKUP_TIMEOUT_MS);
+  try {
+    await rpc.initialize();
+    const result = await rpc.request('model/list');
+    return (result.data as CodexModelRow[]).filter((row) => !row.hidden).map((row) => {
+      const value = row.model || row.id || '';
+      return { value, label: row.displayName || value, description: row.description || undefined };
+    }).filter((model) => model.value);
+  } finally {
+    clearTimeout(timer);
+    await rpc.close();
+  }
+};
 
 const fallbackFor = (provider: LLMProvider, error?: string): ProviderModelList => ({
   provider,
@@ -181,7 +133,12 @@ export const providerModelsService = {
    * 任何失败都回落到静态清单而不是抛错 —— 选不到模型比选到旧模型严重得多。
    */
   async listProviderModels(provider: LLMProvider, { refresh = false } = {}): Promise<ProviderModelList> {
-    const cached = cache.get(provider);
+    let cacheKey: string = provider;
+    if (provider === 'codex') {
+      try { cacheKey = JSON.stringify(getCodexRuntimeInfo()); }
+      catch (error) { return fallbackFor(provider, String(error)); }
+    }
+    const cached = cache.get(cacheKey);
     if (!refresh && cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
@@ -190,22 +147,40 @@ export const providerModelsService = {
       return fallbackFor(provider);
     }
 
-    let result: ProviderModelList;
-    try {
-      const models = await withTimeout(
-        provider === 'claude' ? listClaudeModels() : listCodexModels(),
-        provider,
-      );
-      result = models.length > 0
-        ? { provider, source: 'live', models }
-        : fallbackFor(provider, '实时清单为空');
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      console.warn(`[models] ${provider} 实时模型清单获取失败，回落到内置清单:`, reason);
-      result = fallbackFor(provider, reason);
+    if (!refresh) {
+      const existingRequest = inFlight.get(cacheKey);
+      if (existingRequest) {
+        return existingRequest;
+      }
     }
 
-    cache.set(provider, { expiresAt: Date.now() + CACHE_TTL_MS, value: result });
-    return result;
+    const requestPromise = (async (): Promise<ProviderModelList> => {
+      let result: ProviderModelList;
+      try {
+        const models = await withTimeout(
+          provider === 'claude' ? listClaudeModels() : listCodexModels(),
+          provider,
+        );
+        result = models.length > 0
+          ? { provider, source: 'live', models }
+          : fallbackFor(provider, '实时清单为空');
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        console.warn(`[models] ${provider} 实时模型清单获取失败，回落到内置清单:`, reason);
+        result = fallbackFor(provider, reason);
+      }
+
+      cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, value: result });
+      return result;
+    })();
+
+    inFlight.set(cacheKey, requestPromise);
+    try {
+      return await requestPromise;
+    } finally {
+      if (inFlight.get(cacheKey) === requestPromise) {
+        inFlight.delete(cacheKey);
+      }
+    }
   },
 };

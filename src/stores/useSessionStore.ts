@@ -461,9 +461,18 @@ export function useSessionStore() {
       msg.sessionId === resolvedSessionId
         ? msg
         : { ...msg, sessionId: resolvedSessionId };
-    let updated = [...slot.realtimeMessages, normalizedMessage];
-    if (updated.length > MAX_REALTIME_MESSAGES) {
-      updated = updated.slice(-MAX_REALTIME_MESSAGES);
+    const existingIndex = normalizedMessage.id
+      ? slot.realtimeMessages.findIndex((existing) => existing.id === normalizedMessage.id)
+      : -1;
+    let updated: NormalizedMessage[];
+    if (existingIndex !== -1) {
+      updated = [...slot.realtimeMessages];
+      updated[existingIndex] = { ...updated[existingIndex], ...normalizedMessage };
+    } else {
+      updated = [...slot.realtimeMessages, normalizedMessage];
+      if (updated.length > MAX_REALTIME_MESSAGES) {
+        updated = updated.slice(-MAX_REALTIME_MESSAGES);
+      }
     }
     slot.realtimeMessages = updated;
     recomputeMergedIfNeeded(slot);

@@ -1,10 +1,9 @@
 import { readFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import spawn from 'cross-spawn';
 
-import { resolveCodexExecutablePath } from '@/shared/codex-cli-path.js';
+import { resolveCodexExecutablePath, resolveCodexConfigRoot } from '@/shared/codex-cli-path.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
 import type { ProviderAuthStatus } from '@/shared/types.js';
 import { readObjectRecord, readOptionalString } from '@/shared/utils.js';
@@ -16,15 +15,26 @@ type CodexCredentialsStatus = {
   error?: string;
 };
 
+const installedCache = new Map<string, boolean>();
+
 export class CodexProviderAuth implements IProviderAuth {
   /**
    * Checks whether Codex is available to the server runtime.
    */
   private checkInstalled(): boolean {
-    const cliPath = resolveCodexExecutablePath(process.env.CODEX_CLI_PATH);
     try {
-      // spawn.sync 找不到命令（ENOENT）或超时不会抛错，只体现在返回值的 error 上
-      return !spawn.sync(cliPath, ['--version'], { stdio: 'ignore', timeout: 5000 }).error;
+      const cliPath = resolveCodexExecutablePath(process.env.CODEX_CLI_PATH);
+      const cached = installedCache.get(cliPath);
+      if (cached !== undefined) {
+        return cached;
+      }
+      // spawn.sync reports missing commands and timeouts through its result.
+      const result = spawn.sync(cliPath, ['--version'], { stdio: 'ignore', timeout: 5000 });
+      const installed = !result.error && result.status === 0;
+      if (installed) {
+        installedCache.set(cliPath, true);
+      }
+      return installed;
     } catch {
       return false;
     }
@@ -52,7 +62,7 @@ export class CodexProviderAuth implements IProviderAuth {
    */
   private async checkCredentials(): Promise<CodexCredentialsStatus> {
     try {
-      const authPath = path.join(os.homedir(), '.codex', 'auth.json');
+      const authPath = path.join(resolveCodexConfigRoot(), 'auth.json');
       const content = await readFile(authPath, 'utf8');
       const auth = readObjectRecord(JSON.parse(content)) ?? {};
       const tokens = readObjectRecord(auth.tokens) ?? {};
