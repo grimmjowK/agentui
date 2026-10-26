@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+
 import { api } from '../../../../utils/api';
 import {
+  ANTIGRAVITY_MODELS,
   CLAUDE_MODELS,
   CODEX_MODELS,
   CURSOR_MODELS,
@@ -17,6 +19,7 @@ const MODELS_BY_PROVIDER: Record<string, { OPTIONS: ModelOption[] }> = {
   codex: CODEX_MODELS,
   cursor: CURSOR_MODELS,
   gemini: GEMINI_MODELS,
+  antigravity: ANTIGRAVITY_MODELS,
 };
 
 /** provider → 已取到的实时清单。跨组件实例共享，避免每次开面板都打一次 CLI */

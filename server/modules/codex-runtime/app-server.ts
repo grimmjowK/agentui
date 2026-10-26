@@ -2,6 +2,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 
+import os from 'node:os';
+import path from 'node:path';
+
 import { buildCodexChildEnv } from './child-env.js';
 
 export type RpcMessage = {
@@ -22,20 +25,50 @@ export class CodexAppServer extends EventEmitter {
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
+  private closing = false;
   private exited: Promise<void>;
 
-  constructor(executable: string, cwd: string, configRoot?: string) {
+  constructor(executable: string, cwd: string, configRoot?: string, profile?: string) {
     super();
-    this.child = spawn(executable, ['app-server', '--listen', 'stdio://'], {
+    const args = ['app-server', '--listen', 'stdio://'];
+    const childEnv = configRoot ? buildCodexChildEnv(configRoot) : { ...process.env };
+    if (profile) {
+      childEnv.CODEX_CONFIG_PROFILE = profile;
+      if (profile.startsWith('deepseek')) {
+        const modelSlug = profile === 'deepseek-flash' ? 'deepseek-flash' : 'deepseek-v4-pro';
+        const modelsJson = path.join(os.homedir(), '.codex', 'models.json');
+        args.push(
+          '-c', 'model_provider=deepseek',
+          '-c', `model=${modelSlug}`,
+          '-c', `model_catalog_json=${modelsJson}`
+        );
+      }
+    }
+    this.child = spawn(executable, args, {
       cwd,
-      env: configRoot ? buildCodexChildEnv(configRoot) : { ...process.env },
+      env: childEnv,
       stdio: 'pipe',
       detached: process.platform !== 'win32',
     });
     this.exited = new Promise((resolve) => this.child.once('close', () => resolve()));
     this.child.once('error', (error) => this.fail(error));
+    let stderrBuffer = '';
+    this.child.stderr.on('data', (data) => {
+      const text = String(data);
+      stderrBuffer += text;
+      if (stderrBuffer.length > 8192) {
+        stderrBuffer = stderrBuffer.slice(-8192);
+      }
+      this.emit('diagnostic', text);
+    });
     this.child.once('close', (code, signal) => {
-      this.fail(new Error(`Codex app-server exited (${signal || code})`));
+      if (this.closing) {
+        this.emit('closed');
+        return;
+      }
+      const detail = stderrBuffer.trim() ? `: ${stderrBuffer.trim()}` : '';
+      console.error(`[CodexAppServer] process closed (${signal || code})${detail}`);
+      this.fail(new Error(`Codex app-server exited (${signal || code})${detail}`));
       this.emit('closed');
     });
     this.child.stdin.on('error', (error) => this.fail(error));
@@ -108,6 +141,8 @@ export class CodexAppServer extends EventEmitter {
   }
 
   async close() {
+    this.closing = true;
+    this.stopped = true;
     this.child.stdin.end();
     const wait = (ms: number) => new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => resolve(false), ms);

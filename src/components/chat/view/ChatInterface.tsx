@@ -73,6 +73,8 @@ function ChatInterface({
     setCodexModel,
     geminiModel,
     setGeminiModel,
+    antigravityModel,
+    setAntigravityModel,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -190,10 +192,12 @@ function ChatInterface({
     claudeModel,
     codexModel,
     geminiModel,
+    antigravityModel,
     setClaudeModel,
     setCursorModel,
     setCodexModel,
     setGeminiModel,
+    setAntigravityModel,
     isLoading,
     canAbortSession,
     tokenBudget,
@@ -348,6 +352,8 @@ function ChatInterface({
           setCodexModel={setCodexModel}
           geminiModel={geminiModel}
           setGeminiModel={setGeminiModel}
+          antigravityModel={antigravityModel}
+          setAntigravityModel={setAntigravityModel}
           tasksEnabled={tasksEnabled}
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}

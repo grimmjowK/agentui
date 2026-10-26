@@ -16,6 +16,7 @@ const AGENT_NAMES: Record<AgentProvider, string> = {
   cursor: 'Cursor',
   codex: 'Codex',
   gemini: 'Gemini',
+  antigravity: 'Antigravity',
 };
 
 function AgentToggleSwitch({
@@ -64,7 +65,7 @@ export default function AgentsSettingsTab({
   const { enabledAgents, toggleAgent } = useAgentToggle();
 
   const visibleAgents = useMemo<AgentProvider[]>(() => {
-    const all: AgentProvider[] = ['claude', 'cursor', 'codex', 'gemini'];
+    const all: AgentProvider[] = ['claude', 'cursor', 'codex', 'gemini', 'antigravity'];
     if (isWindowsServer) {
       return all.filter((id) => id !== 'cursor');
     }
@@ -95,12 +96,17 @@ export default function AgentsSettingsTab({
       authStatus: providerAuthStatus.gemini,
       onLogin: () => onProviderLogin('gemini'),
     },
+    antigravity: {
+      authStatus: providerAuthStatus.antigravity,
+      onLogin: () => onProviderLogin('antigravity'),
+    },
   }), [
     onProviderLogin,
     providerAuthStatus.claude,
-    providerAuthStatus.codex,
     providerAuthStatus.cursor,
+    providerAuthStatus.codex,
     providerAuthStatus.gemini,
+    providerAuthStatus.antigravity,
   ]);
 
   const isSelectedAgentEnabled = enabledAgents[selectedAgent];

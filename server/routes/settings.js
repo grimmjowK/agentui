@@ -3,7 +3,7 @@ import { apiKeysDb, appConfigDb, credentialsDb, notificationPreferencesDb, pushS
 import { getPublicKey } from '../services/vapid-keys.js';
 import { createNotificationEvent, notifyUserIfEnabled } from '../services/notification-orchestrator.js';
 
-const VALID_PROVIDERS = ['claude', 'cursor', 'codex', 'gemini'];
+const VALID_PROVIDERS = ['claude', 'cursor', 'codex', 'gemini', 'antigravity'];
 
 const router = express.Router();
 

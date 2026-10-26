@@ -50,6 +50,12 @@ import {
     isGeminiSessionActive,
     getActiveGeminiSessions,
 } from './gemini-cli.js';
+import {
+    spawnAntigravity,
+    abortAntigravitySession,
+    isAntigravitySessionActive,
+    getActiveAntigravitySessions,
+} from './antigravity-cli.js';
 import sessionManager from './sessionManager.js';
 import {
     stripAnsiSequences,
@@ -91,14 +97,10 @@ function getShellSessionById(sessionId) {
     }
 
     const indexedSession = sessionsDb.getSessionById(sessionId);
-    if (
-        indexedSession?.provider === 'gemini'
-        && typeof indexedSession.jsonl_path === 'string'
-        && indexedSession.jsonl_path.endsWith('.jsonl')
-        && fs.existsSync(indexedSession.jsonl_path)
-    ) {
+    if (indexedSession) {
         return {
             ...(memorySession || {}),
+            ...indexedSession,
             cliSessionId: sessionId,
         };
     }
@@ -122,21 +124,25 @@ const wss = createWebSocketServer(server, {
         resolveCodexApproval,
         reconnectCodexSession,
         spawnGemini,
+        spawnAntigravity,
         abortClaudeSDKSession,
         abortCursorSession,
         abortCodexSession,
         abortGeminiSession,
+        abortAntigravitySession,
         resolveToolApproval,
         isClaudeSDKSessionActive,
         isCursorSessionActive,
         isCodexSessionActive,
         isGeminiSessionActive,
+        isAntigravitySessionActive,
         reconnectSessionWriter,
         getPendingApprovalsForSession,
         getActiveClaudeSDKSessions,
         getActiveCursorSessions,
         getActiveCodexSessions,
         getActiveGeminiSessions,
+        getActiveAntigravitySessions,
     },
     shell: {
         getSessionById: getShellSessionById,
@@ -149,6 +155,7 @@ const wss = createWebSocketServer(server, {
             if (provider === 'cursor') return isCursorSessionActive(sessionId);
             if (provider === 'codex') return isCodexSessionActive(sessionId);
             if (provider === 'gemini') return isGeminiSessionActive(sessionId);
+            if (provider === 'antigravity') return isAntigravitySessionActive(sessionId);
             return isClaudeSDKSessionActive(sessionId);
         },
         stopChatSession: async (sessionId, provider, userId) => {
@@ -1103,14 +1110,14 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
             });
         }
 
-        // Handle Gemini sessions - they are raw logs in our current setup
-        if (provider === 'gemini') {
+        // Handle Gemini & Antigravity sessions - they are raw logs in our current setup
+        if (provider === 'gemini' || provider === 'antigravity') {
             return res.json({
                 used: 0,
                 total: 0,
                 breakdown: { input: 0, cacheCreation: 0, cacheRead: 0 },
                 unsupported: true,
-                message: 'Token usage tracking not available for Gemini sessions'
+                message: `Token usage tracking not available for ${provider} sessions`
             });
         }
 

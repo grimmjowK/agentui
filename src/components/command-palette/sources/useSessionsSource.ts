@@ -14,6 +14,7 @@ interface SessionsResponse {
   cursorSessions?: ProjectSession[];
   codexSessions?: ProjectSession[];
   geminiSessions?: ProjectSession[];
+  antigravitySessions?: ProjectSession[];
 }
 
 export function useSessionsSource(projectId: string | undefined, enabled: boolean) {
@@ -33,6 +34,7 @@ export function useSessionsSource(projectId: string | undefined, enabled: boolea
         ...(data.cursorSessions ?? []),
         ...(data.codexSessions ?? []),
         ...(data.geminiSessions ?? []),
+        ...(data.antigravitySessions ?? []).map((session) => ({ ...session, __provider: 'antigravity' as const })),
       ];
       return all.map<SessionResult>((s) => ({
         id: s.id,

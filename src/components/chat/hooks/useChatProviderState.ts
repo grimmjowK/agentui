@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, authenticatedFetch } from '../../../utils/api';
-import { CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS, GEMINI_MODELS } from '../../../../shared/modelConstants';
+import {
+  ANTIGRAVITY_MODELS,
+  CLAUDE_MODELS,
+  CODEX_MODELS,
+  CURSOR_MODELS,
+  GEMINI_MODELS,
+} from '../../../../shared/modelConstants';
 import type { PendingPermissionRequest, PermissionMode } from '../types/types';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
 
 const getPermissionModesForProvider = (provider: LLMProvider): PermissionMode[] => {
   if (provider === 'codex') {
     return ['default', 'acceptEdits', 'bypassPermissions'];
+  }
+  if (provider === 'antigravity') {
+    return ['default', 'bypassPermissions'];
   }
   if (provider === 'claude') {
     return ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'];
@@ -36,6 +45,9 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   });
   const [geminiModel, setGeminiModel] = useState<string>(() => {
     return localStorage.getItem('gemini-model') || GEMINI_MODELS.DEFAULT;
+  });
+  const [antigravityModel, setAntigravityModel] = useState<string>(() => {
+    return localStorage.getItem('antigravity-model') || ANTIGRAVITY_MODELS.DEFAULT;
   });
 
   const lastProviderRef = useRef(provider);
@@ -121,6 +133,32 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
       });
   }, [provider]);
 
+  useEffect(() => {
+    if (provider !== 'antigravity') {
+      return;
+    }
+
+    api.providerModels('antigravity')
+      .then((response) => response.json())
+      .then((payload) => {
+        const models: Array<{ value: string }> = payload?.data?.models ?? [];
+        if (models.length === 0) {
+          return;
+        }
+        setAntigravityModel((current) => {
+          if (models.some((m) => m.value === current)) {
+            return current;
+          }
+          const nextModel = models[0].value;
+          localStorage.setItem('antigravity-model', nextModel);
+          return nextModel;
+        });
+      })
+      .catch((error) => {
+        console.error('Error loading Antigravity models:', error);
+      });
+  }, [provider]);
+
   const cyclePermissionMode = useCallback(() => {
     const modes = getPermissionModesForProvider(provider);
 
@@ -145,6 +183,8 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     setCodexModel,
     geminiModel,
     setGeminiModel,
+    antigravityModel,
+    setAntigravityModel,
     permissionMode,
     setPermissionMode,
     pendingPermissionRequests,

@@ -13,6 +13,8 @@ import {
   prepareCodexTerminalThread,
 } from '@/modules/codex-runtime/index.js';
 import { getCodexRuntimeInfo, resolveCodexExecutablePath } from '@/shared/codex-cli-path.js';
+import { resolveAntigravityExecutablePath } from '@/shared/antigravity-cli-path.js';
+import { ensureAntigravitySessionInCliStore } from '@/shared/antigravity-session-store.js';
 import { parseIncomingJsonObject } from '@/shared/utils.js';
 
 type ShellIncomingMessage = {
@@ -24,6 +26,7 @@ type ShellIncomingMessage = {
   sessionId?: string;
   hasSession?: boolean;
   provider?: string;
+  model?: string;
   initialCommand?: string;
   isPlainShell?: boolean;
 };
@@ -154,7 +157,7 @@ type ShellCommandResult = {
 };
 
 type ShellWebSocketDependencies = {
-  getSessionById: (sessionId: string) => { cliSessionId?: string } | null | undefined;
+  getSessionById: (sessionId: string) => { cliSessionId?: string; provider?: string; jsonl_path?: string } | null | undefined;
   stripAnsiSequences: (content: string) => string;
   normalizeDetectedUrl: (url: string) => string | null;
   extractUrlsFromText: (content: string) => string[];
@@ -209,7 +212,10 @@ function buildShellCommand(
   const hasSession = readBoolean(message.hasSession);
   const sessionId = readString(message.sessionId);
   const initialCommand = readString(message.initialCommand);
-  const provider = readString(message.provider, 'claude');
+  const dbSession = hasSession && sessionId ? dependencies.getSessionById(sessionId) : null;
+  const provider = (dbSession && typeof dbSession.provider === 'string' && dbSession.provider)
+    ? dbSession.provider
+    : readString(message.provider, 'claude');
   const safeSessionIdPattern = /^[a-zA-Z0-9_.\-:]+$/;
   const isPlainShell =
     readBoolean(message.isPlainShell) ||
@@ -229,8 +235,18 @@ function buildShellCommand(
 
   if (provider === 'codex') {
     const executable = resolveCodexExecutablePath();
-    const args = ['-c', 'check_for_update_on_startup=false'];
-    if (hasSession && sessionId) args.push('resume', sessionId);
+    const args: string[] = ['-c', 'check_for_update_on_startup=false'];
+    const model = readString(message.model);
+    const profile = model.startsWith('deepseek')
+      ? (model.includes('flash') ? 'deepseek-flash' : 'deepseek')
+      : undefined;
+
+    if (profile) {
+      args.unshift('-p', profile);
+    }
+    if (hasSession && sessionId) {
+      args.push('resume', sessionId);
+    }
     return { command: executable, executable, args, mode: hasSession && sessionId ? 'resume' : 'new' };
   }
 
@@ -255,6 +271,21 @@ function buildShellCommand(
       return { command: `${command} --resume "${resumeId}"`, mode: 'resume' };
     }
     return { command, mode: 'new' };
+  }
+
+  if (provider === 'antigravity') {
+    const executable = resolveAntigravityExecutablePath();
+    if (hasSession && (!sessionId || !safeSessionIdPattern.test(sessionId))) {
+      throw new Error('A valid Antigravity conversation ID is required to resume.');
+    }
+    // Antigravity IDs are native IDs. Never silently start a new conversation
+    // when resuming fails, and avoid shell interpolation of the executable.
+    return {
+      command: executable,
+      executable,
+      args: hasSession ? ['--conversation', sessionId] : [],
+      mode: hasSession ? 'resume' : 'new',
+    };
   }
 
   const command = initialCommand || 'claude';
@@ -300,7 +331,12 @@ export function handleShellConnection(
         const projectPath = readString(data.projectPath, process.cwd());
         let sessionId = readString(data.sessionId) || null;
         const hasSession = readBoolean(data.hasSession);
-        const provider = readString(data.provider, 'claude');
+        const dbSession = (hasSession && sessionId) ? dependencies.getSessionById(sessionId) : null;
+        let provider = readString(data.provider, 'claude');
+        if (dbSession && typeof dbSession.provider === 'string' && dbSession.provider) {
+          provider = dbSession.provider;
+          data.provider = provider;
+        }
         const initialCommand = readString(data.initialCommand);
         const isPlainShell =
           readBoolean(data.isPlainShell) ||
@@ -403,9 +439,12 @@ export function handleShellConnection(
               await terminateShellSessionsBySessionId(targetSessionId);
             }
           }
+          const model = readString(data.model);
+          const isDeepSeek = model.startsWith('deepseek');
+          const profile = isDeepSeek ? (model.includes('flash') ? 'deepseek-flash' : 'deepseek') : undefined;
           lease = codexOwnership.acquire({ configRoot: runtime.configRoot, threadId: sessionId,
             projectPath: resolvedProjectPath, userId, owner: 'terminal' });
-          const probe = new CodexAppServer(runtime.executablePath, resolvedProjectPath, runtime.configRoot);
+          const probe = new CodexAppServer(runtime.executablePath, resolvedProjectPath, runtime.configRoot, profile);
           try {
             codexOwnership.attach(lease, probe.child.pid);
             await probe.initialize();
@@ -432,6 +471,10 @@ export function handleShellConnection(
           os.platform() === 'win32' ? ['-Command', shellCommand] : ['-c', shellCommand];
         const termCols = readNumber(data.cols, 80);
         const termRows = readNumber(data.rows, 24);
+
+        if (provider === 'antigravity' && hasSession && sessionId) {
+          await ensureAntigravitySessionInCliStore(sessionId);
+        }
 
         try {
         shellProcess = pty.spawn(shellCommandResult.executable ?? shell, shellCommandResult.args ?? shellArgs, {
@@ -585,7 +628,9 @@ export function handleShellConnection(
                 ? 'Codex'
                 : provider === 'gemini'
                   ? 'Gemini'
-                  : 'Claude';
+                  : provider === 'antigravity'
+                    ? 'Antigravity'
+                    : 'Claude';
           welcomeMsg = shellCommandResult.mode === 'resume'
             ? `\x1b[36mResuming ${providerName} session ${sessionId} in: ${projectPath}\x1b[0m\r\n`
             : `\x1b[36mStarting new ${providerName} session in: ${projectPath}\x1b[0m\r\n`;

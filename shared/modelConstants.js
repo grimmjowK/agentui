@@ -74,6 +74,8 @@ export const CODEX_MODELS = {
     { value: "gpt-5.1-codex-max", label: "GPT-5.1 Codex Max" },
     { value: "o3", label: "O3" },
     { value: "o4-mini", label: "O4-mini" },
+    { value: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
+    { value: "deepseek-flash", label: "DeepSeek Flash" },
   ],
 
   DEFAULT: "gpt-6-astra",
@@ -103,11 +105,35 @@ export const GEMINI_MODELS = {
 };
 
 /**
+ * Antigravity Models
+ */
+export const ANTIGRAVITY_MODELS = {
+  OPTIONS: [
+    { value: "gemini-4-argon-high", label: "Gemini 4 Argon (High)" },
+    { value: "gemini-4-argon-medium", label: "Gemini 4 Argon (Medium)" },
+    { value: "gemini-4-argon-low", label: "Gemini 4 Argon (Low)" },
+    { value: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)" },
+    { value: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash (Medium)" },
+    { value: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)" },
+    { value: "claude-opus-5-5-high", label: "Claude Opus 5.5 (High)" },
+    { value: "claude-opus-5-5-medium", label: "Claude Opus 5.5 (Medium)" },
+    { value: "claude-opus-5-5-low", label: "Claude Opus 5.5 (Low)" },
+    { value: "claude-sonnet-5-5-high", label: "Claude Sonnet 5.5 (High)" },
+    { value: "claude-sonnet-5-5-medium", label: "Claude Sonnet 5.5 (Medium)" },
+    { value: "claude-sonnet-5-5-low", label: "Claude Sonnet 5.5 (Low)" },
+    { value: "gpt-oss-120b-medium", label: "GPT-OSS 120B (Medium)" },
+  ],
+
+  DEFAULT: "gemini-4-argon-high",
+};
+
+/**
  * Ordered provider registry. Display order in selection UIs.
  */
 export const PROVIDERS = [
   { id: "claude", name: "Anthropic", models: CLAUDE_MODELS },
   { id: "codex", name: "OpenAI", models: CODEX_MODELS },
+  { id: "antigravity", name: "Antigravity", models: ANTIGRAVITY_MODELS },
   { id: "gemini", name: "Google", models: GEMINI_MODELS },
   { id: "cursor", name: "Cursor", models: CURSOR_MODELS },
 ];

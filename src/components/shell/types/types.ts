@@ -11,6 +11,7 @@ export type ShellInitMessage = {
   sessionId: string | null;
   hasSession: boolean;
   provider: string;
+  model?: string;
   cols: number;
   rows: number;
   initialCommand: string | null | undefined;

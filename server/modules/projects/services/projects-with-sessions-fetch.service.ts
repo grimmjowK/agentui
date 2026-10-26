@@ -15,7 +15,7 @@ type SessionSummary = {
   isStarred: boolean;
 };
 
-type SessionsByProvider = Record<'claude' | 'cursor' | 'codex' | 'gemini', SessionSummary[]>;
+type SessionsByProvider = Record<'claude' | 'cursor' | 'codex' | 'gemini' | 'antigravity', SessionSummary[]>;
 
 type SessionRepositoryRow = {
   provider: string;
@@ -36,6 +36,7 @@ export type ProjectListItem = {
   cursorSessions: SessionSummary[];
   codexSessions: SessionSummary[];
   geminiSessions: SessionSummary[];
+  antigravitySessions: SessionSummary[];
   sessionMeta: {
     hasMore: boolean;
     total: number;
@@ -76,6 +77,7 @@ export type ProjectSessionsPageApiView = {
   cursorSessions: SessionSummary[];
   codexSessions: SessionSummary[];
   geminiSessions: SessionSummary[];
+  antigravitySessions: SessionSummary[];
   sessionMeta: {
     hasMore: boolean;
     total: number;
@@ -142,6 +144,7 @@ function bucketSessionRowsByProvider(rows: SessionRepositoryRow[]): SessionsByPr
     cursor: [],
     codex: [],
     gemini: [],
+    antigravity: [],
   };
 
   for (const row of rows) {
@@ -256,6 +259,7 @@ export async function getProjectsWithSessions(
       cursorSessions: sessionsPage.sessionsByProvider.cursor,
       codexSessions: sessionsPage.sessionsByProvider.codex,
       geminiSessions: sessionsPage.sessionsByProvider.gemini,
+      antigravitySessions: sessionsPage.sessionsByProvider.antigravity,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
         total: sessionsPage.total,
@@ -312,6 +316,7 @@ export async function getArchivedProjectsWithSessions(
       cursorSessions: sessionsPage.sessionsByProvider.cursor,
       codexSessions: sessionsPage.sessionsByProvider.codex,
       geminiSessions: sessionsPage.sessionsByProvider.gemini,
+      antigravitySessions: sessionsPage.sessionsByProvider.antigravity,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
         total: sessionsPage.total,
@@ -344,6 +349,7 @@ export async function getProjectSessionsPage(
     cursorSessions: sessionsPage.sessionsByProvider.cursor,
     codexSessions: sessionsPage.sessionsByProvider.codex,
     geminiSessions: sessionsPage.sessionsByProvider.gemini,
+    antigravitySessions: sessionsPage.sessionsByProvider.antigravity,
     sessionMeta: {
       hasMore: sessionsPage.hasMore,
       total: sessionsPage.total,

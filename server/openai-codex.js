@@ -62,8 +62,14 @@ export async function queryCodex(command, options = {}, writer) {
     if (threadId) {
       await terminateShellSessionsBySessionId(threadId);
     }
+    const modelName = options.model;
+    const isDeepSeek = typeof modelName === 'string' && modelName.startsWith('deepseek');
+    const profile = isDeepSeek
+      ? (modelName.includes('flash') ? 'deepseek-flash' : 'deepseek')
+      : undefined;
+
     lease = codexOwnership.acquire({ configRoot: runtime.configRoot, threadId, projectPath: cwd, userId: state.userId, owner: 'chat' });
-    const rpc = new CodexAppServer(runtime.executablePath, cwd, runtime.configRoot);
+    const rpc = new CodexAppServer(runtime.executablePath, cwd, runtime.configRoot, profile);
     codexOwnership.attach(lease, rpc.child.pid);
     state.rpc = rpc;
     rpc.on('failure', (error) => { if (!state.finished) fail(error); });
