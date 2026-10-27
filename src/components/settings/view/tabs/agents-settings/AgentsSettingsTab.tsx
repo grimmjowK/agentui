@@ -52,6 +52,8 @@ export default function AgentsSettingsTab({
   onClaudePermissionsChange,
   cursorPermissions,
   onCursorPermissionsChange,
+  antigravityPermissions,
+  onAntigravityPermissionsChange,
   codexPermissionMode,
   onCodexPermissionModeChange,
   geminiPermissionMode,
@@ -163,6 +165,8 @@ export default function AgentsSettingsTab({
             onClaudePermissionsChange={onClaudePermissionsChange}
             cursorPermissions={cursorPermissions}
             onCursorPermissionsChange={onCursorPermissionsChange}
+            antigravityPermissions={antigravityPermissions}
+            onAntigravityPermissionsChange={onAntigravityPermissionsChange}
             codexPermissionMode={codexPermissionMode}
             onCodexPermissionModeChange={onCodexPermissionModeChange}
             geminiPermissionMode={geminiPermissionMode}

@@ -527,8 +527,20 @@ export function useSessionStore() {
       slot.total = data.total ?? slot.serverMessages.length;
       slot.hasMore = Boolean(data.hasMore);
       slot.fetchedAt = Date.now();
-      // drop realtime messages that the server has caught up with to prevent unbounded growth.
-      slot.realtimeMessages = [];
+      // Drop realtime messages that the server has caught up with to prevent unbounded growth.
+      // Retain messages that the server transcript never records (e.g. error messages)
+      // and any optimistic user messages that the server hasn't committed yet.
+      const serverUserTexts = new Set(
+        slot.serverMessages.map(userTextFingerprint).filter((t): t is string => t !== null),
+      );
+      slot.realtimeMessages = slot.realtimeMessages.filter((m) => {
+        if (m.kind === 'error') return true;
+        if (m.id.startsWith('local_')) {
+          const fp = userTextFingerprint(m);
+          return fp ? !serverUserTexts.has(fp) : true;
+        }
+        return false;
+      });
       recomputeMergedIfNeeded(slot);
       notify(resolvedSessionId);
     } catch (error) {

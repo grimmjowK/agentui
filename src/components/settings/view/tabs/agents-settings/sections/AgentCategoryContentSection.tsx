@@ -14,6 +14,8 @@ export default function AgentCategoryContentSection({
   onClaudePermissionsChange,
   cursorPermissions,
   onCursorPermissionsChange,
+  antigravityPermissions,
+  onAntigravityPermissionsChange,
   codexPermissionMode,
   onCodexPermissionModeChange,
   geminiPermissionMode,
@@ -79,6 +81,16 @@ export default function AgentCategoryContentSection({
           agent="gemini"
           permissionMode={geminiPermissionMode}
           onPermissionModeChange={onGeminiPermissionModeChange}
+        />
+      )}
+
+      {selectedCategory === 'permissions' && selectedAgent === 'antigravity' && (
+        <PermissionsContent
+          agent="antigravity"
+          skipPermissions={antigravityPermissions.skipPermissions}
+          onSkipPermissionsChange={(value) => {
+            onAntigravityPermissionsChange({ ...antigravityPermissions, skipPermissions: value });
+          }}
         />
       )}
 

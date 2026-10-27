@@ -206,7 +206,11 @@ export async function queryCodex(command, options = {}, writer) {
     state.finished = true;
     if (state.interrupted) terminalMessage = { kind: 'complete', aborted: true };
     else {
-      terminalMessage = { kind: 'error', content: error.message };
+      let errorMessage = error.message;
+      if (typeof errorMessage === 'string' && (errorMessage.includes('array_above_max_length') || errorMessage.includes('array too long'))) {
+        errorMessage = `${errorMessage}\n\n💡 提示：当前会话历史中包含不同模型提供商（如 DeepSeek）写入的专有上下文格式，目标提供商（如 OpenAI）无法直接兼容该历史。请切回原模型（DeepSeek）继续当前对话，或新建会话使用该模型。`;
+      }
+      terminalMessage = { kind: 'error', content: errorMessage };
       notifySafely(notifyRunFailed, { userId: state.userId, provider: 'codex', sessionId: threadId,
         sessionName: options.sessionSummary, error });
     }

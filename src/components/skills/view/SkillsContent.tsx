@@ -109,6 +109,8 @@ export default function SkillsContent({ selectedProvider, currentProjects }: Ski
 
   const userSkills = skills.filter((s) => s.scope === 'user');
   const projectSkills = skills.filter((s) => s.scope === 'project');
+  const repoSkills = skills.filter((s) => s.scope === 'repo');
+  const otherSkills = skills.filter((s) => !['user', 'project', 'repo'].includes(s.scope));
 
   const handleEdit = (skill: SkillItem) => {
     setEditingSkill(skill);
@@ -175,7 +177,7 @@ export default function SkillsContent({ selectedProvider, currentProjects }: Ski
         </div>
       )}
 
-      {!isLoading && (userSkills.length > 0 || projectSkills.length > 0) && (
+      {!isLoading && (userSkills.length > 0 || projectSkills.length > 0 || repoSkills.length > 0 || otherSkills.length > 0) && (
         <div className="space-y-6">
           <SkillGroup
             title={t('skills.scopeGroup.user')}
@@ -186,6 +188,18 @@ export default function SkillsContent({ selectedProvider, currentProjects }: Ski
           <SkillGroup
             title={t('skills.scopeGroup.project')}
             skills={projectSkills}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+          />
+          <SkillGroup
+            title={t('skills.scopeGroup.repo')}
+            skills={repoSkills}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+          />
+          <SkillGroup
+            title={t('skills.scopeGroup.other')}
+            skills={otherSkills}
             onEdit={handleEdit}
             onDelete={handleDelete}
           />

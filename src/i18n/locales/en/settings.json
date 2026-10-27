@@ -411,6 +411,13 @@
         "overrideNote": "You can override this per-session using the mode button in the chat interface."
       }
     },
+    "antigravity": {
+      "headlessNotice": "Antigravity (agy) runs in headless mode and cannot prompt for tool permission approval interactively. Enable \"Skip permissions\" to avoid tool actions being auto-denied and interrupting the session.",
+      "skipPermissions": {
+        "label": "Skip permission prompts (auto-approve all tools)",
+        "description": "Equivalent to the --dangerously-skip-permissions flag"
+      }
+    },
     "actions": {
       "add": "Add"
     }
@@ -459,11 +466,17 @@
     "emptyHint": "Create a new skill or upload .md/.zip files to get started.",
     "scope": {
       "user": "User (Global)",
-      "project": "Project"
+      "project": "Project",
+      "repo": "Repository",
+      "admin": "Admin",
+      "system": "System",
+      "plugin": "Plugin"
     },
     "scopeGroup": {
       "user": "User Skills",
-      "project": "Project Skills"
+      "project": "Project Skills",
+      "repo": "Repository Skills",
+      "other": "Other Skills"
     },
     "editor": {
       "titleCreate": "Create Skill",

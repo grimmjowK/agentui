@@ -2,6 +2,7 @@ import type {
   AgentProvider,
   AuthStatus,
   AgentCategory,
+  AntigravityPermissionsState,
   ClaudePermissionsState,
   CursorPermissionsState,
   CodexPermissionMode,
@@ -24,6 +25,8 @@ export type AgentsSettingsTabProps = {
   onClaudePermissionsChange: (value: ClaudePermissionsState) => void;
   cursorPermissions: CursorPermissionsState;
   onCursorPermissionsChange: (value: CursorPermissionsState) => void;
+  antigravityPermissions: AntigravityPermissionsState;
+  onAntigravityPermissionsChange: (value: AntigravityPermissionsState) => void;
   codexPermissionMode: CodexPermissionMode;
   onCodexPermissionModeChange: (value: CodexPermissionMode) => void;
   geminiPermissionMode: GeminiPermissionMode;
@@ -51,6 +54,8 @@ export type AgentCategoryContentSectionProps = {
   onClaudePermissionsChange: (value: ClaudePermissionsState) => void;
   cursorPermissions: CursorPermissionsState;
   onCursorPermissionsChange: (value: CursorPermissionsState) => void;
+  antigravityPermissions: AntigravityPermissionsState;
+  onAntigravityPermissionsChange: (value: AntigravityPermissionsState) => void;
   codexPermissionMode: CodexPermissionMode;
   onCodexPermissionModeChange: (value: CodexPermissionMode) => void;
   geminiPermissionMode: GeminiPermissionMode;

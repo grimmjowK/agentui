@@ -8,6 +8,7 @@ import {
 } from '../constants/constants';
 import type {
   AgentProvider,
+  AntigravityPermissionsState,
   ClaudePermissionsState,
   CodeEditorSettingsState,
   CodexPermissionMode,
@@ -38,6 +39,10 @@ type ClaudeSettingsStorage = {
 type CursorSettingsStorage = {
   allowedCommands?: string[];
   disallowedCommands?: string[];
+  skipPermissions?: boolean;
+};
+
+type AntigravitySettingsStorage = {
   skipPermissions?: boolean;
 };
 
@@ -103,6 +108,11 @@ const createEmptyCursorPermissions = (): CursorPermissionsState => ({
   ...DEFAULT_CURSOR_PERMISSIONS,
 });
 
+const createDefaultAntigravityPermissions = (): AntigravityPermissionsState => ({
+  // agy 的 headless 模式无法交互式审批工具权限，默认跳过权限。
+  skipPermissions: true,
+});
+
 const createDefaultNotificationPreferences = (): NotificationPreferencesState => ({
   channels: {
     inApp: true,
@@ -131,6 +141,9 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
   ));
   const [cursorPermissions, setCursorPermissions] = useState<CursorPermissionsState>(() => (
     createEmptyCursorPermissions()
+  ));
+  const [antigravityPermissions, setAntigravityPermissions] = useState<AntigravityPermissionsState>(() => (
+    createDefaultAntigravityPermissions()
   ));
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferencesState>(() => (
     createDefaultNotificationPreferences()
@@ -169,6 +182,14 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         skipPermissions: Boolean(savedCursorSettings.skipPermissions),
       });
 
+      const savedAntigravitySettings = parseJson<AntigravitySettingsStorage>(
+        localStorage.getItem('antigravity-settings'),
+        {},
+      );
+      setAntigravityPermissions({
+        skipPermissions: savedAntigravitySettings.skipPermissions !== false,
+      });
+
       const savedCodexSettings = parseJson<CodexSettingsStorage>(
         localStorage.getItem('codex-settings'),
         {},
@@ -202,6 +223,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
       console.error('Error loading settings:', error);
       setClaudePermissions(createEmptyClaudePermissions());
       setCursorPermissions(createEmptyCursorPermissions());
+      setAntigravityPermissions(createDefaultAntigravityPermissions());
       setNotificationPreferences(createDefaultNotificationPreferences());
       setCodexPermissionMode('default');
       setProjectSortOrder('name');
@@ -242,6 +264,11 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         lastUpdated: now,
       }));
 
+      localStorage.setItem('antigravity-settings', JSON.stringify({
+        skipPermissions: antigravityPermissions.skipPermissions,
+        lastUpdated: now,
+      }));
+
       localStorage.setItem('codex-settings', JSON.stringify({
         permissionMode: codexPermissionMode,
         lastUpdated: now,
@@ -273,6 +300,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     cursorPermissions.allowedCommands,
     cursorPermissions.disallowedCommands,
     cursorPermissions.skipPermissions,
+    antigravityPermissions.skipPermissions,
     notificationPreferences,
     geminiPermissionMode,
     projectSortOrder,
@@ -372,6 +400,8 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     setClaudePermissions,
     cursorPermissions,
     setCursorPermissions,
+    antigravityPermissions,
+    setAntigravityPermissions,
     notificationPreferences,
     setNotificationPreferences,
     codexPermissionMode,
