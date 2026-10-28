@@ -534,7 +534,7 @@ export function useSessionStore() {
         slot.serverMessages.map(userTextFingerprint).filter((t): t is string => t !== null),
       );
       slot.realtimeMessages = slot.realtimeMessages.filter((m) => {
-        if (m.kind === 'error') return true;
+        if (m.kind === 'error' || m.isInterrupted) return true;
         if (m.id.startsWith('local_')) {
           const fp = userTextFingerprint(m);
           return fp ? !serverUserTexts.has(fp) : true;

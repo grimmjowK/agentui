@@ -269,9 +269,22 @@ export function useChatRealtimeHandlers({
 
         // Handle aborted case
         if (msg.aborted) {
-          // Abort was requested — the complete event confirms it
-          // No special UI action needed beyond clearing loading state above
-          // The backend already sent any abort-related messages
+          if (sid) {
+            const currentMessages = sessionStore.getMessages(sid);
+            const lastMsg = currentMessages[currentMessages.length - 1];
+            if (!lastMsg?.isInterrupted) {
+              sessionStore.appendRealtime(sid, {
+                id: `interrupted_${Date.now()}`,
+                sessionId: sid,
+                timestamp: new Date().toISOString(),
+                provider,
+                kind: 'text',
+                role: 'user',
+                isInterrupted: true,
+                content: '<turn_aborted>',
+              });
+            }
+          }
           break;
         }
 

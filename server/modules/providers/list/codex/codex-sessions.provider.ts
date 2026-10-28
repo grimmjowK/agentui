@@ -32,9 +32,13 @@ const CODEX_INTERNAL_USER_PREFIXES = [
   '<context_window_guidance>',
   '<persistent_mode>',
   '<subagent_notification>',
-  '<turn_aborted>',
   '# AGENTS.md instructions for ',
 ] as const;
+
+export function isCodexInterruptedText(text: string): boolean {
+  const trimmed = text.trimStart();
+  return trimmed.startsWith('<turn_aborted>') || trimmed.startsWith('Conversation interrupted');
+}
 
 function isInternalCodexUserText(text: string): boolean {
   const trimmed = text.trimStart();
@@ -50,11 +54,10 @@ function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boole
     if (payload.kind && payload.kind !== 'plain') {
       return false;
     }
-    return (
-      typeof payload.message === 'string'
-      && payload.message.trim().length > 0
-      && !isInternalCodexUserText(payload.message)
-    );
+    const msg = typeof payload.message === 'string' ? payload.message : '';
+    if (!msg.trim()) return false;
+    if (isCodexInterruptedText(msg)) return true;
+    return !isInternalCodexUserText(msg);
   }
 
   // Current Codex rollout files persist user input as response_item/message,
@@ -63,6 +66,8 @@ function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boole
     return false;
   }
 
+  const rawText = extractCodexTextContent(payload.content, { excludeInternal: false });
+  if (isCodexInterruptedText(rawText)) return true;
   return extractCodexTextContent(payload.content, { excludeInternal: true }).trim().length > 0;
 }
 
@@ -143,24 +148,30 @@ async function getCodexSessionMessages(
         }
 
         if (entry.type === 'event_msg' && isVisibleCodexUserMessage(entry.payload as AnyRecord)) {
+          const rawMsg = String((entry.payload as AnyRecord).message || '');
+          const isInterrupted = isCodexInterruptedText(rawMsg);
           messages.push({
             type: 'user',
             timestamp: entry.timestamp,
             message: {
               role: 'user',
-              content: entry.payload.message,
+              content: rawMsg,
             },
+            ...(isInterrupted ? { isInterrupted: true } : {}),
           });
         }
 
         if (entry.type === 'response_item' && isVisibleCodexUserMessage(entry.payload as AnyRecord)) {
+          const rawContent = extractCodexTextContent(entry.payload.content, { excludeInternal: false });
+          const isInterrupted = isCodexInterruptedText(rawContent);
           messages.push({
             type: 'user',
             timestamp: entry.timestamp,
             message: {
               role: 'user',
-              content: extractCodexTextContent(entry.payload.content, { excludeInternal: true }),
+              content: isInterrupted ? rawContent : extractCodexTextContent(entry.payload.content, { excludeInternal: true }),
             },
+            ...(isInterrupted ? { isInterrupted: true } : {}),
           });
         }
 
@@ -169,16 +180,29 @@ async function getCodexSessionMessages(
           entry.payload?.type === 'message' &&
           entry.payload.role === 'assistant'
         ) {
-          const textContent = extractCodexTextContent(entry.payload.content);
-          if (textContent.trim()) {
+          const rawContent = extractCodexTextContent(entry.payload.content, { excludeInternal: false });
+          if (isCodexInterruptedText(rawContent)) {
             messages.push({
-              type: 'assistant',
+              type: 'user',
               timestamp: entry.timestamp,
               message: {
-                role: 'assistant',
-                content: textContent,
+                role: 'user',
+                content: rawContent,
               },
+              isInterrupted: true,
             });
+          } else {
+            const textContent = extractCodexTextContent(entry.payload.content, { excludeInternal: true });
+            if (textContent.trim()) {
+              messages.push({
+                type: 'assistant',
+                timestamp: entry.timestamp,
+                message: {
+                  role: 'assistant',
+                  content: textContent,
+                },
+              });
+            }
           }
         }
 
@@ -206,11 +230,18 @@ async function getCodexSessionMessages(
           let toolName = entry.payload.name;
           let toolInput = entry.payload.arguments;
 
-          if (toolName === 'shell_command') {
+          if (toolName === 'shell_command' || toolName === 'exec') {
             toolName = 'Bash';
             try {
-              const args = JSON.parse(entry.payload.arguments) as AnyRecord;
-              toolInput = JSON.stringify({ command: args.command });
+              const args = typeof entry.payload.arguments === 'string'
+                ? JSON.parse(entry.payload.arguments) as AnyRecord
+                : (entry.payload.arguments as AnyRecord);
+              if (args && typeof args === 'object') {
+                const cmd = args.command || args.cmd;
+                if (typeof cmd === 'string') {
+                  toolInput = JSON.stringify({ command: cmd });
+                }
+              }
             } catch {
               // Keep original arguments when parsing fails.
             }
@@ -226,11 +257,31 @@ async function getCodexSessionMessages(
         }
 
         if (entry.type === 'response_item' && entry.payload?.type === 'function_call_output') {
+          const payload = (entry.payload || {}) as AnyRecord;
+          const output = payload.output;
+          let isError = Boolean(payload.is_error || payload.isError);
+          if (!isError && typeof payload.exit_code === 'number' && payload.exit_code !== 0) {
+            isError = true;
+          }
+          if (!isError && typeof payload.exitCode === 'number' && payload.exitCode !== 0) {
+            isError = true;
+          }
+          if (!isError && payload.status === 'failed') {
+            isError = true;
+          }
+          if (!isError && typeof output === 'string' && (
+            /exit code:?\s*[1-9]\d*/i.test(output)
+            || /failed \(exit\s*[1-9]\d*\)/i.test(output)
+          )) {
+            isError = true;
+          }
+
           messages.push({
             type: 'tool_result',
             timestamp: entry.timestamp,
-            toolCallId: entry.payload.call_id,
-            output: entry.payload.output,
+            toolCallId: payload.call_id,
+            output: typeof output === 'string' ? output : JSON.stringify(output || ''),
+            isError,
           });
         }
 
@@ -356,6 +407,7 @@ export class CodexSessionsProvider implements IProviderSessions {
       if (!content.trim()) {
         return [];
       }
+      const isInterrupted = Boolean(raw.isInterrupted) || isCodexInterruptedText(content);
       return [createNormalizedMessage({
         id: baseId,
         sessionId,
@@ -364,6 +416,7 @@ export class CodexSessionsProvider implements IProviderSessions {
         kind: 'text',
         role: 'user',
         content,
+        ...(isInterrupted ? { isInterrupted: true } : {}),
       })];
     }
 
@@ -428,7 +481,7 @@ export class CodexSessionsProvider implements IProviderSessions {
       return [];
     }
 
-    if (raw.message?.role) {
+    if (raw.message?.role || raw.type === 'tool_use' || raw.type === 'tool_result' || raw.type === 'thinking' || raw.toolName) {
       return this.normalizeHistoryEntry(raw, sessionId);
     }
 
@@ -456,7 +509,9 @@ export class CodexSessionsProvider implements IProviderSessions {
             kind: 'thinking',
             content: raw.message?.content || '',
           })];
-        case 'command_execution':
+        case 'command_execution': {
+          const isCmdError = raw.status === 'failed' || raw.status === 'declined' || (typeof raw.exitCode === 'number' && raw.exitCode !== 0);
+          const isCmdDone = raw.status === 'completed' || isCmdError;
           return [createNormalizedMessage({
             id: baseId,
             sessionId,
@@ -469,7 +524,14 @@ export class CodexSessionsProvider implements IProviderSessions {
             output: raw.output,
             exitCode: raw.exitCode,
             status: raw.status,
+            ...(isCmdDone ? {
+              toolResult: {
+                content: raw.output || (isCmdError ? `Exit code ${raw.exitCode ?? 1}` : ''),
+                isError: isCmdError,
+              },
+            } : {}),
           })];
+        }
         case 'file_change':
           return [createNormalizedMessage({
             id: baseId,
