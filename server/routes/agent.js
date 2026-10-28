@@ -989,7 +989,7 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         cwd: finalProjectPath,
         sessionId: sessionId || null,
         model: model || ANTIGRAVITY_MODELS.DEFAULT,
-        skipPermissions: true
+        permissionMode: 'bypassPermissions' // External API runs without interactive approval
       }, writer);
     }
 
