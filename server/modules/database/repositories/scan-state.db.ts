@@ -5,12 +5,11 @@ type ScanStateRow = {
 };
 
 export const scanStateDb = {
-    getLastScannedAt() {
+    getLastScannedAt(provider: 'global' | 'antigravity' = 'global') {
         const db = getConnection();
-
-        const row = db
-            .prepare(`SELECT last_scanned_at FROM scan_state WHERE id = 1`)
-            .get() as ScanStateRow;
+        const row = provider === 'antigravity'
+            ? db.prepare("SELECT value AS last_scanned_at FROM app_config WHERE key = 'antigravity_last_scanned_at'").get() as ScanStateRow | undefined
+            : db.prepare('SELECT last_scanned_at FROM scan_state WHERE id = 1').get() as ScanStateRow | undefined;
 
         if (!row) {
             return null; // Before any scan, the row is undefined.
@@ -28,9 +27,15 @@ export const scanStateDb = {
         return lastScannedDate;
     },
 
-    updateLastScannedAt(scannedAt: Date = new Date()) {
+    updateLastScannedAt(scannedAt: Date = new Date(), provider: 'global' | 'antigravity' = 'global') {
         const db = getConnection();
         const sqliteTimestamp = scannedAt.toISOString().slice(0, 19).replace('T', ' ');
+
+        if (provider === 'antigravity') {
+            db.prepare("INSERT INTO app_config (key, value) VALUES ('antigravity_last_scanned_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+                .run(sqliteTimestamp);
+            return;
+        }
 
         db.prepare(`
             INSERT INTO scan_state (id, last_scanned_at)

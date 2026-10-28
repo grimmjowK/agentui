@@ -37,6 +37,30 @@ function send(writer, message) {
   }
 }
 
+function createReconnectableWriter(writer) {
+  const pending = [];
+  return {
+    isWebSocketWriter: true,
+    userId: writer?.userId,
+    send(message) {
+      if (typeof writer?.ws?.readyState === 'number' && writer.ws.readyState !== 1) {
+        pending.push(message);
+        if (pending.length > 1000) pending.shift();
+        return;
+      }
+      writer?.send(message);
+    },
+    setSessionId(sessionId) { writer?.setSessionId?.(sessionId); },
+    reconnect(nextWriter) {
+      if (this.userId !== nextWriter?.userId || !nextWriter?.ws) return false;
+      if (typeof writer?.updateWebSocket === 'function') writer.updateWebSocket(nextWriter.ws);
+      else writer = nextWriter;
+      for (const message of pending.splice(0)) this.send(message);
+      return true;
+    },
+  };
+}
+
 /**
  * Parses stdout lines from `agy` non-interactive execution.
  */
@@ -328,9 +352,11 @@ export async function spawnAntigravity(message, options = {}, ws) {
   args.push('--output-format', 'stream-json');
 
   // Permission mode: agy uses --dangerously-skip-permissions
-  if (options.skipPermissions || options.permissionMode === 'bypassPermissions') {
+  if (options.permissionMode === 'bypassPermissions') {
     args.push('--dangerously-skip-permissions');
   }
+
+  const liveWriter = createReconnectableWriter(ws);
 
   return new Promise((resolve, reject) => {
     let childProcess;
@@ -344,12 +370,12 @@ export async function spawnAntigravity(message, options = {}, ws) {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (err) {
-      send(ws, { sessionId, kind: 'error', content: err.message });
+      send(liveWriter, { sessionId, kind: 'error', content: err.message });
       return reject(err);
     }
 
     activeAntigravityProcesses.set(sessionId, childProcess);
-    const handler = new AntigravityResponseHandler(options.sessionId || null, ws, (nativeId) => {
+    const handler = new AntigravityResponseHandler(options.sessionId || null, liveWriter, (nativeId) => {
       activeAntigravityProcesses.delete(sessionId);
       sessionId = nativeId;
       activeAntigravityProcesses.set(sessionId, childProcess);
@@ -368,7 +394,7 @@ export async function spawnAntigravity(message, options = {}, ws) {
         handler.handleChunk(chunk);
       } catch (error) {
         handler.error = error.message;
-        send(ws, { sessionId: handler.sessionId, kind: 'error', content: error.message });
+        send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: error.message });
         childProcess.kill('SIGTERM');
       }
     });
@@ -385,7 +411,7 @@ export async function spawnAntigravity(message, options = {}, ws) {
         handler.flush();
       } catch (error) {
         handler.error = error.message;
-        send(ws, { sessionId: handler.sessionId, kind: 'error', content: error.message });
+        send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: error.message });
       }
       activeAntigravityProcesses.delete(sessionId);
       if (handler.sessionId && handler.sessionId !== sessionId) {
@@ -419,14 +445,14 @@ export async function spawnAntigravity(message, options = {}, ws) {
       }
 
       if (childProcess.aborted) {
-        send(ws, { sessionId: handler.sessionId, kind: 'complete', aborted: true, success: true, exitCode: 0 });
+        send(liveWriter, { sessionId: handler.sessionId, kind: 'complete', aborted: true, success: true, exitCode: 0 });
         resolve();
       } else if (code === 0 && !handler.error) {
-        send(ws, { sessionId: handler.sessionId, kind: 'complete', exitCode: 0, success: true });
+        send(liveWriter, { sessionId: handler.sessionId, kind: 'complete', exitCode: 0, success: true });
         resolve();
       } else {
         const errorContent = handler.error || stderrOutput.trim() || `Antigravity CLI exited with code ${code}`;
-        if (!handler.error) send(ws, { sessionId: handler.sessionId, kind: 'error', content: errorContent });
+        if (!handler.error) send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: errorContent });
         notifyRunFailed({ sessionId: handler.sessionId, error: errorContent });
         reject(new Error(errorContent));
       }
@@ -439,7 +465,7 @@ export async function spawnAntigravity(message, options = {}, ws) {
         activeAntigravityProcesses.delete(handler.sessionId);
       }
       const errorMsg = `Failed to start Antigravity process: ${err.message}`;
-      send(ws, { sessionId: handler.sessionId, kind: 'error', content: errorMsg });
+      send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: errorMsg });
       notifyRunFailed({ sessionId: handler.sessionId, error: errorMsg });
       reject(err);
     });
@@ -480,6 +506,13 @@ export function abortAntigravitySession(sessionId) {
 
 export function isAntigravitySessionActive(sessionId) {
   return activeAntigravityProcesses.has(sessionId);
+}
+
+export function reconnectAntigravitySession(sessionId, writer) {
+  const process = activeAntigravityProcesses.get(sessionId);
+  if (!process?.responseHandler || !writer?.ws) return false;
+  const currentWriter = process.responseHandler.writer;
+  return currentWriter?.reconnect?.(writer) === true;
 }
 
 export function getActiveAntigravitySessions() {

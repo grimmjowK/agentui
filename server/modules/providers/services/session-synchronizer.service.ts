@@ -16,6 +16,7 @@ export const sessionSynchronizerService = {
    */
   async synchronizeSessions(): Promise<SessionSynchronizeResult> {
     const lastScanAt = scanStateDb.getLastScannedAt();
+    const antigravityLastScanAt = scanStateDb.getLastScannedAt('antigravity');
     const scanBoundary = new Date();
     const processedByProvider: Record<LLMProvider, number> = {
       claude: 0,
@@ -29,13 +30,18 @@ export const sessionSynchronizerService = {
     const results = await Promise.allSettled(
       providerRegistry.listProviders().map(async (provider) => ({
         provider: provider.id,
-        processed: await provider.sessionSynchronizer.synchronize(lastScanAt ?? undefined),
+        processed: await provider.sessionSynchronizer.synchronize(
+          (provider.id === 'antigravity' ? antigravityLastScanAt : lastScanAt) ?? undefined,
+        ),
       }))
     );
 
     for (const result of results) {
       if (result.status === 'fulfilled') {
         processedByProvider[result.value.provider] = result.value.processed;
+        if (result.value.provider === 'antigravity') {
+          scanStateDb.updateLastScannedAt(scanBoundary, 'antigravity');
+        }
         continue;
       }
 

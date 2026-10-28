@@ -228,18 +228,22 @@ function ChatInterface({
   const handleWebSocketReconnect = useCallback(async () => {
     if (!selectedProject || !selectedSession) return;
     const providerVal = (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
+    const sessionProvider = selectedSession.__provider || providerVal;
+    if (sessionProvider === 'antigravity') {
+      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: sessionProvider });
+    }
     await sessionStore.refreshFromServer(selectedSession.id, {
-      provider: (selectedSession.__provider || providerVal) as LLMProvider,
+      provider: sessionProvider as LLMProvider,
       // Use DB projectId; legacy folder-derived projectName is no longer accepted here.
       projectId: selectedProject.projectId,
       projectPath: selectedProject.fullPath || selectedProject.path || '',
     });
-    setIsLoading(false);
-    setCanAbortSession(false);
-    onSessionNotProcessing?.(selectedSession.id);
-    // Re-check actual session status from backend — if still processing,
-    // the response will set isLoading back to true
-    sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: selectedSession.__provider || providerVal });
+    if (sessionProvider !== 'antigravity') {
+      setIsLoading(false);
+      setCanAbortSession(false);
+      onSessionNotProcessing?.(selectedSession.id);
+      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: sessionProvider });
+    }
   }, [selectedProject, selectedSession, sessionStore, setIsLoading, setCanAbortSession, onSessionNotProcessing, sendMessage]);
 
   useChatRealtimeHandlers({

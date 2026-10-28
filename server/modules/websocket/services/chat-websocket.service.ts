@@ -84,6 +84,7 @@ type ChatWebSocketDependencies = {
   isCodexSessionActive: (sessionId: string) => boolean;
   isGeminiSessionActive: (sessionId: string) => boolean;
   isAntigravitySessionActive?: (sessionId: string) => boolean;
+  reconnectAntigravitySession?: (sessionId: string, writer: WebSocketWriter) => boolean;
   reconnectSessionWriter: (sessionId: string, ws: WebSocket) => boolean;
   getPendingApprovalsForSession: (sessionId: string) => unknown[];
   getActiveClaudeSDKSessions: () => unknown;
@@ -278,7 +279,9 @@ export function handleChatConnection(
         } else if (provider === 'gemini') {
           isActive = dependencies.isGeminiSessionActive(sessionId);
         } else if (provider === 'antigravity') {
-          isActive = dependencies.isAntigravitySessionActive ? dependencies.isAntigravitySessionActive(sessionId) : false;
+          isActive = dependencies.reconnectAntigravitySession
+            ? dependencies.reconnectAntigravitySession(sessionId, writer)
+            : false;
         } else {
           isActive = dependencies.isClaudeSDKSessionActive(sessionId);
           if (isActive) {

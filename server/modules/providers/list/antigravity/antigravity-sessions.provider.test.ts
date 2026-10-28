@@ -31,6 +31,10 @@ test('parseAntigravitySessionPath extracts conversation id from brain paths', ()
   );
 
   assert.equal(parseAntigravitySessionPath('/some/other/path.jsonl'), null);
+  assert.equal(
+    parseAntigravitySessionPath('/data/brain/antigravity/brain/native-id/transcript.jsonl'),
+    'native-id',
+  );
 });
 
 test('fetchHistory handles limit: 0 gracefully', async () => {

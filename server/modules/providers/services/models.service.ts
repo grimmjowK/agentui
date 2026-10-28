@@ -154,22 +154,38 @@ const listCodexModels = async (): Promise<ProviderModel[]> => {
 /** Runs `agy models` and parses its "slug<TAB>label" output lines. */
 const listAntigravityModels = async (): Promise<ProviderModel[]> => {
   const executable = resolveAntigravityExecutablePath();
-  const result = spawn.sync(executable, ['models'], {
-    encoding: 'utf8',
-    timeout: LOOKUP_TIMEOUT_MS,
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const output = await new Promise<string>((resolve, reject) => {
+    const child = spawn(executable, ['models'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(stdout);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(new Error(`agy models 查询超时（${LOOKUP_TIMEOUT_MS / 1000}s）`));
+    }, LOOKUP_TIMEOUT_MS);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      if (stdout.length > 1024 * 1024) {
+        child.kill('SIGKILL');
+        finish(new Error('agy models output exceeded 1 MB'));
+      }
+    });
+    child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-8192); });
+    child.on('error', (error: Error) => finish(error));
+    child.on('close', (code: number | null) => {
+      finish(code === 0 ? undefined : new Error(stderr.trim() || `agy models exited with code ${code}`));
+    });
   });
 
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    const detail = String(result.stderr || result.stdout || '').trim();
-    throw new Error(detail || `agy models exited with code ${result.status}`);
-  }
-
   const models: ProviderModel[] = [];
-  for (const rawLine of String(result.stdout || '').split(/\r?\n/)) {
+  for (const rawLine of output.split(/\r?\n/)) {
     const tabIndex = rawLine.indexOf('\t');
     if (tabIndex <= 0) {
       continue;

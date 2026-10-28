@@ -726,8 +726,7 @@ export function useChatComposerState({
         return {
           allowedTools: [],
           disallowedTools: [],
-          // antigravity 的 headless 模式无法交互式审批工具权限，默认跳过权限。
-          skipPermissions: provider === 'antigravity',
+          skipPermissions: false,
         };
       };
 
@@ -797,8 +796,7 @@ export function useChatComposerState({
             sessionSummary,
             permissionMode,
             toolsSettings,
-            // 设置页默认开启；这里读取用户配置，未配置时回退为 true。
-            skipPermissions: toolsSettings?.skipPermissions ?? true,
+            skipPermissions: permissionMode === 'bypassPermissions',
           },
         });
       } else {

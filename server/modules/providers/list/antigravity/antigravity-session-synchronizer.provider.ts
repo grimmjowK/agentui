@@ -24,7 +24,7 @@ export type ParsedSession = {
 
 export function parseAntigravitySessionPath(filePath: string): string | null {
   const parts = filePath.split(path.sep);
-  const brainIndex = parts.indexOf('brain');
+  const brainIndex = parts.lastIndexOf('brain');
   if (brainIndex !== -1 && parts.length > brainIndex + 1) {
     return parts[brainIndex + 1];
   }
@@ -132,12 +132,7 @@ export class AntigravitySessionSynchronizer implements IProviderSessionSynchroni
     try {
       // Path pattern: .../brain/<conversation-id>/.system_generated/logs/transcript.jsonl
       // or .../brain/<conversation-id>/transcript.jsonl
-      const parts = filePath.split(path.sep);
-      const brainIndex = parts.indexOf('brain');
-      let sessionId = '';
-      if (brainIndex !== -1 && parts.length > brainIndex + 1) {
-        sessionId = parts[brainIndex + 1];
-      }
+      const sessionId = parseAntigravitySessionPath(filePath);
 
       if (!sessionId) {
         return null;

@@ -412,10 +412,10 @@
       }
     },
     "antigravity": {
-      "headlessNotice": "Antigravity（agy）以 headless 模式运行，无法在命令行中交互式审批工具权限。建议启用「跳过权限」，否则需要工具权限的操作会被自动拒绝并中断会话。",
+      "headlessNotice": "Antigravity（agy）以 headless 模式运行，无法交互式审批工具权限。默认模式下工具操作可能被拒绝；聊天界面的权限按钮显示每次运行实际使用的模式。",
       "skipPermissions": {
-        "label": "跳过权限提示（自动放行所有工具）",
-        "description": "等同于 --dangerously-skip-permissions 标志"
+        "label": "新会话默认自动放行所有工具",
+        "description": "将新会话初始模式设为跳过权限；每个会话仍可通过聊天界面的权限按钮覆盖。"
       }
     },
     "actions": {

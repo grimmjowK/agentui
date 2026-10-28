@@ -36,7 +36,7 @@ export class CodexAppServer extends EventEmitter {
       childEnv.CODEX_CONFIG_PROFILE = profile;
       if (profile.startsWith('deepseek')) {
         const modelSlug = profile === 'deepseek-flash' ? 'deepseek-flash' : 'deepseek-v4-pro';
-        const modelsJson = path.join(os.homedir(), '.codex', 'models.json');
+        const modelsJson = path.join(configRoot || process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'models.json');
         args.push(
           '-c', 'model_provider=deepseek',
           '-c', `model=${modelSlug}`,

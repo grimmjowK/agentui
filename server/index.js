@@ -54,6 +54,7 @@ import {
     spawnAntigravity,
     abortAntigravitySession,
     isAntigravitySessionActive,
+    reconnectAntigravitySession,
     getActiveAntigravitySessions,
 } from './antigravity-cli.js';
 import sessionManager from './sessionManager.js';
@@ -136,6 +137,7 @@ const wss = createWebSocketServer(server, {
         isCodexSessionActive,
         isGeminiSessionActive,
         isAntigravitySessionActive,
+        reconnectAntigravitySession,
         reconnectSessionWriter,
         getPendingApprovalsForSession,
         getActiveClaudeSDKSessions,

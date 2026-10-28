@@ -412,10 +412,10 @@
       }
     },
     "antigravity": {
-      "headlessNotice": "Antigravity (agy) runs in headless mode and cannot prompt for tool permission approval interactively. Enable \"Skip permissions\" to avoid tool actions being auto-denied and interrupting the session.",
+      "headlessNotice": "Antigravity (agy) runs in headless mode and cannot prompt for tool approval. Tool actions may be denied in Default mode. The chat permission button shows the mode used for each run.",
       "skipPermissions": {
-        "label": "Skip permission prompts (auto-approve all tools)",
-        "description": "Equivalent to the --dangerously-skip-permissions flag"
+        "label": "Start new chats with all tools approved",
+        "description": "Sets the initial chat mode to Bypass permissions. The chat mode can override this for each session."
       }
     },
     "actions": {

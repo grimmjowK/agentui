@@ -7,10 +7,11 @@ import test from 'node:test';
 
 import Database from 'better-sqlite3';
 
-import { spawnAntigravity, abortAntigravitySession, getActiveAntigravitySessions, isAntigravitySessionActive } from './antigravity-cli.js';
+import { spawnAntigravity, abortAntigravitySession, getActiveAntigravitySessions, isAntigravitySessionActive, reconnectAntigravitySession } from './antigravity-cli.js';
 import { closeConnection } from './modules/database/connection.js';
 import { initializeDatabase } from './modules/database/init-db.js';
-import { sessionsDb, projectsDb } from './modules/database/index.js';
+import { sessionsDb, projectsDb, scanStateDb } from './modules/database/index.js';
+import { sessionSynchronizerService } from './modules/providers/services/session-synchronizer.service.js';
 import { AntigravitySessionSynchronizer } from './modules/providers/list/antigravity/antigravity-session-synchronizer.provider.js';
 import { AntigravitySessionsProvider } from './modules/providers/list/antigravity/antigravity-sessions.provider.js';
 import { getProjectsWithSessions, getProjectSessionsPage, getArchivedProjectsWithSessions } from './modules/projects/services/projects-with-sessions-fetch.service.js';
@@ -33,7 +34,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
 const prompt = args[args.indexOf('--prompt') + 1];
-const id = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : prompt === 'wait' ? 'waiting-native' : 'native-session';
+const id = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : prompt === 'wait' ? 'waiting-native' : prompt === 'reconnect' ? 'reconnect-native' : ['allowed', 'default'].includes(prompt) ? 'permission-' + prompt : 'native-session';
 const emit = (event) => process.stdout.write(JSON.stringify(event) + '\\n');
 fs.writeFileSync(path.join(process.env.ANTIGRAVITY_HOME, 'argv.json'), JSON.stringify(args));
 if (prompt === 'fail') { process.stderr.write('CLI startup failure'); process.exit(1); }
@@ -41,6 +42,14 @@ emit({ event: 'init', conversation_id: id, init: { cwd: process.cwd() } });
 if (prompt === 'wait') {
   process.on('SIGTERM', () => { emit({ event: 'result', result: { conversation_id: id, status: 'ERROR', error: 'interrupted' } }); process.exit(1); });
   setInterval(() => {}, 1000);
+} else if (prompt === 'reconnect') {
+  setTimeout(() => {
+    emit({ event: 'step_update', step_update: { conversation_id: id, step_type: 'agent_response', state: 'IN_PROGRESS', text_delta: 'during disconnect' } });
+  }, 30);
+  setTimeout(() => {
+    emit({ event: 'step_update', step_update: { conversation_id: id, step_type: 'agent_response', state: 'DONE', text_delta: 'after reconnect' } });
+    emit({ event: 'result', result: { conversation_id: id, status: 'SUCCESS', response: 'after reconnect' } });
+  }, 150);
 } else {
   const logs = path.join(process.env.ANTIGRAVITY_HOME, 'brain', id, '.system_generated', 'logs');
   fs.mkdirSync(logs, { recursive: true });
@@ -94,6 +103,15 @@ if (prompt === 'wait') {
     assert.equal(page.antigravitySessions[0].id, 'native-session');
     assert.equal((await provider.fetchHistory('native-session')).total, 4);
 
+    const defaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
+    assert.equal(defaultArgs.includes('--dangerously-skip-permissions'), false);
+    await spawnAntigravity('allowed', { cwd: workspace, permissionMode: 'bypassPermissions' }, writer);
+    const allowedArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
+    assert.equal(allowedArgs.includes('--dangerously-skip-permissions'), true);
+    await spawnAntigravity('default', { cwd: workspace, permissionMode: 'default', skipPermissions: true }, writer);
+    const backToDefaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
+    assert.equal(backToDefaultArgs.includes('--dangerously-skip-permissions'), false);
+
     // An offline CLI transcript gets its workspace from the native summary DB.
     const externalLog = path.join(root, 'brain', 'offline-native', 'transcript.jsonl');
     await mkdir(path.dirname(externalLog), { recursive: true });
@@ -106,6 +124,43 @@ if (prompt === 'wait') {
     const synchronizer = new AntigravitySessionSynchronizer();
     assert.equal(await synchronizer.synchronizeFile(externalLog), 'offline-native');
     assert.equal(sessionsDb.getSessionById('offline-native')?.project_path, workspace);
+    const oldLog = path.join(root, 'brain', 'old-native', 'transcript.jsonl');
+    await mkdir(path.dirname(oldLog), { recursive: true });
+    await writeFile(oldLog, JSON.stringify({ type: 'USER_INPUT', content: '<USER_REQUEST>Old</USER_REQUEST>', workspacePath: workspace }) + '\n');
+    scanStateDb.updateLastScannedAt(new Date(Date.now() + 60_000));
+    assert.equal(scanStateDb.getLastScannedAt('antigravity'), null);
+    await sessionSynchronizerService.synchronizeSessions();
+    assert.ok(sessionsDb.getSessionById('old-native'));
+    assert.ok(scanStateDb.getLastScannedAt('antigravity'));
+
+    const disconnectedMessages: any[] = [];
+    const reconnectedMessages: any[] = [];
+    const oldSocket = { messages: disconnectedMessages, readyState: 1 };
+    const newSocket = { messages: reconnectedMessages, readyState: 1 };
+    const reconnectWriter = {
+      isWebSocketWriter: true,
+      userId: 'same-user',
+      ws: oldSocket,
+      updateWebSocket(socket: typeof oldSocket) { this.ws = socket; },
+      send(message: any) {
+        this.ws.messages.push(message);
+        if (message.kind === 'session_created') {
+          assert.equal(reconnectAntigravitySession(message.sessionId, {
+            ws: newSocket, userId: 'other-user',
+          }), false);
+          oldSocket.readyState = 3;
+          setTimeout(() => {
+            assert.equal(reconnectAntigravitySession(message.sessionId, {
+              ws: newSocket, userId: 'same-user',
+            }), true);
+          }, 90);
+        }
+      },
+    };
+    await spawnAntigravity('reconnect', { cwd: workspace }, reconnectWriter);
+    assert.ok(reconnectedMessages.some((message) => message.kind === 'stream_delta' && message.content === 'during disconnect'));
+    assert.ok(reconnectedMessages.some((message) => message.kind === 'stream_delta' && message.content === 'after reconnect'));
+    assert.ok(reconnectedMessages.some((message) => message.kind === 'complete'));
     const originalLog = sessionsDb.getSessionById('native-session')!.jsonl_path!;
     await synchronizer.synchronizeFile(originalLog);
     assert.equal(sessionsDb.getSessionById('native-session')?.project_path, workspace);

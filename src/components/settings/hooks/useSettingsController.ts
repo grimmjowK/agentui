@@ -44,6 +44,7 @@ type CursorSettingsStorage = {
 
 type AntigravitySettingsStorage = {
   skipPermissions?: boolean;
+  explicitConsent?: boolean;
 };
 
 type CodexSettingsStorage = {
@@ -109,8 +110,7 @@ const createEmptyCursorPermissions = (): CursorPermissionsState => ({
 });
 
 const createDefaultAntigravityPermissions = (): AntigravityPermissionsState => ({
-  // agy 的 headless 模式无法交互式审批工具权限，默认跳过权限。
-  skipPermissions: true,
+  skipPermissions: false,
 });
 
 const createDefaultNotificationPreferences = (): NotificationPreferencesState => ({
@@ -187,7 +187,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         {},
       );
       setAntigravityPermissions({
-        skipPermissions: savedAntigravitySettings.skipPermissions !== false,
+        skipPermissions: savedAntigravitySettings.explicitConsent === true && savedAntigravitySettings.skipPermissions === true,
       });
 
       const savedCodexSettings = parseJson<CodexSettingsStorage>(
@@ -264,10 +264,19 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         lastUpdated: now,
       }));
 
+      const previousAntigravitySettings = parseJson<AntigravitySettingsStorage>(
+        localStorage.getItem('antigravity-settings'), {},
+      );
       localStorage.setItem('antigravity-settings', JSON.stringify({
         skipPermissions: antigravityPermissions.skipPermissions,
+        explicitConsent: true,
         lastUpdated: now,
       }));
+      if (previousAntigravitySettings.skipPermissions !== antigravityPermissions.skipPermissions) {
+        window.dispatchEvent(new CustomEvent('antigravity-permissions-change', {
+          detail: antigravityPermissions.skipPermissions,
+        }));
+      }
 
       localStorage.setItem('codex-settings', JSON.stringify({
         permissionMode: codexPermissionMode,

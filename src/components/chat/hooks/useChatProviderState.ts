@@ -24,12 +24,24 @@ const getPermissionModesForProvider = (provider: LLMProvider): PermissionMode[] 
   return ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
 };
 
+const antigravityDefaultMode = (): PermissionMode => {
+  try {
+    const settings = JSON.parse(localStorage.getItem('antigravity-settings') || '{}');
+    return settings.explicitConsent === true && settings.skipPermissions === true
+      ? 'bypassPermissions' : 'default';
+  } catch {
+    return 'default';
+  }
+};
+
 interface UseChatProviderStateArgs {
   selectedSession: ProjectSession | null;
 }
 
 export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => (
+    localStorage.getItem('selected-provider') === 'antigravity' ? antigravityDefaultMode() : 'default'
+  ));
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
   const [provider, setProvider] = useState<LLMProvider>(() => {
     return (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
@@ -54,13 +66,26 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
 
   useEffect(() => {
     if (!selectedSession?.id) {
+      setPermissionMode(provider === 'antigravity' ? antigravityDefaultMode() : 'default');
       return;
     }
 
     const savedMode = localStorage.getItem(`permissionMode-${selectedSession.id}`) as PermissionMode | null;
     const validModes = getPermissionModesForProvider(provider);
-    setPermissionMode(savedMode && validModes.includes(savedMode) ? savedMode : 'default');
+    setPermissionMode(savedMode && validModes.includes(savedMode)
+      ? savedMode : provider === 'antigravity' ? antigravityDefaultMode() : 'default');
   }, [selectedSession?.id, provider]);
+
+  useEffect(() => {
+    const onChange = (event: Event) => {
+      if (provider !== 'antigravity') return;
+      const nextMode = (event as CustomEvent<boolean>).detail ? 'bypassPermissions' : 'default';
+      setPermissionMode(nextMode);
+      if (selectedSession?.id) localStorage.setItem(`permissionMode-${selectedSession.id}`, nextMode);
+    };
+    window.addEventListener('antigravity-permissions-change', onChange);
+    return () => window.removeEventListener('antigravity-permissions-change', onChange);
+  }, [provider, selectedSession?.id]);
 
   useEffect(() => {
     if (!selectedSession?.__provider || selectedSession.__provider === provider) {
