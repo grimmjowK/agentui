@@ -83,7 +83,6 @@ export class CodexAppServer extends EventEmitter {
       }
       this.receive(message);
     });
-    this.child.stderr.on('data', (data) => this.emit('diagnostic', String(data)));
   }
 
   private fail(error: Error) {

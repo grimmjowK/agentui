@@ -99,10 +99,15 @@ function getShellSessionById(sessionId) {
 
     const indexedSession = sessionsDb.getSessionById(sessionId);
     if (indexedSession) {
+        // Gemini 依 jsonl 续接，文件已被删除时不能当作可续接
+        const resumable = indexedSession.provider !== 'gemini'
+            || (typeof indexedSession.jsonl_path === 'string'
+                && indexedSession.jsonl_path.endsWith('.jsonl')
+                && fs.existsSync(indexedSession.jsonl_path));
         return {
             ...(memorySession || {}),
             ...indexedSession,
-            cliSessionId: sessionId,
+            ...(resumable ? { cliSessionId: sessionId } : {}),
         };
     }
 
