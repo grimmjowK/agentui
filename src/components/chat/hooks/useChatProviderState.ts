@@ -34,6 +34,21 @@ const antigravityDefaultMode = (): PermissionMode => {
   }
 };
 
+const MODEL_DEFAULTS: Record<LLMProvider, string> = {
+  claude: CLAUDE_MODELS.DEFAULT,
+  cursor: CURSOR_MODELS.DEFAULT,
+  codex: CODEX_MODELS.DEFAULT,
+  gemini: GEMINI_MODELS.DEFAULT,
+  antigravity: ANTIGRAVITY_MODELS.DEFAULT,
+};
+
+// 全域預設模型：新 session 使用，也是無記錄的存量 session 的回退值
+const getDefaultModel = (provider: LLMProvider): string =>
+  localStorage.getItem(`${provider}-model`) || MODEL_DEFAULTS[provider];
+
+// 已有 session 的模型按 session 保存，避免一個 session 的切換影響其他 session
+export const sessionModelKey = (sessionId: string) => `session-model-${sessionId}`;
+
 interface UseChatProviderStateArgs {
   selectedSession: ProjectSession | null;
 }
@@ -63,6 +78,24 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   });
 
   const lastProviderRef = useRef(provider);
+
+  // 切換 session（或回到新 session 畫面）時還原該 session 的模型
+  useEffect(() => {
+    const sessionId = selectedSession?.id;
+    // provider 尚未切到該 session 的 provider 時先跳過，等下一輪 effect
+    if (selectedSession?.__provider && selectedSession.__provider !== provider) {
+      return;
+    }
+    const model = (sessionId && localStorage.getItem(sessionModelKey(sessionId))) || getDefaultModel(provider);
+    const setters: Record<LLMProvider, (model: string) => void> = {
+      claude: setClaudeModel,
+      cursor: setCursorModel,
+      codex: setCodexModel,
+      gemini: setGeminiModel,
+      antigravity: setAntigravityModel,
+    };
+    setters[provider](model);
+  }, [selectedSession?.id, selectedSession?.__provider, provider]);
 
   useEffect(() => {
     if (!selectedSession?.id) {
@@ -132,7 +165,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   }, [provider]);
 
   useEffect(() => {
-    if (provider !== 'codex') {
+    if (provider !== 'codex' || (selectedSession?.__provider && selectedSession.__provider !== provider)) {
       return;
     }
 
@@ -148,17 +181,17 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
             return current;
           }
           const nextModel = models[0].value;
-          localStorage.setItem('codex-model', nextModel);
+          localStorage.setItem(selectedSession?.id ? sessionModelKey(selectedSession.id) : 'codex-model', nextModel);
           return nextModel;
         });
       })
       .catch((error) => {
         console.error('Error loading Codex models:', error);
       });
-  }, [provider]);
+  }, [provider, selectedSession?.id, selectedSession?.__provider]);
 
   useEffect(() => {
-    if (provider !== 'antigravity') {
+    if (provider !== 'antigravity' || (selectedSession?.__provider && selectedSession.__provider !== provider)) {
       return;
     }
 
@@ -174,14 +207,14 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
             return current;
           }
           const nextModel = models[0].value;
-          localStorage.setItem('antigravity-model', nextModel);
+          localStorage.setItem(selectedSession?.id ? sessionModelKey(selectedSession.id) : 'antigravity-model', nextModel);
           return nextModel;
         });
       })
       .catch((error) => {
         console.error('Error loading Antigravity models:', error);
       });
-  }, [provider]);
+  }, [provider, selectedSession?.id, selectedSession?.__provider]);
 
   const cyclePermissionMode = useCallback(() => {
     const modes = getPermissionModesForProvider(provider);

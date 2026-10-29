@@ -25,6 +25,7 @@ import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import { escapeRegExp } from '../utils/chatFormatting';
 
 import { useFileMentions } from './useFileMentions';
+import { sessionModelKey } from './useChatProviderState';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
 
 type PendingViewSession = {
@@ -188,21 +189,25 @@ export function useChatComposerState({
   prevSessionIdForInputRef.current = selectedSession?.id;
 
   const handleModelSwitch = useCallback((modelValue: string) => {
+    // 已有 session 只記到該 session；新 session 才更新全域預設
+    const sessionId = selectedSession?.id;
+    const persist = (globalKey: string) =>
+      localStorage.setItem(sessionId ? sessionModelKey(sessionId) : globalKey, modelValue);
     if (provider === 'claude') {
       setClaudeModel(modelValue);
-      localStorage.setItem('claude-model', modelValue);
+      persist('claude-model');
     } else if (provider === 'cursor') {
       setCursorModel(modelValue);
-      localStorage.setItem('cursor-model', modelValue);
+      persist('cursor-model');
     } else if (provider === 'codex') {
       setCodexModel(modelValue);
-      localStorage.setItem('codex-model', modelValue);
+      persist('codex-model');
     } else if (provider === 'gemini') {
       setGeminiModel(modelValue);
-      localStorage.setItem('gemini-model', modelValue);
+      persist('gemini-model');
     } else if (provider === 'antigravity') {
       setAntigravityModel?.(modelValue);
-      localStorage.setItem('antigravity-model', modelValue);
+      persist('antigravity-model');
     }
     setInput('');
     inputValueRef.current = '';
@@ -211,7 +216,7 @@ export function useChatComposerState({
       content: `Model switched to: **${modelValue}**`,
       timestamp: Date.now(),
     });
-  }, [provider, setClaudeModel, setCursorModel, setCodexModel, setGeminiModel, setAntigravityModel, addMessage]);
+  }, [provider, selectedSession?.id, setClaudeModel, setCursorModel, setCodexModel, setGeminiModel, setAntigravityModel, addMessage]);
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -834,6 +839,10 @@ export function useChatComposerState({
       }
 
       safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
+      // 綁定該 session 實際使用的模型，供下次打開時還原
+      if (effectiveSessionId) {
+        localStorage.setItem(sessionModelKey(effectiveSessionId), currentModel);
+      }
     },
     [
       antigravityModel,
@@ -841,6 +850,7 @@ export function useChatComposerState({
       attachedImages,
       claudeModel,
       codexModel,
+      currentModel,
       currentSessionId,
       cursorModel,
       executeCommand,
