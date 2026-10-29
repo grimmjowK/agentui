@@ -15,6 +15,7 @@ import mime from 'mime-types';
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
+import { createShellSessionLookup } from '@/modules/websocket/services/shell-session-lookup.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -50,6 +51,13 @@ import {
     isGeminiSessionActive,
     getActiveGeminiSessions,
 } from './gemini-cli.js';
+import {
+    spawnAntigravity,
+    abortAntigravitySession,
+    isAntigravitySessionActive,
+    reconnectAntigravitySession,
+    getActiveAntigravitySessions,
+} from './antigravity-cli.js';
 import sessionManager from './sessionManager.js';
 import {
     stripAnsiSequences,
@@ -84,27 +92,10 @@ const APP_ROOT = findAppRoot(__dirname);
 
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
 
-function getShellSessionById(sessionId) {
-    const memorySession = sessionManager.getSession(sessionId);
-    if (memorySession?.cliSessionId) {
-        return memorySession;
-    }
-
-    const indexedSession = sessionsDb.getSessionById(sessionId);
-    if (
-        indexedSession?.provider === 'gemini'
-        && typeof indexedSession.jsonl_path === 'string'
-        && indexedSession.jsonl_path.endsWith('.jsonl')
-        && fs.existsSync(indexedSession.jsonl_path)
-    ) {
-        return {
-            ...(memorySession || {}),
-            cliSessionId: sessionId,
-        };
-    }
-
-    return memorySession || null;
-}
+const getShellSessionById = createShellSessionLookup(
+    (sessionId) => sessionManager.getSession(sessionId),
+    (sessionId) => sessionsDb.getSessionById(sessionId),
+);
 
 const app = express();
 const server = http.createServer(app);
@@ -122,21 +113,26 @@ const wss = createWebSocketServer(server, {
         resolveCodexApproval,
         reconnectCodexSession,
         spawnGemini,
+        spawnAntigravity,
         abortClaudeSDKSession,
         abortCursorSession,
         abortCodexSession,
         abortGeminiSession,
+        abortAntigravitySession,
         resolveToolApproval,
         isClaudeSDKSessionActive,
         isCursorSessionActive,
         isCodexSessionActive,
         isGeminiSessionActive,
+        isAntigravitySessionActive,
+        reconnectAntigravitySession,
         reconnectSessionWriter,
         getPendingApprovalsForSession,
         getActiveClaudeSDKSessions,
         getActiveCursorSessions,
         getActiveCodexSessions,
         getActiveGeminiSessions,
+        getActiveAntigravitySessions,
     },
     shell: {
         getSessionById: getShellSessionById,
@@ -149,6 +145,7 @@ const wss = createWebSocketServer(server, {
             if (provider === 'cursor') return isCursorSessionActive(sessionId);
             if (provider === 'codex') return isCodexSessionActive(sessionId);
             if (provider === 'gemini') return isGeminiSessionActive(sessionId);
+            if (provider === 'antigravity') return isAntigravitySessionActive(sessionId);
             return isClaudeSDKSessionActive(sessionId);
         },
         stopChatSession: async (sessionId, provider, userId) => {
@@ -1103,14 +1100,14 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
             });
         }
 
-        // Handle Gemini sessions - they are raw logs in our current setup
-        if (provider === 'gemini') {
+        // Handle Gemini & Antigravity sessions - they are raw logs in our current setup
+        if (provider === 'gemini' || provider === 'antigravity') {
             return res.json({
                 used: 0,
                 total: 0,
                 breakdown: { input: 0, cacheCreation: 0, cacheRead: 0 },
                 unsupported: true,
-                message: 'Token usage tracking not available for Gemini sessions'
+                message: `Token usage tracking not available for ${provider} sessions`
             });
         }
 

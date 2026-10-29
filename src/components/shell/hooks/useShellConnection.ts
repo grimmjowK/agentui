@@ -197,6 +197,7 @@ export function useShellConnection({
               sessionId: isPlainShellRef.current ? null : selectedSessionRef.current?.id || null,
               hasSession: isPlainShellRef.current ? false : Boolean(selectedSessionRef.current),
               provider: isPlainShellRef.current ? 'plain-shell' : (selectedSessionRef.current?.__provider || localStorage.getItem('selected-provider') || 'claude'),
+              model: localStorage.getItem('codex-model') || undefined,
               cols: currentTerminal.cols,
               rows: currentTerminal.rows,
               initialCommand: initialCommandRef.current,

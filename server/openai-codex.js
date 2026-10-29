@@ -62,8 +62,14 @@ export async function queryCodex(command, options = {}, writer) {
     if (threadId) {
       await terminateShellSessionsBySessionId(threadId);
     }
+    const modelName = options.model;
+    const isDeepSeek = typeof modelName === 'string' && modelName.startsWith('deepseek');
+    const profile = isDeepSeek
+      ? (modelName.includes('flash') ? 'deepseek-flash' : 'deepseek')
+      : undefined;
+
     lease = codexOwnership.acquire({ configRoot: runtime.configRoot, threadId, projectPath: cwd, userId: state.userId, owner: 'chat' });
-    const rpc = new CodexAppServer(runtime.executablePath, cwd, runtime.configRoot);
+    const rpc = new CodexAppServer(runtime.executablePath, cwd, runtime.configRoot, profile);
     codexOwnership.attach(lease, rpc.child.pid);
     state.rpc = rpc;
     rpc.on('failure', (error) => { if (!state.finished) fail(error); });
@@ -193,14 +199,33 @@ export async function queryCodex(command, options = {}, writer) {
     if (outcome.status === 'failed') throw new Error(outcome.error?.message || 'Codex turn failed');
     state.interrupted ||= outcome.status === 'interrupted';
     state.finished = true;
+    if (state.interrupted) {
+      emit({
+        kind: 'text',
+        role: 'user',
+        content: '<turn_aborted>',
+        isInterrupted: true,
+      });
+    }
     terminalMessage = { kind: 'complete', actualSessionId: threadId, aborted: state.interrupted };
     notifySafely(notifyRunStopped, { userId: state.userId, provider: 'codex', sessionId: threadId,
       sessionName: options.sessionSummary, stopReason: state.interrupted ? 'aborted' : 'completed' });
   } catch (error) {
     state.finished = true;
-    if (state.interrupted) terminalMessage = { kind: 'complete', aborted: true };
-    else {
-      terminalMessage = { kind: 'error', content: error.message };
+    if (state.interrupted) {
+      emit({
+        kind: 'text',
+        role: 'user',
+        content: '<turn_aborted>',
+        isInterrupted: true,
+      });
+      terminalMessage = { kind: 'complete', aborted: true };
+    } else {
+      let errorMessage = error.message;
+      if (typeof errorMessage === 'string' && (errorMessage.includes('array_above_max_length') || errorMessage.includes('array too long'))) {
+        errorMessage = `${errorMessage}\n\n💡 提示：当前会话历史中包含不同模型提供商（如 DeepSeek）写入的专有上下文格式，目标提供商（如 OpenAI）无法直接兼容该历史。请切回原模型（DeepSeek）继续当前对话，或新建会话使用该模型。`;
+      }
+      terminalMessage = { kind: 'error', content: errorMessage };
       notifySafely(notifyRunFailed, { userId: state.userId, provider: 'codex', sessionId: threadId,
         sessionName: options.sessionSummary, error });
     }

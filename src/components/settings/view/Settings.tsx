@@ -31,6 +31,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
     setNotificationPreferences,
     cursorPermissions,
     setCursorPermissions,
+    antigravityPermissions,
+    setAntigravityPermissions,
     codexPermissionMode,
     setCodexPermissionMode,
     providerAuthStatus,
@@ -129,6 +131,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                   onClaudePermissionsChange={setClaudePermissions}
                   cursorPermissions={cursorPermissions}
                   onCursorPermissionsChange={setCursorPermissions}
+                  antigravityPermissions={antigravityPermissions}
+                  onAntigravityPermissionsChange={setAntigravityPermissions}
                   codexPermissionMode={codexPermissionMode}
                   onCodexPermissionModeChange={setCodexPermissionMode}
                   geminiPermissionMode={geminiPermissionMode}

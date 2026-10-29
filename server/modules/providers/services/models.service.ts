@@ -1,7 +1,7 @@
 /**
  * 模型清单服务。
  *
- * Claude 与 Codex 都能实时给出当前账号可用的模型（含第三方/代理模型），
+ * Claude、Codex 与 Antigravity 都能实时给出当前账号可用的模型（含第三方/代理模型），
  * 这里把它们统一成 `{ value, label, description }`，取不到时回落到
  * `shared/modelConstants.js` 的静态清单，保证 UI 永远有东西可选。
  *
@@ -9,14 +9,21 @@
  */
 
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import spawn from 'cross-spawn';
 
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import { CodexAppServer } from '@/modules/codex-runtime/index.js';
 import { getCodexRuntimeInfo } from '@/shared/codex-cli-path.js';
+import { resolveAntigravityExecutablePath } from '@/shared/antigravity-cli-path.js';
 import type { LLMProvider } from '@/shared/types.js';
 
 import {
+  ANTIGRAVITY_MODELS,
   CLAUDE_MODELS,
   CODEX_MODELS,
   CURSOR_MODELS,
@@ -48,6 +55,7 @@ const FALLBACKS: Record<LLMProvider, { OPTIONS: ProviderModel[] }> = {
   codex: CODEX_MODELS,
   cursor: CURSOR_MODELS,
   gemini: GEMINI_MODELS,
+  antigravity: ANTIGRAVITY_MODELS,
 };
 
 const cache = new Map<string, { expiresAt: number; value: ProviderModelList }>();
@@ -110,14 +118,86 @@ const listCodexModels = async (): Promise<ProviderModel[]> => {
   try {
     await rpc.initialize();
     const result = await rpc.request('model/list');
-    return (result.data as CodexModelRow[]).filter((row) => !row.hidden).map((row) => {
+    const models = (result.data as CodexModelRow[]).filter((row) => !row.hidden).map((row) => {
       const value = row.model || row.id || '';
       return { value, label: row.displayName || value, description: row.description || undefined };
     }).filter((model) => model.value);
+
+    // Merge custom catalog models (such as DeepSeek) if present in ~/.codex/models.json
+    try {
+      const catalogPath = path.join(runtime.configRoot || path.join(os.homedir(), '.codex'), 'models.json');
+      if (fs.existsSync(catalogPath)) {
+        const raw = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
+        if (Array.isArray(raw?.models)) {
+          for (const item of raw.models) {
+            if (item.slug && !models.some((m) => m.value === item.slug)) {
+              models.push({
+                value: item.slug,
+                label: item.display_name || item.slug,
+                description: item.description || undefined,
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore errors reading custom catalog
+    }
+
+    return models;
   } finally {
     clearTimeout(timer);
     await rpc.close();
   }
+};
+
+/** Runs `agy models` and parses its "slug<TAB>label" output lines. */
+const listAntigravityModels = async (): Promise<ProviderModel[]> => {
+  const executable = resolveAntigravityExecutablePath();
+  const output = await new Promise<string>((resolve, reject) => {
+    const child = spawn(executable, ['models'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(stdout);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(new Error(`agy models 查询超时（${LOOKUP_TIMEOUT_MS / 1000}s）`));
+    }, LOOKUP_TIMEOUT_MS);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      if (stdout.length > 1024 * 1024) {
+        child.kill('SIGKILL');
+        finish(new Error('agy models output exceeded 1 MB'));
+      }
+    });
+    child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-8192); });
+    child.on('error', (error: Error) => finish(error));
+    child.on('close', (code: number | null) => {
+      finish(code === 0 ? undefined : new Error(stderr.trim() || `agy models exited with code ${code}`));
+    });
+  });
+
+  const models: ProviderModel[] = [];
+  for (const rawLine of output.split(/\r?\n/)) {
+    const tabIndex = rawLine.indexOf('\t');
+    if (tabIndex <= 0) {
+      continue;
+    }
+    const value = rawLine.slice(0, tabIndex).trim();
+    const label = rawLine.slice(tabIndex + 1).trim();
+    if (!value) {
+      continue;
+    }
+    models.push({ value, label: label || value });
+  }
+  return models;
 };
 
 const fallbackFor = (provider: LLMProvider, error?: string): ProviderModelList => ({
@@ -143,7 +223,7 @@ export const providerModelsService = {
       return cached.value;
     }
 
-    if (provider !== 'claude' && provider !== 'codex') {
+    if (provider !== 'claude' && provider !== 'codex' && provider !== 'antigravity') {
       return fallbackFor(provider);
     }
 
@@ -157,10 +237,13 @@ export const providerModelsService = {
     const requestPromise = (async (): Promise<ProviderModelList> => {
       let result: ProviderModelList;
       try {
-        const models = await withTimeout(
-          provider === 'claude' ? listClaudeModels() : listCodexModels(),
-          provider,
-        );
+        const liveList =
+          provider === 'claude'
+            ? listClaudeModels()
+            : provider === 'codex'
+              ? listCodexModels()
+              : listAntigravityModels();
+        const models = await withTimeout(liveList, provider);
         result = models.length > 0
           ? { provider, source: 'live', models }
           : fallbackFor(provider, '实时清单为空');

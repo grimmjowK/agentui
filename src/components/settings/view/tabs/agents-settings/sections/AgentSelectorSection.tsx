@@ -8,6 +8,7 @@ const AGENT_NAMES: Record<AgentProvider, string> = {
   cursor: 'Cursor',
   codex: 'Codex',
   gemini: 'Gemini',
+  antigravity: 'Antigravity',
 };
 
 export default function AgentSelectorSection({

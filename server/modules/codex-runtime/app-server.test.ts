@@ -47,6 +47,17 @@ test('malformed protocol fails pending calls and exits', async (t) => {
   assert.notEqual(rpc.child.exitCode ?? rpc.child.signalCode, null);
 });
 
+test('DeepSeek uses the configured Codex catalog path', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-catalog-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const executable = path.join(root, 'codex');
+  fs.writeFileSync(executable, `#!${process.execPath}\nprocess.stdin.resume();`, { mode: 0o755 });
+  const configRoot = path.join(root, 'custom-codex-home');
+  const rpc = new CodexAppServer(executable, root, configRoot, 'deepseek-flash');
+  assert.ok(rpc.child.spawnargs.includes(`model_catalog_json=${path.join(configRoot, 'models.json')}`));
+  await rpc.close();
+});
+
 test('request timeout and abrupt process exit reject callers', async (t) => {
   const rpc = fake(t, `process.stdin.resume();`);
   await assert.rejects(rpc.request('never/replies', {}, 30), /timed out/);

@@ -35,7 +35,22 @@ const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> =
     provider: 'gemini',
     rootPath: path.join(os.homedir(), '.gemini', 'tmp'),
   },
+  {
+    provider: 'antigravity',
+    rootPath: path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain'),
+  },
+  {
+    provider: 'antigravity',
+    rootPath: path.join(os.homedir(), '.gemini', 'antigravity', 'brain'),
+  },
 ];
+
+if (process.env.ANTIGRAVITY_HOME) {
+  PROVIDER_WATCH_PATHS.push({
+    provider: 'antigravity',
+    rootPath: path.join(process.env.ANTIGRAVITY_HOME, 'brain'),
+  });
+}
 
 const WATCHER_IGNORED_PATTERNS = [
   '**/node_modules/**',
@@ -70,6 +85,9 @@ let watcherRescheduleAfterRefresh = false;
 function isWatcherTargetFile(provider: LLMProvider, filePath: string): boolean {
   if (provider === 'gemini') {
     return filePath.endsWith('.json') || filePath.endsWith('.jsonl');
+  }
+  if (provider === 'antigravity') {
+    return filePath.endsWith('transcript.jsonl');
   }
 
   return filePath.endsWith('.jsonl');

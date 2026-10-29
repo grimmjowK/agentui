@@ -43,6 +43,10 @@ export type CursorPermissionsState = {
   skipPermissions: boolean;
 };
 
+export type AntigravityPermissionsState = {
+  skipPermissions: boolean;
+};
+
 export type CodeEditorSettingsState = {
   theme: 'dark' | 'light';
   wordWrap: boolean;

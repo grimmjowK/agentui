@@ -113,8 +113,13 @@ export const getAllSessions = (project: Project): SessionWithProvider[] => {
     __provider: 'gemini' as const,
   }));
 
+  const antigravitySessions = (project.antigravitySessions || []).map((session) => ({
+    ...session,
+    __provider: 'antigravity' as const,
+  }));
+
   // 收藏的会话在文件夹内置顶，其余按最后活动时间倒序
-  return [...claudeSessions, ...cursorSessions, ...codexSessions, ...geminiSessions].sort(
+  return [...claudeSessions, ...cursorSessions, ...codexSessions, ...geminiSessions, ...antigravitySessions].sort(
     (a, b) =>
       Number(Boolean(b.isStarred)) - Number(Boolean(a.isStarred)) ||
       getSessionDate(b).getTime() - getSessionDate(a).getTime(),

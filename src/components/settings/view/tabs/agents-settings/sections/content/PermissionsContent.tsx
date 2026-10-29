@@ -693,7 +693,54 @@ function GeminiPermissions({ permissionMode, onPermissionModeChange }: Omit<Gemi
   );
 }
 
-type PermissionsContentProps = ClaudePermissionsProps | CursorPermissionsProps | CodexPermissionsProps | GeminiPermissionsProps;
+type AntigravityPermissionsProps = {
+  agent: 'antigravity';
+  skipPermissions: boolean;
+  onSkipPermissionsChange: (value: boolean) => void;
+};
+
+// Antigravity (agy) headless 模式无法交互式审批工具权限，因此默认跳过权限。
+function AntigravityPermissions({ skipPermissions, onSkipPermissionsChange }: Omit<AntigravityPermissionsProps, 'agent'>) {
+  const { t } = useTranslation('settings');
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="text-sm text-amber-800 dark:text-amber-200">
+            {t('permissions.antigravity.headlessNotice')}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-800 dark:bg-orange-900/20">
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={skipPermissions}
+            onChange={(event) => onSkipPermissionsChange(event.target.checked)}
+            className="mt-1 h-4 w-4 rounded border-input bg-card text-primary focus:ring-2 focus:ring-primary"
+          />
+          <div>
+            <div className="font-medium text-orange-900 dark:text-orange-100">
+              {t('permissions.antigravity.skipPermissions.label')}
+            </div>
+            <div className="text-sm text-orange-700 dark:text-orange-300">
+              {t('permissions.antigravity.skipPermissions.description')}
+            </div>
+          </div>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+type PermissionsContentProps =
+  | ClaudePermissionsProps
+  | CursorPermissionsProps
+  | CodexPermissionsProps
+  | GeminiPermissionsProps
+  | AntigravityPermissionsProps;
 
 export default function PermissionsContent(props: PermissionsContentProps) {
   if (props.agent === 'claude') {
@@ -706,6 +753,10 @@ export default function PermissionsContent(props: PermissionsContentProps) {
 
   if (props.agent === 'gemini') {
     return <GeminiPermissions {...props} />;
+  }
+
+  if (props.agent === 'antigravity') {
+    return <AntigravityPermissions {...props} />;
   }
 
   return <CodexPermissions {...props} />;

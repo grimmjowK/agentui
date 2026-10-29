@@ -50,7 +50,18 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     input: {
       type: 'one-line',
       icon: 'terminal',
-      getValue: (input) => input.command,
+      getValue: (input) => {
+        if (!input) return '';
+        if (typeof input === 'string') {
+          try {
+            const parsed = JSON.parse(input);
+            return parsed.command || parsed.cmd || input;
+          } catch {
+            return input;
+          }
+        }
+        return input.command || input.cmd || '';
+      },
       getSecondary: (input) => input.description,
       action: 'copy',
       style: 'terminal',
@@ -775,6 +786,9 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
  * Get configuration for a tool, with fallback to default
  */
 export function getToolConfig(toolName: string): ToolDisplayConfig {
+  if (toolName === 'exec' || toolName === 'shell_command') {
+    return TOOL_CONFIGS.Bash;
+  }
   return TOOL_CONFIGS[toolName] || TOOL_CONFIGS.Default;
 }
 

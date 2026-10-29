@@ -68,6 +68,8 @@ type ChatWebSocketDependencies = {
   abortCursorSession: (sessionId: string) => boolean;
   abortCodexSession: (sessionId: string) => boolean;
   abortGeminiSession: (sessionId: string) => boolean;
+  abortAntigravitySession?: (sessionId: string) => boolean;
+  spawnAntigravity?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   resolveToolApproval: (
     requestId: string,
     payload: {
@@ -81,19 +83,22 @@ type ChatWebSocketDependencies = {
   isCursorSessionActive: (sessionId: string) => boolean;
   isCodexSessionActive: (sessionId: string) => boolean;
   isGeminiSessionActive: (sessionId: string) => boolean;
+  isAntigravitySessionActive?: (sessionId: string) => boolean;
+  reconnectAntigravitySession?: (sessionId: string, writer: WebSocketWriter) => boolean;
   reconnectSessionWriter: (sessionId: string, ws: WebSocket) => boolean;
   getPendingApprovalsForSession: (sessionId: string) => unknown[];
   getActiveClaudeSDKSessions: () => unknown;
   getActiveCursorSessions: () => unknown;
   getActiveCodexSessions: () => unknown;
   getActiveGeminiSessions: () => unknown;
+  getActiveAntigravitySessions?: () => unknown;
 };
 
 /**
  * Normalizes potentially invalid provider names coming from websocket payloads.
  */
 function readProvider(value: unknown): LLMProvider {
-  if (value === 'claude' || value === 'cursor' || value === 'codex' || value === 'gemini') {
+  if (value === 'claude' || value === 'cursor' || value === 'codex' || value === 'gemini' || value === 'antigravity') {
     return value;
   }
 
@@ -173,6 +178,14 @@ export function handleChatConnection(
         return;
       }
 
+      if (messageType === 'antigravity-command') {
+        warnOnConcurrentShellSession(data.options?.sessionId, 'antigravity', writer);
+        if (dependencies.spawnAntigravity) {
+          await dependencies.spawnAntigravity(data.command ?? '', data.options, writer);
+        }
+        return;
+      }
+
       if (messageType === 'cursor-resume') {
         await dependencies.spawnCursor(
           '',
@@ -198,6 +211,9 @@ export function handleChatConnection(
           if (success) return; // Runtime emits the sole cancellation terminal event.
         } else if (provider === 'gemini') {
           success = dependencies.abortGeminiSession(sessionId);
+        } else if (provider === 'antigravity') {
+          success = dependencies.abortAntigravitySession ? dependencies.abortAntigravitySession(sessionId) : false;
+          if (success) return; // The runtime emits completion after the process exits.
         } else {
           success = await dependencies.abortClaudeSDKSession(sessionId);
         }
@@ -262,6 +278,10 @@ export function handleChatConnection(
           isActive = dependencies.reconnectCodexSession(sessionId, writer);
         } else if (provider === 'gemini') {
           isActive = dependencies.isGeminiSessionActive(sessionId);
+        } else if (provider === 'antigravity') {
+          isActive = dependencies.reconnectAntigravitySession
+            ? dependencies.reconnectAntigravitySession(sessionId, writer)
+            : false;
         } else {
           isActive = dependencies.isClaudeSDKSessionActive(sessionId);
           if (isActive) {
@@ -299,6 +319,7 @@ export function handleChatConnection(
             cursor: dependencies.getActiveCursorSessions(),
             codex: dependencies.getActiveCodexSessions(),
             gemini: dependencies.getActiveGeminiSessions(),
+            antigravity: dependencies.getActiveAntigravitySessions ? dependencies.getActiveAntigravitySessions() : {},
           },
         });
       }

@@ -1,9 +1,11 @@
-import { useTranslation } from 'react-i18next';
 import { useCallback, useRef } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
-import type { ChatMessage } from '../../types/types';
+import { useTranslation } from 'react-i18next';
+
 import type { Project, ProjectSession, LLMProvider } from '../../../../types/app';
+import type { ChatMessage } from '../../types/types';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
+
 import MessageComponent from './MessageComponent';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
 import UserMessageIndex from './UserMessageIndex';
@@ -27,6 +29,8 @@ interface ChatMessagesPaneProps {
   setCodexModel: (model: string) => void;
   geminiModel: string;
   setGeminiModel: (model: string) => void;
+  antigravityModel?: string;
+  setAntigravityModel?: (model: string) => void;
   tasksEnabled: boolean;
   isTaskMasterInstalled: boolean | null;
   onShowAllTasks?: (() => void) | null;
@@ -72,6 +76,8 @@ export default function ChatMessagesPane({
   setCodexModel,
   geminiModel,
   setGeminiModel,
+  antigravityModel,
+  setAntigravityModel,
   tasksEnabled,
   isTaskMasterInstalled,
   onShowAllTasks,
@@ -155,6 +161,8 @@ export default function ChatMessagesPane({
           setCodexModel={setCodexModel}
           geminiModel={geminiModel}
           setGeminiModel={setGeminiModel}
+          antigravityModel={antigravityModel}
+          setAntigravityModel={setAntigravityModel}
           tasksEnabled={tasksEnabled}
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}

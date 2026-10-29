@@ -9,6 +9,7 @@ const DEFAULT_STATE: AgentToggleState = {
   cursor: true,
   codex: true,
   gemini: true,
+  antigravity: true,
 };
 
 export function useAgentToggle() {

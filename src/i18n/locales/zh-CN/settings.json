@@ -411,6 +411,13 @@
         "overrideNote": "您可以使用聊天界面中的模式按钮按会话覆盖此设置。"
       }
     },
+    "antigravity": {
+      "headlessNotice": "Antigravity（agy）以 headless 模式运行，无法交互式审批工具权限。默认模式下工具操作可能被拒绝；聊天界面的权限按钮显示每次运行实际使用的模式。",
+      "skipPermissions": {
+        "label": "新会话默认自动放行所有工具",
+        "description": "将新会话初始模式设为跳过权限；每个会话仍可通过聊天界面的权限按钮覆盖。"
+      }
+    },
     "actions": {
       "add": "添加"
     }
@@ -459,11 +466,17 @@
     "emptyHint": "创建新 Skill 或上传 .md/.zip 文件开始使用。",
     "scope": {
       "user": "全局（用户）",
-      "project": "项目"
+      "project": "项目",
+      "repo": "仓库",
+      "admin": "系统管理员",
+      "system": "系统",
+      "plugin": "插件"
     },
     "scopeGroup": {
       "user": "全局 Skills",
-      "project": "项目 Skills"
+      "project": "项目 Skills",
+      "repo": "仓库 Skills",
+      "other": "其他 Skills"
     },
     "editor": {
       "titleCreate": "创建 Skill",
