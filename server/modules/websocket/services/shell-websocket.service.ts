@@ -157,7 +157,7 @@ type ShellCommandResult = {
 };
 
 type ShellWebSocketDependencies = {
-  getSessionById: (sessionId: string) => { cliSessionId?: string; provider?: string; jsonl_path?: string } | null | undefined;
+  getSessionById: (sessionId: string, provider?: string) => { cliSessionId?: string; provider?: string; jsonl_path?: string | null } | null | undefined;
   stripAnsiSequences: (content: string) => string;
   normalizeDetectedUrl: (url: string) => string | null;
   extractUrlsFromText: (content: string) => string[];
@@ -255,7 +255,7 @@ function buildShellCommand(
     let resumeId = '';
     if (hasSession && sessionId) {
       try {
-        const existingSession = dependencies.getSessionById(sessionId);
+        const existingSession = dependencies.getSessionById(sessionId, 'gemini');
         if (existingSession && existingSession.cliSessionId) {
           resumeId = existingSession.cliSessionId;
           if (!safeSessionIdPattern.test(resumeId)) {

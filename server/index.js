@@ -15,6 +15,7 @@ import mime from 'mime-types';
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
+import { createShellSessionLookup } from '@/modules/websocket/services/shell-session-lookup.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -91,28 +92,10 @@ const APP_ROOT = findAppRoot(__dirname);
 
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
 
-function getShellSessionById(sessionId) {
-    const memorySession = sessionManager.getSession(sessionId);
-    if (memorySession?.cliSessionId) {
-        return memorySession;
-    }
-
-    const indexedSession = sessionsDb.getSessionById(sessionId);
-    if (indexedSession) {
-        // Gemini 依 jsonl 续接，文件已被删除时不能当作可续接
-        const resumable = indexedSession.provider !== 'gemini'
-            || (typeof indexedSession.jsonl_path === 'string'
-                && indexedSession.jsonl_path.endsWith('.jsonl')
-                && fs.existsSync(indexedSession.jsonl_path));
-        return {
-            ...(memorySession || {}),
-            ...indexedSession,
-            ...(resumable ? { cliSessionId: sessionId } : {}),
-        };
-    }
-
-    return memorySession || null;
-}
+const getShellSessionById = createShellSessionLookup(
+    (sessionId) => sessionManager.getSession(sessionId),
+    (sessionId) => sessionsDb.getSessionById(sessionId),
+);
 
 const app = express();
 const server = http.createServer(app);
