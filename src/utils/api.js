@@ -112,6 +112,14 @@ export const api = {
     authenticatedFetch(`/api/providers/sessions/${sessionId}/restore`, {
       method: 'POST',
     }),
+  // session 最後使用的模型（存在後端資料庫）
+  getSessionModel: (sessionId) =>
+    authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/model`),
+  setSessionModel: (sessionId, model) =>
+    authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/model`, {
+      method: 'PUT',
+      body: JSON.stringify({ model }),
+    }),
   renameSession: (sessionId, summary) =>
     authenticatedFetch(`/api/providers/sessions/${sessionId}`, {
       method: 'PUT',

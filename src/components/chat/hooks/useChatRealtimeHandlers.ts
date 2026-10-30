@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import type { PendingPermissionRequest, SessionNavigationOptions } from '../types/types';
+import { saveSessionModel } from '../utils/chatStorage';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
 
@@ -236,6 +237,12 @@ export function useChatRealtimeHandlers({
           console.log('Session created with ID:', newSessionId);
           console.log('Existing session ID:', currentSessionId);
           sessionStorage.setItem('pendingSessionId', newSessionId);
+          // 新 session 只發一次訊息時也要綁定模型，否則回退全域預設會被其他新 session 改掉
+          const pendingModel = sessionStorage.getItem('pendingSessionModel');
+          if (pendingModel) {
+            saveSessionModel(newSessionId, pendingModel);
+            sessionStorage.removeItem('pendingSessionModel');
+          }
           if (pendingViewSessionRef.current && !pendingViewSessionRef.current.sessionId) {
             pendingViewSessionRef.current.sessionId = newSessionId;
           }

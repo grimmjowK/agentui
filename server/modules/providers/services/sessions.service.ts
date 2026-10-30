@@ -248,6 +248,16 @@ export const sessionsService = {
   /**
    * Renames one session by id without requiring the caller to pass provider.
    */
+  // 不檢查 sessions 列是否存在：新 session 在同步器建立該列之前就要寫入
+  getSessionModel(sessionId: string): { model: string | null } {
+    return { model: sessionsDb.getSessionModel(sessionId) };
+  },
+
+  setSessionModel(sessionId: string, model: string): { sessionId: string; model: string } {
+    sessionsDb.setSessionModel(sessionId, model);
+    return { sessionId, model };
+  },
+
   renameSessionById(sessionId: string, summary: string): { sessionId: string; summary: string } {
     const session = sessionsDb.getSessionById(sessionId);
     if (!session) {

@@ -200,6 +200,19 @@ const parseProvider = (value: unknown): LLMProvider => {
   });
 };
 
+const parseSessionModel = (payload: unknown): string => {
+  const model = payload && typeof payload === 'object'
+    ? (payload as Record<string, unknown>).model
+    : undefined;
+  if (typeof model !== 'string' || !model.trim() || model.length > 200) {
+    throw new AppError('model must be a non-empty string up to 200 characters.', {
+      code: 'INVALID_SESSION_MODEL',
+      statusCode: 400,
+    });
+  }
+  return model.trim();
+};
+
 const parseSessionRenameSummary = (payload: unknown): string => {
   if (!payload || typeof payload !== 'object') {
     throw new AppError('Request body must be an object.', {
@@ -398,6 +411,24 @@ router.put(
     const summary = parseSessionRenameSummary(req.body);
     const result = sessionsService.renameSessionById(sessionId, summary);
     res.json(createApiSuccessResponse(result));
+  }),
+);
+
+// session 最後使用的模型存在資料庫，跨重啟、跨版本、跨瀏覽器保留
+router.get(
+  '/sessions/:sessionId/model',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    res.json(createApiSuccessResponse(sessionsService.getSessionModel(sessionId)));
+  }),
+);
+
+router.put(
+  '/sessions/:sessionId/model',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const model = parseSessionModel(req.body);
+    res.json(createApiSuccessResponse(sessionsService.setSessionModel(sessionId, model)));
   }),
 );
 

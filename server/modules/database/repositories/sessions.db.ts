@@ -85,6 +85,22 @@ export const sessionsDb = {
     return sessionId;
   },
 
+  getSessionModel(sessionId: string): string | null {
+    const db = getConnection();
+    const row = db
+      .prepare('SELECT model FROM session_models WHERE session_id = ?')
+      .get(sessionId) as { model: string } | undefined;
+    return row?.model ?? null;
+  },
+
+  setSessionModel(sessionId: string, model: string): void {
+    const db = getConnection();
+    db.prepare(
+      `INSERT INTO session_models (session_id, model, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(session_id) DO UPDATE SET model = excluded.model, updated_at = excluded.updated_at`
+    ).run(sessionId, model);
+  },
+
   updateSessionCustomName(sessionId: string, customName: string): void {
     const db = getConnection();
     db.prepare(

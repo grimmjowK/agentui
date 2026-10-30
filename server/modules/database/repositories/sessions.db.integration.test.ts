@@ -70,3 +70,19 @@ test('createSession reactivates archived rows when the session becomes active ag
     assert.equal(restoredSession?.isArchived, 0);
   });
 });
+
+test('session model is stored independently of the sessions row and upserted', async () => {
+  await withIsolatedDatabase(() => {
+    // 新 session 在同步器建立 sessions 列之前就要能寫入
+    assert.equal(sessionsDb.getSessionModel('session-new'), null);
+    sessionsDb.setSessionModel('session-new', 'opus');
+    assert.equal(sessionsDb.getSessionModel('session-new'), 'opus');
+
+    sessionsDb.setSessionModel('session-new', 'anthropic/gpt-6-astra-hc-yd');
+    assert.equal(sessionsDb.getSessionModel('session-new'), 'anthropic/gpt-6-astra-hc-yd');
+
+    // 同步器之後建立 sessions 列，不影響已記錄的模型
+    sessionsDb.createSession('session-new', 'claude', '/workspace/demo-project');
+    assert.equal(sessionsDb.getSessionModel('session-new'), 'anthropic/gpt-6-astra-hc-yd');
+  });
+});
