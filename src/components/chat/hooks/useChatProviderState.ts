@@ -46,9 +46,6 @@ const MODEL_DEFAULTS: Record<LLMProvider, string> = {
 const getDefaultModel = (provider: LLMProvider): string =>
   localStorage.getItem(`${provider}-model`) || MODEL_DEFAULTS[provider];
 
-// 已有 session 的模型按 session 保存，避免一個 session 的切換影響其他 session
-export const sessionModelKey = (sessionId: string) => `session-model-${sessionId}`;
-
 interface UseChatProviderStateArgs {
   selectedSession: ProjectSession | null;
 }
@@ -86,7 +83,6 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     if (selectedSession?.__provider && selectedSession.__provider !== provider) {
       return;
     }
-    const model = (sessionId && localStorage.getItem(sessionModelKey(sessionId))) || getDefaultModel(provider);
     const setters: Record<LLMProvider, (model: string) => void> = {
       claude: setClaudeModel,
       cursor: setCursorModel,
@@ -94,7 +90,22 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
       gemini: setGeminiModel,
       antigravity: setAntigravityModel,
     };
-    setters[provider](model);
+    const setModel = setters[provider];
+    if (!sessionId) {
+      setModel(getDefaultModel(provider));
+      return;
+    }
+
+    let cancelled = false;
+    api.getSessionModel(sessionId)
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null)
+      .then((payload) => {
+        if (!cancelled) setModel(payload?.data?.model || getDefaultModel(provider));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedSession?.id, selectedSession?.__provider, provider]);
 
   useEffect(() => {
@@ -181,7 +192,8 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
             return current;
           }
           const nextModel = models[0].value;
-          localStorage.setItem(selectedSession?.id ? sessionModelKey(selectedSession.id) : 'codex-model', nextModel);
+          // session 的模型由還原 effect 非同步讀取，這裡只改顯示、不回寫，避免與其競態覆蓋記錄
+          if (!selectedSession?.id) localStorage.setItem('codex-model', nextModel);
           return nextModel;
         });
       })
@@ -207,7 +219,8 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
             return current;
           }
           const nextModel = models[0].value;
-          localStorage.setItem(selectedSession?.id ? sessionModelKey(selectedSession.id) : 'antigravity-model', nextModel);
+          // session 的模型由還原 effect 非同步讀取，這裡只改顯示、不回寫，避免與其競態覆蓋記錄
+          if (!selectedSession?.id) localStorage.setItem('antigravity-model', nextModel);
           return nextModel;
         });
       })

@@ -112,6 +112,16 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 `;
 
+// 每個 session 最後使用的模型。獨立成表而不放進 sessions：
+// 新 session 在 `session_created` 時就要寫入，此時 sessions 列可能尚未由同步器建立
+export const SESSION_MODELS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS session_models (
+    session_id TEXT PRIMARY KEY,
+    model TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -151,4 +161,6 @@ CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id);
 ${LAST_SCANNED_AT_SQL}
 
 ${APP_CONFIG_TABLE_SCHEMA_SQL}
+
+${SESSION_MODELS_TABLE_SCHEMA_SQL}
 `;

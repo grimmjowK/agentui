@@ -34,13 +34,24 @@
 - **WHEN** 使用者在記錄為 Y 的 session 中，之後點擊新建 session
 - **THEN** 選擇器顯示全域預設模型，而非 Y
 
-### Requirement: 發送訊息時綁定 session 的模型
-系統 SHALL 在對已有 sessionId 的 session 發送訊息時，把本次使用的模型寫入該 session 的模型記錄。
+### Requirement: 建立與發送時綁定 session 的模型
+系統 SHALL 在新 session 建立（取得 sessionId）時，把首次發送所用的模型寫入該 session 的模型記錄；並 SHALL 在之後每次對該 session 發送訊息時以當下模型更新記錄。
+
+#### Scenario: 只發過一則訊息的新 session
+- **WHEN** 使用者在新 session 以模型 Y 發送一則訊息建立 session C（之後不再手動發送），再到新 session 畫面把模型切為 X，然後打開 session C
+- **THEN** 選擇器顯示 Y，而非 X
 
 #### Scenario: 新 session 建立後綁定模型
-- **WHEN** 使用者在新 session 中以模型 X 建立 session C 並再發送一則訊息，之後在新 session 畫面把全域預設改為 Z
+- **WHEN** 使用者在新 session 中以模型 X 建立 session C，之後在新 session 畫面把全域預設改為 Z
 - **THEN** 重新打開 session C 時選擇器顯示 X，而非 Z
 
 #### Scenario: 存量 session 升級後首次發送
 - **WHEN** 一個無記錄的存量 session 以模型 X 發送訊息
 - **THEN** 該 session 的模型記錄變為 X
+
+### Requirement: session 模型記錄持久化於後端
+系統 SHALL 將 session 的模型記錄保存在後端資料庫，且 MUST NOT 依賴瀏覽器 localStorage，使記錄在 app 重啟、版本升級、桌面端頁面 origin 變動或更換瀏覽器後仍可讀取。
+
+#### Scenario: 桌面端重啟後還原
+- **WHEN** 使用者在桌面端以模型 Y 建立 session C，完全結束並重新啟動 app 後打開 session C
+- **THEN** 右下角選擇器顯示 Y

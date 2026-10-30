@@ -1,6 +1,15 @@
+import { api } from '../../../utils/api';
 import type { ClaudeSettings } from '../types/types';
 
 export const CLAUDE_SETTINGS_KEY = 'claude-settings';
+
+// 已有 session 的模型存在後端資料庫，避免一個 session 的切換影響其他 session，
+// 也不受 localStorage 依 origin 隔離（桌面端 port 每次啟動都不同）影響
+export const saveSessionModel = (sessionId: string, model: string) => {
+  api.setSessionModel(sessionId, model).catch((error: unknown) => {
+    console.warn('[sessionModel] 保存 session 模型失败:', error);
+  });
+};
 
 export const safeLocalStorage = {
   setItem: (key: string, value: string) => {

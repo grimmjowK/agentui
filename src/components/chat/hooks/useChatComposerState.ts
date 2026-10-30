@@ -15,7 +15,7 @@ import { ANTIGRAVITY_MODELS } from '../../../../shared/modelConstants';
 import { authenticatedFetch } from '../../../utils/api';
 import { thinkingModes } from '../constants/thinkingModes';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
-import { safeLocalStorage } from '../utils/chatStorage';
+import { safeLocalStorage, saveSessionModel } from '../utils/chatStorage';
 import type {
   ChatMessage,
   PendingPermissionRequest,
@@ -25,7 +25,6 @@ import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import { escapeRegExp } from '../utils/chatFormatting';
 
 import { useFileMentions } from './useFileMentions';
-import { sessionModelKey } from './useChatProviderState';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
 
 type PendingViewSession = {
@@ -191,8 +190,10 @@ export function useChatComposerState({
   const handleModelSwitch = useCallback((modelValue: string) => {
     // 已有 session 只記到該 session；新 session 才更新全域預設
     const sessionId = selectedSession?.id;
-    const persist = (globalKey: string) =>
-      localStorage.setItem(sessionId ? sessionModelKey(sessionId) : globalKey, modelValue);
+    const persist = (globalKey: string) => {
+      if (sessionId) saveSessionModel(sessionId, modelValue);
+      else localStorage.setItem(globalKey, modelValue);
+    };
     if (provider === 'claude') {
       setClaudeModel(modelValue);
       persist('claude-model');
@@ -702,6 +703,8 @@ export function useChatComposerState({
         // For new sessions we intentionally keep this as `null` until the backend
         // emits `session_created` with the canonical provider session id.
         pendingViewSessionRef.current = { sessionId: null, startedAt: Date.now() };
+        // 新 session 尚無 id，先暫存所用模型，待 `session_created` 時綁定
+        sessionStorage.setItem('pendingSessionModel', currentModel);
       }
       if (effectiveSessionId) {
         onSessionActive?.(effectiveSessionId);
@@ -841,7 +844,7 @@ export function useChatComposerState({
       safeLocalStorage.removeItem(`draft_input_${selectedProject.projectId}`);
       // 綁定該 session 實際使用的模型，供下次打開時還原
       if (effectiveSessionId) {
-        localStorage.setItem(sessionModelKey(effectiveSessionId), currentModel);
+        saveSessionModel(effectiveSessionId, currentModel);
       }
     },
     [
