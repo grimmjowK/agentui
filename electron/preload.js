@@ -39,6 +39,14 @@ contextBridge.exposeInMainWorld('cloudcliDesktop', {
   retry: () => ipcRenderer.invoke('cloudcli:retry'),
   /** 前端主题变化时单向通知外壳，同步原生菜单 / 窗口底色 / Windows 控制按钮 */
   setTheme: (theme) => ipcRenderer.send('cloudcli:set-theme', theme),
+  /** 需要用户处理的请求到达；外壳仅在窗口失焦时发系统通知 */
+  notifyAttention: (payload) => ipcRenderer.send('cloudcli:attention', payload),
+  /** 订阅「点击通知」跳转，返回取消订阅函数 */
+  onOpenSession: (callback) => {
+    const listener = (_event, target) => callback(target);
+    ipcRenderer.on('cloudcli:open-session', listener);
+    return () => ipcRenderer.removeListener('cloudcli:open-session', listener);
+  },
 });
 
 /**

@@ -73,6 +73,24 @@ function AppContentInner() {
     setActiveTab('shell');
   }, [setActiveTab]);
 
+  // 点击通知（Web Push 经 Service Worker / 桌面端经 preload）后跳到对应 session
+  const openFromNotification = useCallback((target: { sessionId?: unknown; provider?: unknown }) => {
+    if (typeof target.provider === 'string' && target.provider.trim()) {
+      localStorage.setItem('selected-provider', target.provider);
+    }
+
+    setActiveTab('chat');
+    setSidebarOpen(false);
+    void refreshProjectsSilently();
+
+    if (typeof target.sessionId === 'string' && target.sessionId) {
+      navigate(`/session/${target.sessionId}`);
+      return;
+    }
+
+    navigate('/');
+  }, [navigate, refreshProjectsSilently, setActiveTab, setSidebarOpen]);
+
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
       return undefined;
@@ -80,24 +98,7 @@ function AppContentInner() {
 
     const handleServiceWorkerMessage = (event: MessageEvent) => {
       const message = event.data;
-      if (!message || message.type !== 'notification:navigate') {
-        return;
-      }
-
-      if (typeof message.provider === 'string' && message.provider.trim()) {
-        localStorage.setItem('selected-provider', message.provider);
-      }
-
-      setActiveTab('chat');
-      setSidebarOpen(false);
-      void refreshProjectsSilently();
-
-      if (typeof message.sessionId === 'string' && message.sessionId) {
-        navigate(`/session/${message.sessionId}`);
-        return;
-      }
-
-      navigate('/');
+      if (message?.type === 'notification:navigate') openFromNotification(message);
     };
 
     navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
@@ -105,7 +106,27 @@ function AppContentInner() {
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
     };
-  }, [navigate, refreshProjectsSilently, setActiveTab, setSidebarOpen]);
+  }, [openFromNotification]);
+
+  useEffect(() => window.cloudcliDesktop?.onOpenSession(openFromNotification), [openFromNotification]);
+
+  // 桌面端：审批 / 交互问答到达时交给外壳，窗口在后台则发系统通知（前台时外壳忽略）。
+  // 放在 AppContent 而非聊天视图：用户停在终端 / 文件标签时聊天视图可能未挂载。
+  useEffect(() => {
+    const desktop = window.cloudcliDesktop;
+    const msg = latestMessage as { kind?: string; toolName?: string; input?: Record<string, any>; sessionId?: string; provider?: string } | null;
+    if (!desktop || msg?.kind !== 'permission_request') return;
+    const input = msg.input ?? {};
+    const detail = input.command ?? input.file_path ?? input.questions?.[0]?.question ?? '';
+    const toolName = msg.toolName || t('notifications.genericTool');
+    desktop.notifyAttention({
+      title: t('notifications.codes.permission.required.title'),
+      body: [t('notifications.codes.permission.required.body', { toolName }), typeof detail === 'string' ? detail : '']
+        .filter(Boolean).join('\n'),
+      sessionId: msg.sessionId ?? null,
+      provider: msg.provider ?? null,
+    });
+  }, [latestMessage, t]);
 
   // Permission recovery: query pending permissions on WebSocket reconnect or session change
   useEffect(() => {

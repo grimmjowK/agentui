@@ -8,7 +8,7 @@
  *   - GUI 启动时补全 PATH，否则 claude/codex/gemini/cursor 一律找不到（D7）
  */
 
-import { app, BrowserWindow, shell, ipcMain, safeStorage, nativeTheme, screen, Menu } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, safeStorage, nativeTheme, screen, Menu, Notification } from 'electron';
 import { spawn, exec } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -210,6 +210,8 @@ async function startBackend() {
     ELECTRON_RUN_AS_NODE: '1',
     HOST: '127.0.0.1',
     SERVER_PORT: '0',
+    // 后端默认 55 秒无人审批即拒绝；桌面端常在后台，放宽到与 Codex 一致的 10 分钟（用户显式设置优先）
+    CLAUDE_TOOL_APPROVAL_TIMEOUT_MS: env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS ?? '600000',
     NODE_ENV: app.isPackaged ? 'production' : env.NODE_ENV ?? 'development',
   });
 
@@ -499,6 +501,13 @@ function createWindow() {
     saveWindowState();
   });
 
+  // 回到前台即视为已看到：清角标、停闪烁
+  mainWindow.on('focus', () => {
+    attentionCount = 0;
+    app.setBadgeCount(0);
+    mainWindow.flashFrame(false);
+  });
+
   for (const [event, fullscreen] of [['enter-full-screen', true], ['leave-full-screen', false]]) {
     mainWindow.on(event, () => mainWindow.webContents.send('cloudcli:fullscreen', fullscreen));
   }
@@ -575,6 +584,47 @@ ipcMain.on('cloudcli:get-desktop-state', (event) => {
   event.returnValue = { material: USE_MATERIAL, fullscreen: win?.isFullScreen() ?? false };
 });
 
+// ---------------------------------------------------------------- 后台提醒
+
+/** 窗口失焦期间累计的待处理请求数，用作 Dock 角标 */
+let attentionCount = 0;
+/** 持有通知引用：被 GC 后 macOS 上点击回调会丢失 */
+const liveNotifications = new Set();
+
+/**
+ * 审批 / 交互问答到达时由前端调用。窗口在前台时什么都不做（页面内卡片已可见）；
+ * 在后台时发系统通知 + Dock 跳动 / 任务栏闪烁，点击通知回到窗口并切到对应 session。
+ */
+ipcMain.on('cloudcli:attention', (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isFocused()) return;
+  const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
+  const title = text(payload?.title, 80) || 'CloudCLI';
+  const body = text(payload?.body, 200);
+  const sessionId = text(payload?.sessionId, 200) || null;
+  const provider = text(payload?.provider, 40) || null;
+
+  attentionCount += 1;
+  app.setBadgeCount(attentionCount); // Windows 不支持角标，返回 false，靠 flashFrame
+  if (process.platform === 'darwin') app.dock.bounce('critical');
+  else win.flashFrame(true);
+
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({ title, body });
+  liveNotifications.add(notification);
+  const release = () => liveNotifications.delete(notification);
+  notification.on('close', release);
+  notification.on('click', () => {
+    release();
+    if (win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send('cloudcli:open-session', { sessionId, provider });
+  });
+  notification.show();
+});
+
 // 前端是主题唯一真相，这里只单向跟随（D4）
 ipcMain.on('cloudcli:set-theme', (event, theme) => {
   if (theme !== 'light' && theme !== 'dark') return;
@@ -601,6 +651,9 @@ if (!app.requestSingleInstanceLock()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
   });
+
+  // Windows 通知需要与安装器快捷方式一致的 AUMID（electron-builder.config.js 的 appId）
+  if (process.platform === 'win32') app.setAppUserModelId('ai.cloudcli.desktop');
 
   app.whenReady().then(async () => {
     windowState = loadWindowState();
