@@ -1,11 +1,8 @@
-import { ExternalLink, MessageSquare, Star } from 'lucide-react';
+import { MessageSquare, Star } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { IS_PLATFORM } from '../../../../constants/config';
 import { currentVersion } from '../../../../hooks/useVersionCheck';
 
 const GITHUB_REPO_URL = 'https://github.com/grimmjowK/agentui';
-const DOCS_URL = 'https://cloudcli.ai/docs/plugin-overview';
-const CLOUDCLI_URL = 'https://cloudcli.ai';
 
 function GitHubIcon({ className }: { className?: string }) {
   return (
@@ -61,44 +58,7 @@ export default function AboutTab() {
           <GitHubIcon className="h-4 w-4" />
           GitHub
         </a>
-        <a
-          href={DOCS_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-          Docs
-        </a>
-        <a
-          href={CLOUDCLI_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-          cloudcli.ai
-        </a>
       </div>
-
-      {/* Hosted CTA (OSS mode only) */}
-      {!IS_PLATFORM && (
-        <div className="rounded-xl border border-primary/10 bg-primary/5 p-4">
-          <h4 className="text-sm font-medium text-foreground">Try CloudCLI Hosted</h4>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Team collaboration, shared MCP configs, settings sync across environments, and managed infrastructure.
-          </p>
-          <a
-            href={CLOUDCLI_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:underline"
-          >
-            Learn more
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
-      )}
 
       {/* License */}
       <div className="border-t border-border/50 pt-4">
