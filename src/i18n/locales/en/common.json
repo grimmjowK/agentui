@@ -93,7 +93,14 @@
     "createProjectDesktop": "Create a new project by clicking the folder icon in the sidebar",
     "newSession": "New Session",
     "untitledSession": "Untitled Session",
-    "projectFiles": "Project Files"
+    "projectFiles": "Project Files",
+    "sessionInfo": {
+      "copyId": "Copy session ID",
+      "copyResume": "Copy resume command",
+      "copyTranscript": "Copy transcript path",
+      "copied": "Copied",
+      "unavailable": "Not available for this session"
+    }
   },
   "fileTree": {
     "loading": "Loading files...",
