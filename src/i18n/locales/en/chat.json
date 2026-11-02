@@ -156,39 +156,38 @@
   },
   "thinkingMode": {
     "selector": {
-      "title": "Thinking Mode",
-      "description": "Extended thinking gives Claude more time to evaluate alternatives",
+      "title": "Reasoning Effort",
+      "description": "How much the model thinks before answering. Higher levels are slower and use more tokens.",
       "active": "Active",
-      "tip": "Higher thinking modes take more time but provide more thorough analysis"
+      "tip": "Applies to this and following messages. Levels a model does not support are lowered automatically."
     },
     "modes": {
-      "none": {
-        "name": "Standard",
-        "description": "Regular Claude response",
-        "prefix": ""
+      "default": {
+        "name": "Default",
+        "description": "Use the CLI default"
       },
-      "think": {
-        "name": "Think",
-        "description": "Basic extended thinking",
-        "prefix": "think"
+      "low": {
+        "name": "Low",
+        "description": "Fastest, minimal thinking"
       },
-      "thinkHard": {
-        "name": "Think Hard",
-        "description": "More thorough evaluation",
-        "prefix": "think hard"
+      "medium": {
+        "name": "Medium",
+        "description": "Balanced speed and depth"
       },
-      "thinkHarder": {
-        "name": "Think Harder",
-        "description": "Deep analysis with alternatives",
-        "prefix": "think harder"
+      "high": {
+        "name": "High",
+        "description": "Deep reasoning"
       },
-      "ultrathink": {
-        "name": "Ultrathink",
-        "description": "Maximum thinking budget",
-        "prefix": "ultrathink"
+      "xhigh": {
+        "name": "Extra High",
+        "description": "Deeper than high (newer models)"
+      },
+      "max": {
+        "name": "Max",
+        "description": "Maximum effort (Claude only)"
       }
     },
-    "buttonTitle": "Thinking mode: {{mode}}"
+    "buttonTitle": "Reasoning effort: {{mode}}"
   },
   "providerSelection": {
     "title": "Choose Your AI Assistant",

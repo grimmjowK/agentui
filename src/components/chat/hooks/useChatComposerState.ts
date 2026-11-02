@@ -13,7 +13,7 @@ import { useDropzone } from 'react-dropzone';
 
 import { ANTIGRAVITY_MODELS } from '../../../../shared/modelConstants';
 import { authenticatedFetch } from '../../../utils/api';
-import { thinkingModes } from '../constants/thinkingModes';
+import { EFFORT_STORAGE_KEY, resolveEffort } from '../constants/thinkingModes';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
 import { safeLocalStorage, saveSessionModel } from '../utils/chatStorage';
 import type {
@@ -163,7 +163,11 @@ export function useChatComposerState({
   const [uploadingImages, setUploadingImages] = useState<Map<string, number>>(new Map());
   const [imageErrors, setImageErrors] = useState<Map<string, string>>(new Map());
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
-  const [thinkingMode, setThinkingMode] = useState('none');
+  // 推理强度（effort）。跨消息、跨会话保持，不再每次发送后重置
+  const [thinkingMode, setThinkingMode] = useState(() => safeLocalStorage.getItem(EFFORT_STORAGE_KEY) || 'default');
+  useEffect(() => {
+    safeLocalStorage.setItem(EFFORT_STORAGE_KEY, thinkingMode);
+  }, [thinkingMode]);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
 
   const [pendingCommand, setPendingCommand] = useState<SlashCommand | null>(null);
@@ -615,11 +619,9 @@ export function useChatComposerState({
         }
       }
 
-      let messageContent = currentInput;
-      const selectedThinkingMode = thinkingModes.find((mode: { id: string; prefix?: string }) => mode.id === thinkingMode);
-      if (selectedThinkingMode && selectedThinkingMode.prefix) {
-        messageContent = `${selectedThinkingMode.prefix}: ${currentInput}`;
-      }
+      const messageContent = currentInput;
+      const effort = resolveEffort(provider, thinkingMode);
+      const effortOption = effort === 'default' ? {} : { effort };
 
       let uploadedImages: unknown[] = [];
       if (attachedImages.length > 0) {
@@ -684,7 +686,6 @@ export function useChatComposerState({
       setUploadingImages(new Map());
       setImageErrors(new Map());
       setIsTextareaExpanded(false);
-      setThinkingMode('none');
 
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
@@ -771,6 +772,7 @@ export function useChatComposerState({
             resume: Boolean(effectiveSessionId),
             model: codexModel,
             sessionSummary,
+            ...effortOption,
             permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
           },
         });
@@ -820,6 +822,7 @@ export function useChatComposerState({
             permissionMode,
             model: claudeModel,
             sessionSummary,
+            ...effortOption,
             images: uploadedImages,
           },
         });
