@@ -362,16 +362,20 @@ export function useChatSessionState({
     const nearBottom = isNearBottom();
     setIsUserScrolledUp(!nearBottom);
 
+    const scrolledNearTop = container.scrollTop < 100;
     if (!allMessagesLoadedRef.current) {
-      const scrolledNearTop = container.scrollTop < 100;
       // ponytail: 之前用一个额外的 topLoadLockRef + "scrollTop > 20 才解锁" 的
       // 阈值来防抖，但 loadOlderMessages 成功后 useLayoutEffect 会把 scrollTop
       // 恢复到接近原位（往往仍 < 100），锁于是卡死，后续向上滚动的事件被静默
       // 吞掉——这正是"有时候无响应"的根因。loadOlderMessages 本身已经用
       // isLoadingMoreRef 防重入，直接依赖它即可，不需要额外的位置阈值锁。
       if (scrolledNearTop) await loadOlderMessages(container);
+    } else if (scrolledNearTop && !pendingScrollRestoreRef.current && visibleMessageCount < chatMessages.length) {
+      // 全量历史已在 store（索引静默补全），向上滚动只需放大渲染窗口。
+      pendingScrollRestoreRef.current = { height: container.scrollHeight, top: container.scrollTop };
+      setVisibleMessageCount((prev) => prev + MESSAGES_PER_PAGE);
     }
-  }, [isNearBottom, loadOlderMessages]);
+  }, [isNearBottom, loadOlderMessages, visibleMessageCount, chatMessages.length]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
@@ -380,7 +384,7 @@ export function useChatSessionState({
     const newScrollHeight = container.scrollHeight;
     container.scrollTop = top + Math.max(newScrollHeight - height, 0);
     pendingScrollRestoreRef.current = null;
-  }, [chatMessages.length]);
+  }, [chatMessages.length, visibleMessageCount]);
 
   // Reset scroll/pagination state on session change
   useEffect(() => {
@@ -740,15 +744,22 @@ export function useChatSessionState({
     return () => { if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current); };
   }, [isLoadingMoreMessages, hasMoreMessages]);
 
-  // silent=true 用于用户消息索引条在挂载时静默补全历史：只拉数据、把
+  // silent=true 用于用户消息索引条在挂载时静默补全历史：只拉数据进 store、把
   // allMessagesLoaded 标记为已完成，不弹「加载全部」进度浮层、不做滚动位置
-  // 恢复、不强制 visibleMessageCount=Infinity（那会关闭虚拟化，对大会话是
-  // 索引跳转依赖目标消息进入 DOM；静默补全历史后也要扩大可见窗口，
-  // 否则索引条虽然出现，点击旧消息却永远找不到锚点。
+  // 恢复、不强制 visibleMessageCount=Infinity（那会一次渲染整段长会话，切换
+  // session 卡顿的根因）。渲染窗口之外的老消息由向上滚动 / 索引跳转再展开。
   const loadAllMessages = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
     if (!selectedSession || !selectedProject) return;
     if (isLoadingAllMessages) return;
+    // 首页分页请求还在途时不静默补全，否则晚到的首页响应会覆盖掉全量数据。
+    if (silent && isLoadingSessionMessages) return;
+    // 数据已全量在 store 里（例如索引静默补全过），只需放开渲染窗口；重新拉取
+    // 对没有稳定 id 的 provider（codex 等）会换掉 message id，导致索引锚点失配。
+    if (!silent && allMessagesLoaded) {
+      setVisibleMessageCount(Infinity);
+      return;
+    }
     const sessionProvider = selectedSession.__provider || 'claude';
 
     const requestSessionId = selectedSession.id;
@@ -780,7 +791,7 @@ export function useChatSessionState({
         setHasMoreMessages(false);
         setTotalMessages(slot.total);
         messagesOffsetRef.current = slot.total;
-        setVisibleMessageCount(Infinity);
+        if (!silent) setVisibleMessageCount(Infinity);
         setAllMessagesLoaded(true);
 
         if (!silent) {
@@ -800,7 +811,7 @@ export function useChatSessionState({
       isLoadingMoreRef.current = false;
       setIsLoadingAllMessages(false);
     }
-  }, [selectedSession, selectedProject, isLoadingAllMessages, currentSessionId, sessionStore]);
+  }, [selectedSession, selectedProject, isLoadingAllMessages, isLoadingSessionMessages, allMessagesLoaded, currentSessionId, sessionStore]);
 
   const loadEarlierMessages = useCallback(() => {
     setVisibleMessageCount((prev) => prev + 100);

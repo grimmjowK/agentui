@@ -35,8 +35,8 @@ const JUMP_RETRY_INTERVAL_MS = 200;
  * 点击跳转到对话中的对应位置并高亮反馈。
  *
  * 索引覆盖当前已加载到 store 的全部消息（allMessages），不局限于滚动窗口内
- * 的 visibleMessages，否则还没滚上去加载的历史会在索引里直接消失。索引不在
- * 挂载时强制拉取全量历史；点击未加载的条目时才按需加载，避免切换长会话卡顿。
+ * 的 visibleMessages，否则还没滚上去加载的历史会在索引里直接消失。挂载时静默
+ * 拉全量历史进 store（不放大渲染窗口）；点击窗口外的条目时再放开窗口并跳转。
  */
 export default function UserMessageIndex({
   allMessages,
@@ -96,6 +96,12 @@ export default function UserMessageIndex({
   useEffect(() => () => {
     if (jumpRetryTimerRef.current) clearTimeout(jumpRetryTimerRef.current);
   }, []);
+
+  // 首屏只分页拉了最新一页，静默补全全量历史进 store，索引才能一开始就覆盖
+  // 所有用户消息。silent 模式不放大渲染窗口，不会因此卡顿。
+  useEffect(() => {
+    if (!allMessagesLoaded) loadAllMessages({ silent: true });
+  }, [allMessagesLoaded, loadAllMessages]);
 
   const entries = useMemo<IndexEntry[]>(() => {
     return allMessages
