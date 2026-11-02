@@ -151,6 +151,16 @@
         "label": "Font Size",
         "description": "Editor font size in pixels"
       }
+    },
+    "fonts": {
+      "cjk": {
+        "label": "Chinese Font",
+        "description": "Font used for Chinese characters"
+      },
+      "latin": {
+        "label": "English Font",
+        "description": "Font used for letters, digits and punctuation"
+      }
     }
   },
   "mcpForm": {

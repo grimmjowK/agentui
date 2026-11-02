@@ -128,8 +128,11 @@
   
   body {
     @apply bg-background text-foreground;
-    /* 兰亭黑-简：macOS 系统可下载字体，未安装的环境（Windows 等）回落到后面的系统字体 */
-    font-family: "Lantinghei SC", "兰亭黑-简", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* 英文字体在前、中文字体在后：汉字回落到中文字体。两个变量由 src/utils/fontPreferences.ts 按设置写入，
+       这里的默认值与其 DEFAULT_* 一致；末尾系统字体兜底未安装的情况 */
+    font-family: var(--font-ui-latin, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto),
+      var(--font-ui-cjk, "Lantinghei SC", "兰亭黑-简"),
+      "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
     margin: 0;
     padding: 0;
   }

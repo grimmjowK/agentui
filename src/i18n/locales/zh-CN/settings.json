@@ -151,6 +151,16 @@
         "label": "字体大小",
         "description": "编辑器字体大小（px）"
       }
+    },
+    "fonts": {
+      "cjk": {
+        "label": "中文字体",
+        "description": "界面中汉字使用的字体"
+      },
+      "latin": {
+        "label": "英文字体",
+        "description": "字母、数字和标点使用的字体"
+      }
     }
   },
   "mcpForm": {
