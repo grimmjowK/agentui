@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { IS_DESKTOP } from '../../../../../constants/config';
 import { useCredentialsSettings } from '../../../hooks/useCredentialsSettings';
 import ApiKeysSection from './sections/ApiKeysSection';
 import GithubCredentialsSection from './sections/GithubCredentialsSection';
@@ -56,7 +57,8 @@ export default function CredentialsSettingsTab() {
         />
       )}
 
-      <ApiKeysSection
+      {/* API 密钥只供外部脚本调用 /api/agent；桌面端后端只绑 127.0.0.1 且端口随机，外部用不上 */}
+      {!IS_DESKTOP && <ApiKeysSection
         apiKeys={apiKeys}
         showNewKeyForm={showNewKeyForm}
         newKeyName={newKeyName}
@@ -66,7 +68,7 @@ export default function CredentialsSettingsTab() {
         onCancelCreateApiKey={cancelNewApiKeyForm}
         onToggleApiKey={toggleApiKey}
         onDeleteApiKey={deleteApiKey}
-      />
+      />}
 
       <GithubCredentialsSection
         githubCredentials={githubCredentials}

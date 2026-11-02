@@ -15,6 +15,7 @@ export function useGitSettings() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(null);
+  const [saveError, setSaveError] = useState('');
   const clearStatusTimerRef = useRef<number | null>(null);
 
   const clearSaveStatus = useCallback(() => {
@@ -63,9 +64,11 @@ export function useGitSettings() {
 
       const data = await response.json() as GitConfigResponse;
       console.error('Failed to save git config:', data.error);
+      setSaveError(data.error || '');
       setSaveStatus('error');
     } catch (error) {
       console.error('Error saving git config:', error);
+      setSaveError(error instanceof Error ? error.message : '');
       setSaveStatus('error');
     } finally {
       setIsSaving(false);
@@ -90,6 +93,7 @@ export function useGitSettings() {
     isLoading,
     isSaving,
     saveStatus,
+    saveError,
     clearSaveStatus,
     saveGitConfig,
   };

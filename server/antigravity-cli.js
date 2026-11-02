@@ -375,6 +375,8 @@ export async function spawnAntigravity(message, options = {}, ws) {
     }
 
     activeAntigravityProcesses.set(sessionId, childProcess);
+    // 推送通知按 userId 查订阅，缺了它 notifyUserIfEnabled 会直接跳过
+    childProcess.notifyContext = { userId: ws?.userId || null, provider: 'antigravity', sessionName: options.sessionSummary };
     const handler = new AntigravityResponseHandler(options.sessionId || null, liveWriter, (nativeId) => {
       activeAntigravityProcesses.delete(sessionId);
       sessionId = nativeId;
@@ -449,11 +451,12 @@ export async function spawnAntigravity(message, options = {}, ws) {
         resolve();
       } else if (code === 0 && !handler.error) {
         send(liveWriter, { sessionId: handler.sessionId, kind: 'complete', exitCode: 0, success: true });
+        notifyRunStopped({ ...childProcess.notifyContext, sessionId: handler.sessionId, stopReason: 'completed' });
         resolve();
       } else {
         const errorContent = handler.error || stderrOutput.trim() || `Antigravity CLI exited with code ${code}`;
         if (!handler.error) send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: errorContent });
-        notifyRunFailed({ sessionId: handler.sessionId, error: errorContent });
+        notifyRunFailed({ ...childProcess.notifyContext, sessionId: handler.sessionId, error: errorContent });
         reject(new Error(errorContent));
       }
     });
@@ -466,7 +469,7 @@ export async function spawnAntigravity(message, options = {}, ws) {
       }
       const errorMsg = `Failed to start Antigravity process: ${err.message}`;
       send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: errorMsg });
-      notifyRunFailed({ sessionId: handler.sessionId, error: errorMsg });
+      notifyRunFailed({ ...childProcess.notifyContext, sessionId: handler.sessionId, error: errorMsg });
       reject(err);
     });
   });
@@ -496,7 +499,7 @@ export function abortAntigravitySession(sessionId) {
       }
     }, 2000).unref();
 
-    notifyRunStopped({ sessionId });
+    notifyRunStopped({ ...childProcess.notifyContext, sessionId, stopReason: 'aborted' });
     return true;
   } catch (err) {
     console.error(`Failed to abort Antigravity session ${sessionId}:`, err);

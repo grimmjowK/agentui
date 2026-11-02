@@ -116,7 +116,8 @@
       "actionRequired": "需要处理",
       "stop": "运行已停止",
       "error": "运行失败"
-    }
+    },
+    "desktopNote": "桌面版不支持 Web 推送。窗口在后台时，权限审批与交互问答会以 Dock 图标跳动和角标提醒（Windows 为任务栏闪烁）。"
   },
   "appearanceSettings": {
     "darkMode": {
@@ -223,7 +224,7 @@
   },
   "git": {
     "title": "Git 配置",
-    "description": "配置您的 git 提交身份。这些设置将通过 git config --global 全局应用",
+    "description": "配置你的 git 提交身份。保存时会执行 git config --global，修改本机所有 git 仓库使用的身份（~/.gitconfig）。",
     "name": {
       "label": "Git 名称",
       "help": "您的 git 提交名称"
@@ -237,7 +238,8 @@
       "saving": "保存中..."
     },
     "status": {
-      "success": "保存成功"
+      "success": "保存成功",
+      "error": "保存失败"
     }
   },
   "apiKeys": {

@@ -1,5 +1,6 @@
 import { Bell, BellOff, BellRing, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { IS_DESKTOP } from '../../../../constants/config';
 import type { NotificationPreferencesState } from '../../types/types';
 
 type NotificationsSettingsTabProps = {
@@ -22,6 +23,19 @@ export default function NotificationsSettingsTab({
   onDisablePush,
 }: NotificationsSettingsTabProps) {
   const { t } = useTranslation('settings');
+
+  // Electron 没有推送服务，Web Push 订阅必然失败；桌面端靠外壳的 Dock 角标 / 跳动提醒
+  if (IS_DESKTOP) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Bell className="w-5 h-5 text-blue-600" />
+          <h3 className="text-lg font-medium text-foreground">{t('notifications.title')}</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">{t('notifications.desktopNote')}</p>
+      </div>
+    );
+  }
 
   const pushSupported = pushPermission !== 'unsupported';
   const pushDenied = pushPermission === 'denied';

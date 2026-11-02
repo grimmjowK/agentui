@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { AlertCircle, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useGitSettings } from '../../../hooks/useGitSettings';
 import { Button, Input } from '../../../../../shared/view/ui';
@@ -15,6 +15,7 @@ export default function GitSettingsTab() {
     isLoading,
     isSaving,
     saveStatus,
+    saveError,
     saveGitConfig,
   } = useGitSettings();
 
@@ -70,6 +71,13 @@ export default function GitSettingsTab() {
                 <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
                   <Check className="h-4 w-4" />
                   {t('git.status.success')}
+                </div>
+              )}
+
+              {saveStatus === 'error' && (
+                <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  {saveError || t('git.status.error')}
                 </div>
               )}
             </div>
