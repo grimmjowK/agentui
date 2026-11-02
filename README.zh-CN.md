@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/logo.svg" alt="CloudCLI UI" width="64" height="64">
+  <img src="public/logo-mark.svg" alt="CloudCLI UI" width="64" height="64">
   <h1>Cloud CLI（又名 Claude Code UI）</h1>
   <p><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>、<a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>、<a href="https://developers.openai.com/codex">Codex</a> 和 <a href="https://geminicli.com/">Gemini-CLI</a> 的桌面和移动端 UI。可在本地或远程使用，从任何地方查看激活的项目与会话。</p>
 </div>

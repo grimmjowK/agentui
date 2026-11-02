@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/logo.svg" alt="CloudCLI UI" width="64" height="64">
+  <img src="public/logo-mark.svg" alt="CloudCLI UI" width="64" height="64">
   <h1>Cloud CLI (aka Claude Code UI)</h1>
   <p>Десктопный и мобильный UI для <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>, <a href="https://developers.openai.com/codex">Codex</a> и <a href="https://geminicli.com/">Gemini-CLI</a>.<br>Используйте локально или удалённо, чтобы просматривать активные проекты и сессии отовсюду.</p>
 </div>

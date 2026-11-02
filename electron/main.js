@@ -658,6 +658,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     windowState = loadWindowState();
     buildApplicationMenu();
+    if (!app.isPackaged && process.platform === 'darwin') app.dock.setIcon(path.join(__dirname, '..', 'public', 'logo-1024.png'));
     createWindow();
     await showStartupPage();
     await bootBackendAndNavigate();
