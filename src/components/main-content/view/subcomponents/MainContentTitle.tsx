@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type { AppTab, Project, ProjectSession } from '../../../../types/app';
 import { usePlugins } from '../../../../contexts/PluginsContext';
+import SessionIdBadge from './SessionIdBadge';
 
 type MainContentTitleProps = {
   activeTab: AppTab;
@@ -68,7 +69,10 @@ export default function MainContentTitle({
             <h2 className="scrollbar-hide overflow-x-auto whitespace-nowrap text-sm font-semibold leading-tight text-foreground">
               {getSessionTitle(selectedSession)}
             </h2>
-            <div className="truncate text-[11px] leading-tight text-muted-foreground">{selectedProject.displayName}</div>
+            <div className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
+              <span className="truncate">{selectedProject.displayName}</span>
+              <SessionIdBadge sessionId={selectedSession.id} provider={selectedSession.__provider} />
+            </div>
           </div>
         ) : showChatNewSession ? (
           <div className="min-w-0">

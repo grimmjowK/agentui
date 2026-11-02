@@ -53,14 +53,14 @@ export default {
       { target: 'zip', arch: ['arm64'] },
     ],
     category: 'public.app-category.developer-tools',
-    icon: 'public/logo-512.png',
+    icon: 'public/logo-1024.png',
     // 本次不做签名与公证（见 proposal「不在本次范围内」）
     identity: null,
   },
 
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],
-    icon: 'public/logo-512.png',
+    icon: 'public/logo-1024.png',
   },
 
   nsis: {

@@ -181,7 +181,7 @@ Environment Variables:
   CONTEXT_WINDOW      Set context window size (default: 160000)
 
 Documentation:
-  ${packageJson.homepage || 'https://github.com/siteboon/claudecodeui'}
+  ${packageJson.homepage || 'https://github.com/grimmjowK/agentui'}
 `);
 }
 

@@ -397,11 +397,12 @@ export default function ChatComposer({
               </div>
             </button>
 
-            {provider === 'claude' && (
-              <ThinkingModeSelector selectedMode={thinkingMode} onModeChange={setThinkingMode} onClose={() => {}} className="" />
+            {(provider === 'claude' || provider === 'codex') && (
+              <ThinkingModeSelector provider={provider} selectedMode={thinkingMode} onModeChange={setThinkingMode} onClose={() => {}} className="" />
             )}
 
-            <TokenUsagePie used={tokenBudget?.used || 0} total={tokenBudget?.total || parseInt(import.meta.env.VITE_CONTEXT_WINDOW) || 160000} />
+            {/* 只在 provider 实际报告了用量时显示；Gemini / Antigravity / Cursor 无数据，显示 0% 会误导 */}
+            {tokenBudget?.total ? <TokenUsagePie used={tokenBudget.used || 0} total={tokenBudget.total} /> : null}
 
             <PromptInputButton
               tooltip={{ content: t('input.showAllCommands') }}

@@ -1162,8 +1162,9 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
                     // Codex stores token info in event_msg with type: "token_count"
                     if (entry.type === 'event_msg' && entry.payload?.type === 'token_count' && entry.payload?.info) {
                         const tokenInfo = entry.payload.info;
-                        if (tokenInfo.total_token_usage) {
-                            totalTokens = tokenInfo.total_token_usage.total_tokens || 0;
+                        // last_token_usage 才是当前上下文占用；total_token_usage 是线程累计值
+                        if (tokenInfo.last_token_usage) {
+                            totalTokens = tokenInfo.last_token_usage.total_tokens || 0;
                         }
                         if (tokenInfo.model_context_window) {
                             contextWindow = tokenInfo.model_context_window;
@@ -1219,7 +1220,7 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
         const lines = fileContent.trim().split('\n');
 
         const parsedContextWindow = parseInt(process.env.CONTEXT_WINDOW, 10);
-        const contextWindow = Number.isFinite(parsedContextWindow) ? parsedContextWindow : 160000;
+        let contextWindow = Number.isFinite(parsedContextWindow) ? parsedContextWindow : 200000;
         let inputTokens = 0;
         let cacheCreationTokens = 0;
         let cacheReadTokens = 0;
@@ -1248,6 +1249,8 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
 
         // Calculate total context usage (excluding output_tokens, as per ccusage)
         const totalUsed = inputTokens + cacheCreationTokens + cacheReadTokens;
+        // ponytail: 转录里不记录上下文窗口，超出标准窗口只可能是 1M 模型；实时轮次会用 SDK 报告的准确值覆盖
+        if (totalUsed > 200000) contextWindow = 1000000;
 
         res.json({
             used: totalUsed,

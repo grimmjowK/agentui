@@ -3,6 +3,7 @@ import express, { type Request, type Response } from 'express';
 import multer from 'multer';
 
 import { codexOwnership } from '@/modules/codex-runtime/index.js';
+import { sessionsDb } from '@/modules/database/index.js';
 import { getCodexRuntimeInfo } from '@/shared/codex-cli-path.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
@@ -10,6 +11,7 @@ import { providerModelsService } from '@/modules/providers/services/models.servi
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
+import { buildResumeCommand } from '@/modules/providers/services/session-resume.js';
 import type { LLMProvider, McpScope, McpTransport, UpsertProviderMcpServerInput } from '@/shared/types.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
@@ -420,6 +422,30 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
     res.json(createApiSuccessResponse(sessionsService.getSessionModel(sessionId)));
+  }),
+);
+
+// 聊天页标题处的「会话信息」：外部终端接续会话、或把转录文件交给 AI 排查时用
+router.get(
+  '/sessions/:sessionId/resume-info',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const indexed = sessionsDb.getSessionById(sessionId);
+    if (!indexed) {
+      throw new AppError('Session not found.', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+    }
+
+    // 索引里的 session_id 即各 CLI 的原生 ID（Gemini 也是按转录文件建索引）。
+    // ponytail: Gemini 本次运行中新建、尚未入索引的会话只在内存 sessionManager 里有原生 ID 映射，
+    // 这里查不到会 404；provider 模块不能直接依赖根目录的 sessionManager，需要时改为依赖注入
+    const provider = indexed.provider || readOptionalQueryString(req.query.provider) || 'claude';
+    res.json(createApiSuccessResponse({
+      sessionId,
+      provider,
+      nativeId: sessionId,
+      transcriptPath: indexed.jsonl_path,
+      resumeCommand: buildResumeCommand(provider, sessionId, indexed.project_path),
+    }));
   }),
 );
 

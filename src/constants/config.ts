@@ -4,6 +4,9 @@
  */
 export const IS_PLATFORM = import.meta.env.VITE_IS_PLATFORM === 'true';
 
+/** 运行在 Electron 桌面外壳内（preload 暴露了 cloudcliDesktop bridge） */
+export const IS_DESKTOP = typeof window !== 'undefined' && Boolean(window.cloudcliDesktop);
+
 /**
  * For empty shell instances where no project is provided,
  * we use a default project object to ensure the shell can still function.

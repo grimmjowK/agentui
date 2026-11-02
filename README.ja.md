@@ -1,18 +1,16 @@
 <div align="center">
-  <img src="public/logo.svg" alt="CloudCLI UI" width="64" height="64">
+  <img src="public/logo-mark.svg" alt="CloudCLI UI" width="64" height="64">
   <h1>Cloud CLI（別名 Claude Code UI）</h1>
   <p><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>、<a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>、<a href="https://developers.openai.com/codex">Codex</a>、<a href="https://geminicli.com/">Gemini-CLI</a> のためのデスクトップ／モバイル UI。<br>ローカルでもリモートでも使え、アクティブなプロジェクトとセッションをどこからでも閲覧できます。</p>
 </div>
 
 <p align="center">
-  <a href="https://cloudcli.ai">CloudCLI Cloud</a> · <a href="https://cloudcli.ai/docs">ドキュメント</a> · <a href="https://discord.gg/buxwujPNRE">Discord</a> · <a href="https://github.com/siteboon/claudecodeui/issues">バグ報告</a> · <a href="CONTRIBUTING.md">コントリビュート</a>
+  <a href="https://cloudcli.ai">CloudCLI Cloud</a> · <a href="https://cloudcli.ai/docs">ドキュメント</a> · <a href="https://discord.gg/buxwujPNRE">Discord</a> · <a href="https://github.com/grimmjowK/agentui/issues">バグ報告</a> · <a href="CONTRIBUTING.md">コントリビュート</a>
 </p>
 
 <p align="center">
   <a href="https://cloudcli.ai"><img src="https://img.shields.io/badge/☁️_CloudCLI_Cloud-Try_Now-0066FF?style=for-the-badge" alt="CloudCLI Cloud"></a>
   <a href="https://discord.gg/buxwujPNRE"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord コミュニティに参加"></a>
-  <br><br>
-  <a href="https://trendshift.io/repositories/15586" target="_blank"><img src="https://trendshift.io/api/badge/repositories/15586" alt="siteboon%2Fclaudecodeui | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 </p>
 
 <div align="right"><i><a href="./README.md">English</a> · <a href="./README.ru.md">Русский</a> · <a href="./README.de.md">Deutsch</a> · <a href="./README.ko.md">한국어</a> · <a href="./README.zh-CN.md">中文</a> · <b>日本語</b> · <a href="./README.tr.md">Türkçe</a></i></div>
@@ -210,7 +208,7 @@ CloudCLI UI と CloudCLI Cloud は、Claude Code の横に別物として存在�
 
 - **[ドキュメント](https://cloudcli.ai/docs)** — インストール、設定、機能、トラブルシューティング
 - **[Discord](https://discord.gg/buxwujPNRE)** — ヘルプを得たり、ユーザー同士で交流したりできます
-- **[GitHub Issues](https://github.com/siteboon/claudecodeui/issues)** — バグ報告と機能要望
+- **[GitHub Issues](https://github.com/grimmjowK/agentui/issues)** — バグ報告と機能要望
 - **[コントリビューションガイド](CONTRIBUTING.md)** — プロジェクトへの貢献方法
 
 ## ライセンス
@@ -233,8 +231,6 @@ GNU General Public License v3.0 - 詳細は [LICENSE](LICENSE) ファイルを�
 - **[CodeMirror](https://codemirror.net/)** - 高度なコードエディタ
 - **[TaskMaster AI](https://github.com/eyaltoledano/claude-task-master)** *(オプション)* - AI を活用したプロジェクト管理とタスク計画
 
-## スポンサー
-- [Siteboon - AI を活用したウェブサイトビルダー](https://siteboon.ai)
 ---
 
 <div align="center">

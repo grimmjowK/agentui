@@ -156,39 +156,38 @@
   },
   "thinkingMode": {
     "selector": {
-      "title": "思考模式",
-      "description": "扩展思考给 Claude 更多时间来评估替代方案",
-      "active": "激活",
-      "tip": "更高的思考模式需要更多时间，但提供更彻底的分析"
+      "title": "推理强度",
+      "description": "模型回答前思考的深度，越高越慢、消耗越多 token。",
+      "active": "当前",
+      "tip": "对本条及之后的消息生效；模型不支持的档位会自动降级。"
     },
     "modes": {
-      "none": {
-        "name": "标准",
-        "description": "常规 Claude 响应",
-        "prefix": ""
+      "default": {
+        "name": "默认",
+        "description": "沿用 CLI 默认设置"
       },
-      "think": {
-        "name": "思考",
-        "description": "基本扩展思考",
-        "prefix": "思考"
+      "low": {
+        "name": "低",
+        "description": "最快，思考最少"
       },
-      "thinkHard": {
-        "name": "深入思考",
-        "description": "更彻底的评估",
-        "prefix": "深入思考"
+      "medium": {
+        "name": "中",
+        "description": "速度与深度平衡"
       },
-      "thinkHarder": {
-        "name": "更深入思考",
-        "description": "考虑替代方案的深度分析",
-        "prefix": "更深入思考"
+      "high": {
+        "name": "高",
+        "description": "深入推理"
       },
-      "ultrathink": {
-        "name": "超级思考",
-        "description": "最大思考预算",
-        "prefix": "超级思考"
+      "xhigh": {
+        "name": "超高",
+        "description": "比「高」更深入（较新模型）"
+      },
+      "max": {
+        "name": "最大",
+        "description": "最大推理强度（仅 Claude）"
       }
     },
-    "buttonTitle": "思考模式：{{mode}}"
+    "buttonTitle": "推理强度：{{mode}}"
   },
   "providerSelection": {
     "title": "选择您的 AI 助手",

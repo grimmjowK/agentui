@@ -58,6 +58,9 @@ export const ThemeProvider = ({ children }) => {
         themeColorMeta.setAttribute('content', '#ffffff'); // Light background color
       }
     }
+
+    // 桌面外壳：同步原生菜单 / 窗口底色 / 标题栏 overlay（浏览器端无此对象）
+    window.cloudcliDesktop?.setTheme(isDarkMode ? 'dark' : 'light');
   }, [isDarkMode]);
 
   // Listen for system theme changes

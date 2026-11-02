@@ -116,7 +116,8 @@
       "actionRequired": "Action required",
       "stop": "Run stopped",
       "error": "Run failed"
-    }
+    },
+    "desktopNote": "The desktop app does not support web push. When the window is in the background, permission requests and questions are signaled by the Dock icon bouncing with a badge (taskbar flashing on Windows)."
   },
   "appearanceSettings": {
     "darkMode": {
@@ -150,6 +151,16 @@
       "fontSize": {
         "label": "Font Size",
         "description": "Editor font size in pixels"
+      }
+    },
+    "fonts": {
+      "cjk": {
+        "label": "Chinese Font",
+        "description": "Font used for Chinese characters"
+      },
+      "latin": {
+        "label": "English Font",
+        "description": "Font used for letters, digits and punctuation"
       }
     }
   },
@@ -213,7 +224,7 @@
   },
   "git": {
     "title": "Git Configuration",
-    "description": "Configure your git identity for commits. These settings will be applied globally via git config --global",
+    "description": "Configure your git commit identity. Saving runs git config --global, which changes the identity used by every git repository on this machine (~/.gitconfig).",
     "name": {
       "label": "Git Name",
       "help": "Your name for git commits"
@@ -227,7 +238,8 @@
       "saving": "Saving..."
     },
     "status": {
-      "success": "Saved successfully"
+      "success": "Saved successfully",
+      "error": "Failed to save"
     }
   },
   "apiKeys": {

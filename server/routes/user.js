@@ -77,6 +77,7 @@ router.post('/git-config', authenticateToken, async (req, res) => {
       console.log(`Applied git config globally: ${gitName} <${gitEmail}>`);
     } catch (gitError) {
       console.error('Error applying git config:', gitError);
+      return res.status(500).json({ error: `git config --global 执行失败：${gitError.message}` });
     }
 
     res.json({

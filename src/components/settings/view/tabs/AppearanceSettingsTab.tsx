@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DarkModeToggle } from '../../../../shared/view/ui';
 import type { CodeEditorSettingsState, ProjectSortOrder } from '../../types/types';
@@ -6,6 +7,15 @@ import SettingsCard from '../SettingsCard';
 import SettingsRow from '../SettingsRow';
 import SettingsSection from '../SettingsSection';
 import SettingsToggle from '../SettingsToggle';
+import {
+  CJK_FONTS,
+  LATIN_FONTS,
+  getFontPreference,
+  isFontInstalled,
+  setFontPreference,
+  type FontOption,
+  type FontSlot,
+} from '../../../../utils/fontPreferences';
 
 type AppearanceSettingsTabProps = {
   projectSortOrder: ProjectSortOrder;
@@ -17,6 +27,40 @@ type AppearanceSettingsTabProps = {
   onCodeEditorLineNumbersChange: (value: boolean) => void;
   onCodeEditorFontSizeChange: (value: string) => void;
 };
+
+const FONT_OPTIONS: Record<FontSlot, FontOption[]> = { latin: LATIN_FONTS, cjk: CJK_FONTS };
+
+function FontSelectRow({ slot }: { slot: FontSlot }) {
+  const { t } = useTranslation('settings');
+  const [value, setValue] = useState(() => getFontPreference(slot));
+  // 只列出本机已安装的字体；当前选中项即使已卸载也保留，避免下拉框显示空值
+  const options = useMemo(
+    () => FONT_OPTIONS[slot].filter((option) => option.id === value || isFontInstalled(option.stack)),
+    [slot, value],
+  );
+
+  return (
+    <SettingsRow
+      label={t(`appearanceSettings.fonts.${slot}.label`)}
+      description={t(`appearanceSettings.fonts.${slot}.description`)}
+    >
+      <select
+        value={value}
+        onChange={(event) => {
+          setValue(event.target.value);
+          setFontPreference(slot, event.target.value);
+        }}
+        className="w-full rounded-lg border border-input bg-card p-2.5 text-sm text-foreground touch-manipulation focus:border-primary focus:ring-1 focus:ring-primary sm:w-56"
+      >
+        {options.map((option) => (
+          <option key={option.id} value={option.id} style={{ fontFamily: option.stack }}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </SettingsRow>
+  );
+}
 
 export default function AppearanceSettingsTab({
   projectSortOrder,
@@ -44,8 +88,10 @@ export default function AppearanceSettingsTab({
       </SettingsSection>
 
       <SettingsSection title={t('mainTabs.appearance')}>
-        <SettingsCard>
+        <SettingsCard divided>
           <LanguageSelector />
+          <FontSelectRow slot="cjk" />
+          <FontSelectRow slot="latin" />
         </SettingsCard>
       </SettingsSection>
 

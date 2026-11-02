@@ -9,6 +9,8 @@ import { getCodexRuntimeInfo } from './shared/codex-cli-path.js';
 import { createNormalizedMessage } from './shared/utils.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 
+const CODEX_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh']);
+
 const activeCodexSessions = new Map();
 const pendingRuns = new Set();
 function notifySafely(notify, payload) {
@@ -149,9 +151,10 @@ export async function queryCodex(command, options = {}, writer) {
         }
       }
       if (method === 'thread/tokenUsage/updated') {
-        const total = params.tokenUsage?.total;
-        if (total) emit({ kind: 'status', text: 'token_budget', tokenBudget: {
-          used: total.totalTokens, total: params.tokenUsage.modelContextWindow,
+        // last 是最近一轮实际送进模型的量，即上下文占用；total 是整个线程的累计值，会虚高
+        const last = params.tokenUsage?.last;
+        if (last && params.tokenUsage.modelContextWindow) emit({ kind: 'status', text: 'token_budget', tokenBudget: {
+          used: last.totalTokens, total: params.tokenUsage.modelContextWindow,
         } });
       }
       if (method === 'turn/completed') {
@@ -192,6 +195,8 @@ export async function queryCodex(command, options = {}, writer) {
     if (state.interrupted) throw new Error('Codex run cancelled');
     const turn = await rpc.request('turn/start', {
       threadId, input: [{ type: 'text', text: command, text_elements: [] }],
+      // 推理强度对本轮及之后的轮次生效；未指定则沿用线程 / config.toml 的设置
+      ...(CODEX_EFFORT_LEVELS.has(options.effort) ? { effort: options.effort } : {}),
     });
     state.turnId = turn.turn.id;
     clearTimeout(startupTimer);

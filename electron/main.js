@@ -8,10 +8,11 @@
  *   - GUI 启动时补全 PATH，否则 claude/codex/gemini/cursor 一律找不到（D7）
  */
 
-import { app, BrowserWindow, shell, ipcMain, safeStorage } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, safeStorage, nativeTheme, screen, Menu, Notification } from 'electron';
 import { spawn, exec } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +27,21 @@ const BACKEND_READY_TIMEOUT_MS = 60_000;
 const BACKEND_KILL_GRACE_MS = 10_000;
 const STARTUP_PAGE = path.join(__dirname, 'startup.html');
 const PRELOAD_SCRIPT = path.join(__dirname, 'preload.js');
+
+/** 窗口背景色，对应 src/index.css 的 --background（浅 0 0% 100%，深 222.2 84% 4.9%） */
+const THEME_BACKGROUND = { light: '#ffffff', dark: '#020817' };
+/** Windows 控制按钮图标色，对应 src/index.css 的 --foreground */
+const THEME_SYMBOL = { light: '#020817', dark: '#f8fafc' };
+/** 与 src/index.css 中 html[data-desktop="win32"] 的 --titlebar-height 一致 */
+const WIN_TITLEBAR_HEIGHT = 36;
+const DEFAULT_WINDOW_SIZE = { width: 1440, height: 900 };
+
+/**
+ * 原生材质（见 desktop-native-polish D3）：macOS vibrancy 全版本可用；
+ * Windows 的 backgroundMaterial 需 build ≥ 22621（Win11 22H2），os.release() 形如 10.0.22621。
+ */
+const USE_MATERIAL = process.platform === 'darwin'
+  || (process.platform === 'win32' && Number(os.release().split('.')[2]) >= 22621);
 
 // ---------------------------------------------------------------- 全局状态
 
@@ -194,6 +210,8 @@ async function startBackend() {
     ELECTRON_RUN_AS_NODE: '1',
     HOST: '127.0.0.1',
     SERVER_PORT: '0',
+    // 后端默认 55 秒无人审批即拒绝；桌面端常在后台，放宽到与 Codex 一致的 10 分钟（用户显式设置优先）
+    CLAUDE_TOOL_APPROVAL_TIMEOUT_MS: env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS ?? '600000',
     NODE_ENV: app.isPackaged ? 'production' : env.NODE_ENV ?? 'development',
   });
 
@@ -340,17 +358,130 @@ function isAllowedNavigation(targetUrl) {
   }
 }
 
+// ---------------------------------------------------------------- 窗口状态（D7）
+
+/** { x, y, width, height, isMaximized, theme }；文件不存在或损坏时走默认值 */
+let windowState = {};
+
+function windowStateFile() {
+  return path.join(app.getPath('userData'), 'window-state.json');
+}
+
+function loadWindowState() {
+  try {
+    return JSON.parse(fs.readFileSync(windowStateFile(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveWindowState() {
+  try {
+    fs.writeFileSync(windowStateFile(), JSON.stringify(windowState));
+  } catch (err) {
+    console.warn('[desktop] 窗口状态保存失败:', err.message);
+  }
+}
+
+/** 上次位置不与任何显示器 workArea 相交（如外接屏已拔）时丢弃位置，只留尺寸，由 BrowserWindow 默认居中 */
+function restoreBounds({ x, y, width = DEFAULT_WINDOW_SIZE.width, height = DEFAULT_WINDOW_SIZE.height }) {
+  const size = { width, height };
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return size;
+  const visible = screen.getAllDisplays().some(({ workArea: a }) => (
+    x < a.x + a.width && x + width > a.x && y < a.y + a.height && y + height > a.y
+  ));
+  return visible ? { x, y, ...size } : size;
+}
+
+/** 材质启用时 overlay 用透明底，让 mica 透出来，避免控制按钮区出现色块 */
+function titleBarOverlay(theme) {
+  return {
+    color: USE_MATERIAL ? '#00000000' : THEME_BACKGROUND[theme],
+    symbolColor: THEME_SYMBOL[theme],
+    height: WIN_TITLEBAR_HEIGHT,
+  };
+}
+
+function currentTheme() {
+  return windowState.theme ?? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+}
+
+// ---------------------------------------------------------------- 菜单（D6）
+
+function buildApplicationMenu() {
+  const viewSubmenu = [
+    { role: 'reload' },
+    { role: 'forceReload' },
+    ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' }]),
+    { type: 'separator' },
+    { role: 'resetZoom' },
+    { role: 'zoomIn' },
+    { role: 'zoomOut' },
+    { type: 'separator' },
+    { role: 'togglefullscreen' },
+  ];
+  const template = process.platform === 'darwin'
+    ? [{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'viewMenu', submenu: viewSubmenu }, { role: 'windowMenu' }]
+    : [{ role: 'fileMenu' }, { role: 'editMenu' }, { role: 'viewMenu', submenu: viewSubmenu }];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** 只在可编辑元素或有选中文本时弹；页面自己 preventDefault 的 contextmenu 不会走到这里 */
+function showContextMenu(win, params) {
+  const { isEditable, selectionText, editFlags, misspelledWord, dictionarySuggestions } = params;
+  const hasSelection = selectionText.trim().length > 0;
+  if (!isEditable && !hasSelection) return;
+
+  const template = [];
+  if (isEditable && misspelledWord && dictionarySuggestions.length > 0) {
+    for (const suggestion of dictionarySuggestions) {
+      template.push({ label: suggestion, click: () => win.webContents.replaceMisspelling(suggestion) });
+    }
+    template.push({ type: 'separator' });
+  }
+  if (isEditable) {
+    template.push(
+      { role: 'cut', enabled: editFlags.canCut },
+      { role: 'copy', enabled: editFlags.canCopy },
+      { role: 'paste', enabled: editFlags.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', enabled: editFlags.canSelectAll },
+    );
+  } else {
+    template.push({ role: 'copy', enabled: editFlags.canCopy });
+  }
+  Menu.buildFromTemplate(template).popup({ window: win });
+}
+
 function createWindow() {
+  const savedTheme = windowState.theme;
+  // 建窗前套用上次主题，启动页的 prefers-color-scheme 与原生控件随之一致；首次启动保持 'system'
+  if (savedTheme) nativeTheme.themeSource = savedTheme;
+  const theme = currentTheme();
+
+  const platformChrome = process.platform === 'darwin'
+    ? {
+      titleBarStyle: 'hiddenInset',
+      // 红绿灯（约 14px 高）垂直居中于 38px 拖拽条；实机偏差在这里微调
+      trafficLightPosition: { x: 14, y: 12 },
+      vibrancy: 'sidebar',
+      visualEffectState: 'followWindow',
+    }
+    : {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: titleBarOverlay(theme),
+      ...(USE_MATERIAL ? { backgroundMaterial: 'mica' } : {}),
+    };
+
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 720,
+    ...restoreBounds(windowState),
+    // > 前端 768 移动端断点（src/hooks/useDeviceSettings.ts），100% 缩放下不落入抽屉布局
+    minWidth: 960,
     minHeight: 480,
-    show: true,
-    backgroundColor: '#111827',
-    // 用系统标题栏。hiddenInset 会让网页内容顶到红绿灯下面（图标重叠），且整条顶栏
-    // 不可拖拽、双击不缩放 —— 无边框要做对得由前端预留位置并标 -webkit-app-region，
-    // 而这套前端同时还要跑在浏览器里，不值得为外壳改动它。
+    show: false,
+    // 材质画在窗口背后，背景必须透明才看得见；否则用主题底色防止首帧异色
+    backgroundColor: USE_MATERIAL ? '#00000000' : THEME_BACKGROUND[theme],
+    ...platformChrome,
     webPreferences: {
       preload: PRELOAD_SCRIPT,
       contextIsolation: true,
@@ -358,6 +489,32 @@ function createWindow() {
       sandbox: true,
     },
   });
+
+  mainWindow.once('ready-to-show', () => {
+    if (windowState.isMaximized) mainWindow.maximize();
+    mainWindow.show();
+  });
+
+  // getNormalBounds：最大化时存还原尺寸，而不是整屏
+  mainWindow.on('close', () => {
+    Object.assign(windowState, mainWindow.getNormalBounds(), { isMaximized: mainWindow.isMaximized() });
+    saveWindowState();
+  });
+
+  // 回到前台即视为已看到：清角标、停闪烁
+  mainWindow.on('focus', () => {
+    attentionCount = 0;
+    app.setBadgeCount(0);
+    mainWindow.flashFrame(false);
+  });
+
+  for (const [event, fullscreen] of [['enter-full-screen', true], ['leave-full-screen', false]]) {
+    mainWindow.on(event, () => mainWindow.webContents.send('cloudcli:fullscreen', fullscreen));
+  }
+
+  // 禁用触控板捏合缩放；Cmd/Ctrl +/-/0 走 View 菜单的 zoom 角色，保留
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
+  mainWindow.webContents.on('context-menu', (_event, params) => showContextMenu(mainWindow, params));
 
   // 站外地址一律交给系统浏览器，不在应用内开窗
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -421,6 +578,68 @@ ipcMain.handle('cloudcli:retry', async () => {
   await bootBackendAndNavigate();
 });
 
+// 同步 handler：preload 要在页面首帧前把 data-material / data-fullscreen 写上 <html>（D1）
+ipcMain.on('cloudcli:get-desktop-state', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  event.returnValue = { material: USE_MATERIAL, fullscreen: win?.isFullScreen() ?? false };
+});
+
+// ---------------------------------------------------------------- 后台提醒
+
+/** 窗口失焦期间累计的待处理请求数，用作 Dock 角标 */
+let attentionCount = 0;
+/** 持有通知引用：被 GC 后 macOS 上点击回调会丢失 */
+const liveNotifications = new Set();
+
+/**
+ * 审批 / 交互问答到达时由前端调用。窗口在前台时什么都不做（页面内卡片已可见）；
+ * 在后台时发系统通知 + Dock 跳动 / 任务栏闪烁，点击通知回到窗口并切到对应 session。
+ */
+ipcMain.on('cloudcli:attention', (event, payload) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isFocused()) return;
+  const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
+  const title = text(payload?.title, 80) || 'CloudCLI';
+  const body = text(payload?.body, 200);
+  const sessionId = text(payload?.sessionId, 200) || null;
+  const provider = text(payload?.provider, 40) || null;
+
+  attentionCount += 1;
+  app.setBadgeCount(attentionCount); // Windows 不支持角标，返回 false，靠 flashFrame
+  if (process.platform === 'darwin') app.dock.bounce('critical');
+  else win.flashFrame(true);
+
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({ title, body });
+  liveNotifications.add(notification);
+  const release = () => liveNotifications.delete(notification);
+  notification.on('close', release);
+  notification.on('click', () => {
+    release();
+    if (win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send('cloudcli:open-session', { sessionId, provider });
+  });
+  notification.show();
+});
+
+// 前端是主题唯一真相，这里只单向跟随（D4）
+ipcMain.on('cloudcli:set-theme', (event, theme) => {
+  if (theme !== 'light' && theme !== 'dark') return;
+  nativeTheme.themeSource = theme;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) {
+    if (!USE_MATERIAL) win.setBackgroundColor(THEME_BACKGROUND[theme]);
+    if (process.platform === 'win32') win.setTitleBarOverlay(titleBarOverlay(theme));
+  }
+  if (windowState.theme !== theme) {
+    windowState.theme = theme;
+    saveWindowState();
+  }
+});
+
 // ---------------------------------------------------------------- 生命周期
 
 // 单实例：两个后端同时操作同一份 SQLite 与 ~/.claude 会互相踩踏
@@ -433,7 +652,13 @@ if (!app.requestSingleInstanceLock()) {
     mainWindow.focus();
   });
 
+  // Windows 通知需要与安装器快捷方式一致的 AUMID（electron-builder.config.js 的 appId）
+  if (process.platform === 'win32') app.setAppUserModelId('ai.cloudcli.desktop');
+
   app.whenReady().then(async () => {
+    windowState = loadWindowState();
+    buildApplicationMenu();
+    if (!app.isPackaged && process.platform === 'darwin') app.dock.setIcon(path.join(__dirname, '..', 'public', 'logo-1024.png'));
     createWindow();
     await showStartupPage();
     await bootBackendAndNavigate();

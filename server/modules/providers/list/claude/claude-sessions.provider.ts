@@ -412,6 +412,13 @@ export class ClaudeSessionsProvider implements IProviderSessions {
       return [createNormalizedMessage({ kind: 'stream_end', sessionId, provider: PROVIDER })];
     }
 
+    // 新版 CLI 会把发给 API 的请求体副本（`api-request-blob`）也写进 transcript，
+    // 带 message.role 但没有 uuid/timestamp，内容是已有对话行的重复（含 ToolSearch
+    // 的 "Tool loaded." 文本）。不过滤会生成随机 id 的重复用户/助手消息。
+    if (raw.type === 'api-request-blob') {
+      return [];
+    }
+
     const messages: NormalizedMessage[] = [];
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('claude');

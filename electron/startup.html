@@ -5,34 +5,51 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
   <title>CloudCLI</title>
   <style>
-    :root { color-scheme: dark; }
+    /* 跟随 nativeTheme.themeSource（main 在建窗前已设为上次主题，首次启动为系统主题） */
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff; --fg: #020817; --muted: #e5e7eb; --accent: #2563eb;
+      --detail-bg: #f8fafc; --detail-border: #e5e7eb; --error: #dc2626;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #020817; --fg: #e5e7eb; --muted: #374151; --accent: #60a5fa;
+        --detail-bg: #0b1220; --detail-border: #1f2937; --error: #f87171;
+      }
+    }
     * { box-sizing: border-box; }
     body {
       margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
       font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-      background: #111827; color: #e5e7eb; -webkit-user-select: none; user-select: none;
+      background: var(--bg); color: var(--fg); -webkit-user-select: none; user-select: none;
     }
+    /* 隐藏系统标题栏后的拖拽条，高度与 src/index.css 的 --titlebar-height 对齐 */
+    html[data-desktop] body::before {
+      content: ''; position: fixed; top: 0; left: 0; right: 0; height: 38px; -webkit-app-region: drag;
+    }
+    html[data-desktop="win32"] body::before { height: 36px; }
+    html[data-fullscreen] body::before { display: none; }
     main { width: min(560px, 90vw); text-align: center; }
     h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
     .spinner {
       width: 28px; height: 28px; margin: 0 auto 20px; border-radius: 50%;
-      border: 2px solid #374151; border-top-color: #60a5fa; animation: spin .8s linear infinite;
+      border: 2px solid var(--muted); border-top-color: var(--accent); animation: spin .8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     .detail {
       display: none; margin-top: 16px; padding: 12px; max-height: 40vh; overflow: auto;
-      background: #0b1220; border: 1px solid #1f2937; border-radius: 6px;
+      background: var(--detail-bg); border: 1px solid var(--detail-border); border-radius: 6px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
-      white-space: pre-wrap; text-align: left; color: #fca5a5; user-select: text;
+      white-space: pre-wrap; text-align: left; color: var(--error); user-select: text;
     }
     button {
       margin-top: 20px; padding: 8px 20px; border: 0; border-radius: 6px;
-      background: #2563eb; color: #fff; font-size: 14px; cursor: pointer;
+      background: #2563eb; color: #fff; font-size: 14px; cursor: default;
     }
     button:hover { background: #1d4ed8; }
     button[hidden] { display: none; }
     body.error .spinner { display: none; }
-    body.error h1 { color: #f87171; }
+    body.error h1 { color: var(--error); }
     body.error .detail { display: block; }
   </style>
 </head>

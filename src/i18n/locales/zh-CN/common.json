@@ -93,7 +93,14 @@
     "createProjectDesktop": "点击侧边栏中的文件夹图标以创建新项目",
     "newSession": "新会话",
     "untitledSession": "未命名会话",
-    "projectFiles": "项目文件"
+    "projectFiles": "项目文件",
+    "sessionInfo": {
+      "copyId": "复制会话 ID",
+      "copyResume": "复制 resume 命令",
+      "copyTranscript": "复制转录文件路径",
+      "copied": "已复制",
+      "unavailable": "此会话不可用"
+    }
   },
   "fileTree": {
     "loading": "正在加载文件...",

@@ -2,16 +2,17 @@ import { useState, useRef, useEffect, useCallback, type CSSProperties } from 're
 import { createPortal } from 'react-dom';
 import { Brain, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { thinkingModes } from '../../constants/thinkingModes';
+import { resolveEffort, thinkingModesFor } from '../../constants/thinkingModes';
 
 type ThinkingModeSelectorProps = {
+  provider: string;
   selectedMode: string;
   onModeChange: (modeId: string) => void;
   onClose?: () => void;
   className?: string;
 };
 
-function ThinkingModeSelector({ selectedMode, onModeChange, onClose, className = '' }: ThinkingModeSelectorProps) {
+function ThinkingModeSelector({ provider, selectedMode: storedMode, onModeChange, onClose, className = '' }: ThinkingModeSelectorProps) {
   const { t } = useTranslation('chat');
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -19,21 +20,12 @@ function ThinkingModeSelector({ selectedMode, onModeChange, onClose, className =
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownStyle, setDropdownStyle] = useState<CSSProperties | null>(null);
 
-  // Mapping from mode ID to translation key
-  const modeKeyMap: Record<string, string> = {
-    'think-hard': 'thinkHard',
-    'think-harder': 'thinkHarder'
-  };
-  // Create translated modes for display
-  const translatedModes = thinkingModes.map(mode => {
-    const modeKey = modeKeyMap[mode.id] || mode.id;
-    return {
-      ...mode,
-      name: t(`thinkingMode.modes.${modeKey}.name`),
-      description: t(`thinkingMode.modes.${modeKey}.description`),
-      prefix: t(`thinkingMode.modes.${modeKey}.prefix`)
-    };
-  });
+  const selectedMode = resolveEffort(provider, storedMode);
+  const translatedModes = thinkingModesFor(provider).map(mode => ({
+    ...mode,
+    name: t(`thinkingMode.modes.${mode.id}.name`),
+    description: t(`thinkingMode.modes.${mode.id}.description`),
+  }));
 
   const closeDropdown = useCallback(() => {
     setIsOpen(false);
@@ -145,7 +137,7 @@ function ThinkingModeSelector({ selectedMode, onModeChange, onClose, className =
 
           setIsOpen(true);
         }}
-        className={`flex h-10 w-10 items-center justify-center rounded-full transition-all duration-200 sm:h-10 sm:w-10 ${selectedMode === 'none'
+        className={`flex h-10 w-10 items-center justify-center rounded-full transition-all duration-200 sm:h-10 sm:w-10 ${selectedMode === 'default'
             ? 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600'
             : 'bg-blue-100 hover:bg-blue-200 dark:bg-blue-900 dark:hover:bg-blue-800'
           }`}
@@ -217,11 +209,6 @@ function ThinkingModeSelector({ selectedMode, onModeChange, onClose, className =
                       <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                         {mode.description}
                       </p>
-                      {mode.prefix && (
-                        <code className="mt-1 inline-block rounded bg-gray-100 px-1.5 py-0.5 text-xs dark:bg-gray-700">
-                          {mode.prefix}
-                        </code>
-                      )}
                     </div>
                   </div>
                 </button>

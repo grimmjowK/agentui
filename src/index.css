@@ -128,7 +128,11 @@
   
   body {
     @apply bg-background text-foreground;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* 英文字体在前、中文字体在后：汉字回落到中文字体。两个变量由 src/utils/fontPreferences.ts 按设置写入，
+       这里的默认值与其 DEFAULT_* 一致；末尾系统字体兜底未安装的情况 */
+    font-family: var(--font-ui-latin, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto),
+      var(--font-ui-cjk, "Lantinghei SC", "兰亭黑-简"),
+      "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
     margin: 0;
     padding: 0;
   }
@@ -939,5 +943,119 @@
       outline-offset: 4px;
       background-color: transparent;
     }
+  }
+}
+
+/*
+ * 桌面外壳专属样式（openspec/changes/desktop-native-polish）
+ * 全部以 html[data-desktop] 为作用域 —— 该属性只由 electron/preload.js 写入，浏览器 / PWA / 移动端零影响。
+ */
+@layer base {
+  /* ---- 标题栏拖拽条与内容让位（D2） ---- */
+  html[data-desktop] {
+    --titlebar-height: 38px; /* macOS：与 main.js trafficLightPosition 对齐 */
+  }
+
+  html[data-desktop="win32"] {
+    --titlebar-height: 36px; /* Windows：与 main.js WIN_TITLEBAR_HEIGHT 对齐 */
+  }
+
+  html[data-desktop][data-fullscreen] {
+    --titlebar-height: 0px;
+  }
+
+  /* 拖拽条内不放任何控件，所有内容都让到它下方，因此无需逐个标 no-drag */
+  html[data-desktop] body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--titlebar-height);
+    z-index: 2147483647;
+    background: transparent;
+    -webkit-app-region: drag;
+  }
+
+  html[data-desktop] #root {
+    padding-top: var(--titlebar-height);
+  }
+
+  html[data-desktop] .min-h-screen {
+    min-height: calc(100vh - var(--titlebar-height));
+  }
+
+  /* 全屏固定层（AppContent 根、设置窗、命令面板、遮罩等）从拖拽条下缘开始 */
+  html[data-desktop] .fixed.inset-0,
+  html[data-desktop] .fixed.top-0 {
+    top: var(--titlebar-height);
+  }
+
+  /* 顶部固定且占满高度的抽屉（QuickSettingsPanel）：改由 bottom 收口，避免底部溢出 */
+  html[data-desktop] .fixed.top-0.h-full,
+  html[data-desktop] .fixed.top-0.h-screen {
+    height: auto;
+    bottom: 0;
+  }
+
+  /* ---- 原生材质开洞（D3），仅 main 已设置 vibrancy / mica 时 ---- */
+  html[data-desktop][data-material] body,
+  html[data-desktop][data-material] .app-shell {
+    background-color: transparent;
+  }
+
+  html[data-desktop][data-material] .app-sidebar {
+    background-color: hsl(var(--background) / 0.35);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html[data-desktop][data-material] .app-main {
+    background-color: hsl(var(--background));
+  }
+
+  /* ---- 桌面交互习惯（D5） ---- */
+  html[data-desktop] :is(button, [role="button"], a, summary, label, .cursor-pointer) {
+    cursor: default;
+  }
+
+  html[data-desktop] a[href^="http"] {
+    cursor: pointer;
+  }
+
+  html[data-desktop] .app-shell {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  html[data-desktop] .app-shell :is(.chat-message, pre, code, .prose, .xterm, .cm-editor, input, textarea, [contenteditable]) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  html[data-desktop] :is(img, a) {
+    -webkit-user-drag: none;
+  }
+
+  html[data-desktop] body {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  html[data-desktop] :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* 输入类控件自带 focus ring，不再叠加 outline */
+  html[data-desktop] :focus-visible:not(input, textarea, select, [contenteditable]) {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* 用标准属性而非 ::-webkit-scrollbar：.dark 上的 scrollbar-color 会被继承，
+     Chromium 遇到标准属性就忽略 webkit 伪元素 */
+  html[data-desktop],
+  html[data-desktop] * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
   }
 }

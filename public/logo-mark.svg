@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><g transform="translate(0.0 0.0) scale(1.0000)">
+<defs>
+<linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="317.3" y1="364.2" x2="423.3" y2="563.7"><stop offset="0" stop-color="#548CE3"/><stop offset="1" stop-color="#2961CE"/></linearGradient>
+<linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="702.1" y1="362.1" x2="558.3" y2="635.8"><stop offset="0" stop-color="#7CB1EC"/><stop offset="1" stop-color="#3575E0"/></linearGradient>
+<linearGradient id="gb1" gradientUnits="userSpaceOnUse" x1="336.0" y1="349.3" x2="404.3" y2="415.3"><stop offset="0" stop-color="#12225A"/><stop offset="1" stop-color="#2552AA"/></linearGradient><linearGradient id="gb2" gradientUnits="userSpaceOnUse" x1="681.8" y1="345.7" x2="612.8" y2="411.7"><stop offset="0" stop-color="#12225A"/><stop offset="1" stop-color="#2552AA"/></linearGradient>
+<linearGradient id="gb3" gradientUnits="userSpaceOnUse" x1="343.6" y1="674.5" x2="410.4" y2="621.1"><stop offset="0" stop-color="#12225A"/><stop offset="1" stop-color="#244078"/></linearGradient><linearGradient id="gb4" gradientUnits="userSpaceOnUse" x1="678.9" y1="675.1" x2="612.1" y2="621.7"><stop offset="0" stop-color="#12225A"/><stop offset="1" stop-color="#244078"/></linearGradient>
+<filter id="blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
+<clipPath id="under"><polygon points="723.7,648.7 570.9,296.0 448.6,296.0 678.9,675.1"/><polygon points="298.6,379.0 454.5,727.0 565.5,727.0 336.0,349.3"/></clipPath>
+</defs>
+
+<g transform="translate(512 512) scale(2.3202) translate(-511.1 -511.5)">
+<polygon points="336.0,349.3 404.3,415.3 367.2,415.3" fill="url(#gb1)"/><polygon points="681.8,345.7 612.8,411.7 648.4,411.7" fill="url(#gb2)"/>
+<polygon points="343.6,674.5 410.4,621.1 373.3,621.1" fill="url(#gb3)"/><polygon points="678.9,675.1 612.1,621.7 649.2,621.7" fill="url(#gb4)"/>
+<polygon points="723.7,648.7 570.9,296.0 448.6,296.0 678.9,675.1" fill="#2961CE"/>
+<polygon points="298.6,379.0 454.5,727.0 565.5,727.0 336.0,349.3" fill="url(#g3)"/>
+<g clip-path="url(#under)" opacity="0.5"><polygon points="343.6,674.5 568.7,296.0 449.2,296.0 299.6,648.6" fill="#0A1A4A" filter="url(#blur)"/><polygon points="681.8,345.7 449.9,727.0 570.8,727.0 722.5,378.5" fill="#0A1A4A" filter="url(#blur)"/></g>
+<polygon points="343.6,674.5 568.7,296.0 449.2,296.0 299.6,648.6" fill="#63A2F9"/>
+<polygon points="681.8,345.7 449.9,727.0 570.8,727.0 722.5,378.5" fill="url(#g4)"/>
+
+</g></g></svg>

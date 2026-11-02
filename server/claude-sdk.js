@@ -35,6 +35,7 @@ const pendingToolApprovals = new Map();
 const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 55000;
 
 const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
+const CLAUDE_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
 function createRequestId() {
   if (typeof crypto.randomUUID === 'function') {
@@ -205,6 +206,11 @@ function mapCliOptionsToSDK(options = {}) {
   // Map model (default to sonnet)
   // Valid models: sonnet, opus, haiku, opusplan, sonnet[1m]
   sdkOptions.model = options.model || CLAUDE_MODELS.DEFAULT;
+
+  // 推理强度：未指定则用 CLI 默认（high）；模型不支持的档位由 CLI 自动降级
+  if (CLAUDE_EFFORT_LEVELS.has(options.effort)) {
+    sdkOptions.effort = options.effort;
+  }
   // Model logged at query start below
 
   // Map system prompt configuration
@@ -289,39 +295,25 @@ function transformMessage(sdkMessage) {
  * @param {Object} resultMessage - SDK result message
  * @returns {Object|null} Token budget object or null
  */
-function extractTokenBudget(resultMessage) {
-  if (resultMessage.type !== 'result' || !resultMessage.modelUsage) {
+function extractTokenBudget(resultMessage, lastUsage, lastModel) {
+  if (resultMessage.type !== 'result' || !lastUsage) {
     return null;
   }
 
-  // Get the first model's usage data
-  const modelKey = Object.keys(resultMessage.modelUsage)[0];
-  const modelData = resultMessage.modelUsage[modelKey];
+  // 上下文占用 = 最后一次 API 调用送出的输入（含缓存读写）+ 它的输出（下一轮会成为输入）。
+  // 不能用 modelUsage 的累计值：每轮都会重复计入同一份缓存上下文，长会话会虚高数倍。
+  const used = (lastUsage.input_tokens || 0)
+    + (lastUsage.cache_read_input_tokens || 0)
+    + (lastUsage.cache_creation_input_tokens || 0)
+    + (lastUsage.output_tokens || 0);
 
-  if (!modelData) {
-    return null;
-  }
+  // 分母取 SDK 报告的模型上下文窗口（1M 模型即为 1000000）；拿不到才退回 CONTEXT_WINDOW
+  const modelUsage = resultMessage.modelUsage || {};
+  const contextWindow = modelUsage[lastModel]?.contextWindow
+    || Math.max(0, ...Object.values(modelUsage).map((entry) => entry?.contextWindow || 0))
+    || parseInt(process.env.CONTEXT_WINDOW, 10) || 200000;
 
-  // Use cumulative tokens if available (tracks total for the session)
-  // Otherwise fall back to per-request tokens
-  const inputTokens = modelData.cumulativeInputTokens || modelData.inputTokens || 0;
-  const outputTokens = modelData.cumulativeOutputTokens || modelData.outputTokens || 0;
-  const cacheReadTokens = modelData.cumulativeCacheReadInputTokens || modelData.cacheReadInputTokens || 0;
-  const cacheCreationTokens = modelData.cumulativeCacheCreationInputTokens || modelData.cacheCreationInputTokens || 0;
-
-  // Total used = input + output + cache tokens
-  const totalUsed = inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens;
-
-  // Use configured context window budget from environment (default 160000)
-  // This is the user's budget limit, not the model's context window
-  const contextWindow = parseInt(process.env.CONTEXT_WINDOW) || 160000;
-
-  // Token calc logged via token-budget WS event
-
-  return {
-    used: totalUsed,
-    total: contextWindow
-  };
+  return { used, total: contextWindow };
 }
 
 /**
@@ -639,6 +631,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Process streaming messages
     console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
+    let lastMainUsage = null;
+    let lastMainModel = null;
     for await (const message of queryInstance) {
       // Capture session ID from first message
       if (message.session_id && !capturedSessionId) {
@@ -674,13 +668,15 @@ async function queryClaudeSDK(command, options = {}, ws) {
         ws.send(msg);
       }
 
+      // 只记主线程（非 subagent）的最后一次调用，subagent 的上下文与主会话无关
+      if (message.type === 'assistant' && !message.parent_tool_use_id && message.message?.usage) {
+        lastMainUsage = message.message.usage;
+        lastMainModel = message.message.model;
+      }
+
       // Extract and send token budget updates from result messages
       if (message.type === 'result') {
-        const models = Object.keys(message.modelUsage || {});
-        if (models.length > 0) {
-          // Model info available in result message
-        }
-        const tokenBudgetData = extractTokenBudget(message);
+        const tokenBudgetData = extractTokenBudget(message, lastMainUsage, lastMainModel);
         if (tokenBudgetData) {
           ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
         }
@@ -855,5 +851,6 @@ export {
   getActiveClaudeSDKSessions,
   resolveToolApproval,
   getPendingApprovalsForSession,
-  reconnectSessionWriter
+  reconnectSessionWriter,
+  extractTokenBudget
 };

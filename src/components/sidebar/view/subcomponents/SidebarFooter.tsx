@@ -3,7 +3,7 @@ import type { TFunction } from 'i18next';
 import { IS_PLATFORM } from '../../../../constants/config';
 import { version } from '../../../../../package.json';
 
-const GITHUB_REPO_URL = 'https://github.com/siteboon/claudecodeui';
+const GITHUB_REPO_URL = 'https://github.com/grimmjowK/agentui';
 
 type SidebarFooterProps = {
   onShowSettings: () => void;
