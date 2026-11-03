@@ -280,6 +280,15 @@ router.get(
   }),
 );
 
+router.post(
+  '/:provider/install',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = parseProvider(req.params.provider);
+    const status = await providerAuthService.installProviderCli(provider);
+    res.json(createApiSuccessResponse(status));
+  }),
+);
+
 // ----------------- Models routes -----------------
 router.get(
   '/:provider/models',

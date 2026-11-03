@@ -46,6 +46,16 @@ export class CodexProviderAuth implements IProviderAuth {
   async getStatus(): Promise<ProviderAuthStatus> {
     const installed = this.checkInstalled();
     const credentials = await this.checkCredentials();
+    if (!installed && !credentials.authenticated) {
+      return {
+        installed: false,
+        provider: 'codex',
+        authenticated: false,
+        email: null,
+        method: null,
+        error: 'Codex CLI is not installed',
+      };
+    }
 
     return {
       installed,

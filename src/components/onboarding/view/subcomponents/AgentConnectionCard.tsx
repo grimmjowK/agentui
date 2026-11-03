@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { Check, Download, Loader2 } from 'lucide-react';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type { LLMProvider } from '../../../../types/app';
 import type { ProviderAuthStatus } from '../../../provider-auth/types';
@@ -11,6 +11,7 @@ type AgentConnectionCardProps = {
   iconContainerClassName: string;
   loginButtonClassName: string;
   onLogin: () => void;
+  onInstall?: () => void;
 };
 
 export default function AgentConnectionCard({
@@ -21,39 +22,74 @@ export default function AgentConnectionCard({
   iconContainerClassName,
   loginButtonClassName,
   onLogin,
+  onInstall,
 }: AgentConnectionCardProps) {
   const containerClassName = status.authenticated ? connectedClassName : 'border-border bg-card';
 
   const statusText = status.loading
     ? 'Checking...'
+    : status.installing
+      ? 'Installing CLI...'
     : status.authenticated
-      ? status.email || 'Connected'
+      ? status.installSuccess
+        ? `Installed & connected (${status.email || 'Connected'})`
+        : status.email || 'Connected'
+      : status.installSuccess
+        ? 'CLI installed successfully — click Login to connect'
       : status.error || 'Not connected';
+
+  const statusTextClassName = !status.loading && !status.installing && !status.authenticated && status.error && !status.installSuccess
+    ? 'text-xs text-red-600 dark:text-red-400'
+    : status.installSuccess
+      ? 'text-xs text-green-600 dark:text-green-400'
+      : 'text-xs text-muted-foreground';
 
   return (
     <div className={`rounded-lg border p-4 transition-colors ${containerClassName}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={`flex h-10 w-10 items-center justify-center rounded-full ${iconContainerClassName}`}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${iconContainerClassName}`}>
             <SessionProviderLogo provider={provider} className="h-5 w-5" />
           </div>
 
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 font-medium text-foreground">
               {title}
               {status.authenticated && <Check className="h-4 w-4 text-green-500" />}
             </div>
-            <div className="text-xs text-muted-foreground">{statusText}</div>
+            <div className={`break-words ${statusTextClassName}`}>{statusText}</div>
           </div>
         </div>
 
         {!status.authenticated && !status.loading && (
-          <button
-            onClick={onLogin}
-            className={`${loginButtonClassName} rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors`}
-          >
-            Login
-          </button>
+          <div className="flex flex-shrink-0 items-center gap-2">
+            {(!status.installed || status.installing) && onInstall && (
+              <button
+                onClick={onInstall}
+                disabled={status.installing}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {status.installing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Installing...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    Install
+                  </>
+                )}
+              </button>
+            )}
+            <button
+              onClick={onLogin}
+              disabled={status.installing}
+              className={`${loginButtonClassName} rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              Login
+            </button>
+          </div>
         )}
       </div>
     </div>

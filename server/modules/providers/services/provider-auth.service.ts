@@ -1,5 +1,86 @@
+import { spawn } from 'node:child_process';
+
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type { LLMProvider, ProviderAuthStatus } from '@/shared/types.js';
+import { AppError } from '@/shared/utils.js';
+
+const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
+
+function buildInstallShellCommand(provider: LLMProvider, platform: NodeJS.Platform = process.platform): string {
+  const isWindows = platform === 'win32';
+  if (provider === 'claude') {
+    return 'npm install -g @anthropic-ai/claude-code';
+  }
+  if (provider === 'cursor') {
+    return isWindows
+      ? "irm 'https://cursor.com/install?win32=true' | iex"
+      : 'curl https://cursor.com/install -fsS | bash';
+  }
+  if (provider === 'codex') {
+    return 'npm install -g @openai/codex';
+  }
+  if (provider === 'gemini') {
+    return 'npm install -g @google/gemini-cli';
+  }
+  return isWindows
+    ? 'irm https://antigravity.google/cli/install.ps1 | iex'
+    : 'curl -fsSL https://antigravity.google/cli/install.sh | bash';
+}
+
+function runShellInstallCommand(command: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const isWindows = process.platform === 'win32';
+  const shell = isWindows ? 'powershell.exe' : 'bash';
+  const args = isWindows
+    ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command]
+    : ['-c', command];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(shell, args, {
+      env: { ...process.env, npm_config_loglevel: 'error' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGTERM');
+      reject(new AppError('CLI installation timed out after 5 minutes.', {
+        code: 'CLI_INSTALL_TIMEOUT',
+        statusCode: 504,
+      }));
+    }, INSTALL_TIMEOUT_MS);
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout = (stdout + chunk.toString()).slice(-16384);
+    });
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-16384);
+    });
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new AppError(`Failed to start installer: ${err.message}`, {
+        code: 'CLI_INSTALL_FAILED',
+        statusCode: 500,
+      }));
+    });
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() });
+    });
+  });
+}
 
 export const providerAuthService = {
   /**
@@ -8,6 +89,33 @@ export const providerAuthService = {
   async getProviderAuthStatus(providerName: string): Promise<ProviderAuthStatus> {
     const provider = providerRegistry.resolveProvider(providerName);
     return provider.auth.getStatus();
+  },
+
+  /**
+   * Installs the CLI for a provider in the background and returns the updated auth status.
+   */
+  async installProviderCli(providerName: LLMProvider): Promise<ProviderAuthStatus> {
+    const command = buildInstallShellCommand(providerName);
+    const { code, stdout, stderr } = await runShellInstallCommand(command);
+
+    if (code !== 0) {
+      const detail = stderr || stdout || `Installer exited with code ${code}`;
+      throw new AppError(`Installation failed: ${detail}`, {
+        code: 'CLI_INSTALL_FAILED',
+        statusCode: 500,
+      });
+    }
+
+    const status = await this.getProviderAuthStatus(providerName);
+    if (!status.installed) {
+      const detail = stderr || stdout || 'CLI executable could not be found after installation.';
+      throw new AppError(`Installation completed but CLI is still not detected: ${detail}`, {
+        code: 'CLI_INSTALL_NOT_DETECTED',
+        statusCode: 500,
+      });
+    }
+
+    return status;
   },
 
   /**

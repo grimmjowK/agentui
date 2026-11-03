@@ -39,8 +39,9 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
     geminiPermissionMode,
     setGeminiPermissionMode,
     openLoginForProvider,
+    openInstallForProvider,
+    closeLoginModal,
     showLoginModal,
-    setShowLoginModal,
     loginProvider,
     handleLoginComplete,
   } = useSettingsController({
@@ -127,6 +128,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                 <AgentsSettingsTab
                   providerAuthStatus={providerAuthStatus}
                   onProviderLogin={openLoginForProvider}
+                  onProviderInstall={openInstallForProvider}
                   claudePermissions={claudePermissions}
                   onClaudePermissionsChange={setClaudePermissions}
                   cursorPermissions={cursorPermissions}
@@ -168,7 +170,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
       <ProviderLoginModal
         key={loginProvider || 'claude'}
         isOpen={showLoginModal}
-        onClose={() => setShowLoginModal(false)}
+        onClose={closeLoginModal}
         provider={loginProvider || 'claude'}
         onComplete={handleLoginComplete}
         isAuthenticated={isAuthenticated}

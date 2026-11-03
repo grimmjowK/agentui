@@ -27,6 +27,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     providerAuthStatus,
     checkProviderAuthStatus,
     refreshProviderAuthStatuses,
+    installProviderCli,
   } = useProviderAuthStatus();
 
   const previousActiveLoginProviderRef = useRef<LLMProvider | null | undefined>(undefined);
@@ -71,6 +72,10 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
   const handleProviderLoginOpen = (provider: LLMProvider) => {
     setActiveLoginProvider(provider);
+  };
+
+  const handleProviderInstallOpen = (provider: LLMProvider) => {
+    void installProviderCli(provider);
   };
 
   const handleLoginComplete = (exitCode: number) => {
@@ -165,6 +170,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
               <AgentConnectionsStep
                 providerStatuses={providerAuthStatus}
                 onOpenProviderLogin={handleProviderLoginOpen}
+                onOpenProviderInstall={handleProviderInstallOpen}
               />
             )}
 
@@ -230,6 +236,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
       {activeLoginProvider && (
         <ProviderLoginModal
+          key={activeLoginProvider}
           isOpen={Boolean(activeLoginProvider)}
           onClose={() => setActiveLoginProvider(null)}
           provider={activeLoginProvider}

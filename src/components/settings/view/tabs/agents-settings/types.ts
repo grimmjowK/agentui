@@ -13,6 +13,7 @@ import type {
 export type AgentContext = {
   authStatus: AuthStatus;
   onLogin: () => void;
+  onInstall: () => void;
 };
 
 export type AgentContextByProvider = Record<AgentProvider, AgentContext>;
@@ -21,6 +22,7 @@ export type ProviderAuthStatusByProvider = Record<AgentProvider, AuthStatus>;
 export type AgentsSettingsTabProps = {
   providerAuthStatus: ProviderAuthStatusByProvider;
   onProviderLogin: (provider: AgentProvider) => void;
+  onProviderInstall: (provider: AgentProvider) => void;
   claudePermissions: ClaudePermissionsState;
   onClaudePermissionsChange: (value: ClaudePermissionsState) => void;
   cursorPermissions: CursorPermissionsState;

@@ -157,6 +157,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     providerAuthStatus,
     checkProviderAuthStatus,
     refreshProviderAuthStatuses,
+    installProviderCli,
   } = useProviderAuthStatus();
 
   const loadSettings = useCallback(async () => {
@@ -234,6 +235,17 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     setLoginProvider(provider);
     setShowLoginModal(true);
   }, []);
+
+  const openInstallForProvider = useCallback((provider: AgentProvider) => {
+    void installProviderCli(provider);
+  }, [installProviderCli]);
+
+  const closeLoginModal = useCallback(() => {
+    setShowLoginModal(false);
+    if (loginProvider) {
+      void checkProviderAuthStatus(loginProvider);
+    }
+  }, [checkProviderAuthStatus, loginProvider]);
 
   const handleLoginComplete = useCallback((exitCode: number) => {
     if (exitCode !== 0 || !loginProvider) {
@@ -419,6 +431,8 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     geminiPermissionMode,
     setGeminiPermissionMode,
     openLoginForProvider,
+    openInstallForProvider,
+    closeLoginModal,
     showLoginModal,
     setShowLoginModal,
     loginProvider,
