@@ -71,7 +71,8 @@ export default function AccountContent({ agent, authStatus, onLogin, onInstall }
   const { t } = useTranslation('settings');
   const config = agentConfig[agent];
   const showInstallButton = !IS_PLATFORM && !authStatus.loading && (!authStatus.installed || Boolean(authStatus.installing)) && Boolean(onInstall);
-  const showLoginSection = authStatus.method !== 'api_key' || showInstallButton;
+  const showLoginButton = !authStatus.loading && authStatus.installed && !authStatus.installing && authStatus.method !== 'api_key';
+  const showLoginSection = showLoginButton || showInstallButton;
 
   return (
     <div className="space-y-6">
@@ -153,7 +154,7 @@ export default function AccountContent({ agent, authStatus, onLogin, onInstall }
                       )}
                     </Button>
                   )}
-                  {authStatus.method !== 'api_key' && (
+                  {showLoginButton && (
                     <Button
                       onClick={onLogin}
                       className={`${config.buttonClass} text-white`}
@@ -169,7 +170,7 @@ export default function AccountContent({ agent, authStatus, onLogin, onInstall }
             </div>
           )}
 
-          {authStatus.installSuccess && !authStatus.error && (
+          {authStatus.installSuccess && (
             <div className="border-t border-border/50 pt-4">
               <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
                 <CheckCircle2 className="h-4 w-4 flex-shrink-0" />

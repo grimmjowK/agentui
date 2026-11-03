@@ -27,7 +27,7 @@ export default function AgentConnectionCard({
 }: AgentConnectionCardProps) {
   const isReady = status.authenticated && status.installed;
   const showInstallButton = !IS_PLATFORM && !status.loading && (!status.installed || Boolean(status.installing)) && Boolean(onInstall);
-  const showLoginButton = !status.loading && !status.authenticated;
+  const showLoginButton = !status.loading && status.installed && !status.installing && !status.authenticated;
   const containerClassName = isReady ? connectedClassName : 'border-border bg-card';
 
   const statusText = status.loading

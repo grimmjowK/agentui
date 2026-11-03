@@ -5,7 +5,7 @@
 
 ## 2. Electron 外壳骨架
 
-- [x] 2.1 添加 devDependencies：`electron`、`electron-builder`、`@electron/rebuild`
+- [x] 2.1 添加 devDependencies：`electron`、`electron-builder`
 - [x] 2.2 创建 `electron/main.js`：单实例锁（未获取则立即退出，已有实例还原并聚焦主窗口）
 - [x] 2.3 创建主窗口，`contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`
 - [x] 2.4 拦截 `setWindowOpenHandler` 与 `will-navigate`：非 `http://127.0.0.1:<port>` 与启动页的目标交给系统浏览器
@@ -42,7 +42,7 @@
 - [x] 6.1 创建 `electron-builder.config.js`：`files` 仅含 `electron/**` 与根 `package.json`
 - [x] 6.2 配置 `extraResources`：`dist/`、`dist-server/`、`node_modules/`、`package.json` → `resources/app/`
 - [x] 6.3 后端入口解析为 `path.join(process.resourcesPath, 'app', 'dist-server', 'server', 'index.js')`，开发态回退到项目内路径
-- [x] 6.4 打包前置步骤中加入 `@electron/rebuild --only better-sqlite3`，按 Electron ABI 重编；**不要**全量 rebuild —— `node-pty` 走 prebuildify/N-API（`prebuilds/<platform>-<arch>/pty.node`），ABI 无关，强行重编反而会把可用的 prebuild 换成一次本地源码编译
+- [x] 6.4 升级 `better-sqlite3@^13.0.3`（N-API prebuild）并在 `electron-builder.config.js` 设置 `npmRebuild: false`，所有原生模块直接复用 N-API 预编译产物，无需 `@electron/rebuild`
 - [x] 6.5 处理 spawn-helper 可执行位：`scripts/fix-node-pty.js` 是 postinstall 钩子、只作用于源码树，打包产物里不会再跑；改为在 `electron-builder.config.js` 的 `afterPack` 中对产物内 `**/node-pty/prebuilds/*/spawn-helper` 再 chmod 0755（幂等，不依赖 extraResources 是否保留 mode）
 - [x] 6.6 配置 mac (`dmg`/`zip`) 与 win (`nsis`) 目标，暂不启用签名与公证
 - [x] 6.7 添加 npm 脚本：`desktop:dev`、`desktop:build`、`desktop:package`
