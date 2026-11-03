@@ -5,11 +5,14 @@ import type { LLMProvider, ProviderAuthStatus } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
+const inFlightInstalls = new Map<LLMProvider, Promise<ProviderAuthStatus>>();
 
 function buildInstallShellCommand(provider: LLMProvider, platform: NodeJS.Platform = process.platform): string {
   const isWindows = platform === 'win32';
   if (provider === 'claude') {
-    return 'npm install -g @anthropic-ai/claude-code';
+    return isWindows
+      ? 'npm install -g @anthropic-ai/claude-code'
+      : 'npm install -g @anthropic-ai/claude-code || (curl -fsSL https://claude.ai/install.sh | bash)';
   }
   if (provider === 'cursor') {
     return isWindows
@@ -27,6 +30,30 @@ function buildInstallShellCommand(provider: LLMProvider, platform: NodeJS.Platfo
     : 'curl -fsSL https://antigravity.google/cli/install.sh | bash';
 }
 
+function killProcessTree(child: ReturnType<typeof spawn>): void {
+  const pid = child.pid;
+  if (!pid) {
+    return;
+  }
+  if (process.platform === 'win32') {
+    try {
+      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+    return;
+  }
+  try {
+    process.kill(-pid, 'SIGTERM');
+  } catch {
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+}
+
 function runShellInstallCommand(command: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
   const isWindows = process.platform === 'win32';
   const shell = isWindows ? 'powershell.exe' : 'bash';
@@ -39,6 +66,7 @@ function runShellInstallCommand(command: string): Promise<{ code: number | null;
       env: { ...process.env, npm_config_loglevel: 'error' },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      detached: !isWindows,
     });
 
     let stdout = '';
@@ -48,7 +76,7 @@ function runShellInstallCommand(command: string): Promise<{ code: number | null;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill('SIGTERM');
+      killProcessTree(child);
       reject(new AppError('CLI installation timed out after 5 minutes.', {
         code: 'CLI_INSTALL_TIMEOUT',
         statusCode: 504,
@@ -95,27 +123,48 @@ export const providerAuthService = {
    * Installs the CLI for a provider in the background and returns the updated auth status.
    */
   async installProviderCli(providerName: LLMProvider): Promise<ProviderAuthStatus> {
-    const command = buildInstallShellCommand(providerName);
-    const { code, stdout, stderr } = await runShellInstallCommand(command);
-
-    if (code !== 0) {
-      const detail = stderr || stdout || `Installer exited with code ${code}`;
-      throw new AppError(`Installation failed: ${detail}`, {
-        code: 'CLI_INSTALL_FAILED',
-        statusCode: 500,
+    if (process.env.VITE_IS_PLATFORM === 'true') {
+      throw new AppError('Runtime CLI installation is disabled in platform mode.', {
+        code: 'CLI_INSTALL_FORBIDDEN',
+        statusCode: 403,
       });
     }
 
-    const status = await this.getProviderAuthStatus(providerName);
-    if (!status.installed) {
-      const detail = stderr || stdout || 'CLI executable could not be found after installation.';
-      throw new AppError(`Installation completed but CLI is still not detected: ${detail}`, {
-        code: 'CLI_INSTALL_NOT_DETECTED',
-        statusCode: 500,
-      });
+    const existing = inFlightInstalls.get(providerName);
+    if (existing) {
+      return existing;
     }
 
-    return status;
+    const task = (async () => {
+      const command = buildInstallShellCommand(providerName);
+      const { code, stdout, stderr } = await runShellInstallCommand(command);
+
+      if (code !== 0) {
+        const detail = stderr || stdout || `Installer exited with code ${code}`;
+        throw new AppError(`Installation failed: ${detail}`, {
+          code: 'CLI_INSTALL_FAILED',
+          statusCode: 500,
+        });
+      }
+
+      const status = await this.getProviderAuthStatus(providerName);
+      if (!status.installed) {
+        const detail = stderr || stdout || 'CLI executable could not be found after installation.';
+        throw new AppError(`Installation completed but CLI is still not detected: ${detail}`, {
+          code: 'CLI_INSTALL_NOT_DETECTED',
+          statusCode: 500,
+        });
+      }
+
+      return status;
+    })();
+
+    inFlightInstalls.set(providerName, task);
+    try {
+      return await task;
+    } finally {
+      inFlightInstalls.delete(providerName);
+    }
   },
 
   /**

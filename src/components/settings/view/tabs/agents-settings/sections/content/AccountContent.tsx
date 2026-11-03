@@ -1,5 +1,6 @@
 import { CheckCircle2, Download, Loader2, LogIn } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { IS_PLATFORM } from '../../../../../../../constants/config';
 import { Badge, Button } from '../../../../../../../shared/view/ui';
 import SessionProviderLogo from '../../../../../../llm-logo-provider/SessionProviderLogo';
 import type { AgentProvider, AuthStatus } from '../../../../../types/types';
@@ -69,6 +70,8 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
 export default function AccountContent({ agent, authStatus, onLogin, onInstall }: AccountContentProps) {
   const { t } = useTranslation('settings');
   const config = agentConfig[agent];
+  const showInstallButton = !IS_PLATFORM && !authStatus.loading && (!authStatus.installed || Boolean(authStatus.installing)) && Boolean(onInstall);
+  const showLoginSection = authStatus.method !== 'api_key' || showInstallButton;
 
   return (
     <div className="space-y-6">
@@ -116,7 +119,7 @@ export default function AccountContent({ agent, authStatus, onLogin, onInstall }
             </div>
           </div>
 
-          {authStatus.method !== 'api_key' && (
+          {showLoginSection && (
             <div className="border-t border-border/50 pt-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -130,7 +133,7 @@ export default function AccountContent({ agent, authStatus, onLogin, onInstall }
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {!authStatus.loading && !authStatus.authenticated && (!authStatus.installed || authStatus.installing) && onInstall && (
+                  {showInstallButton && (
                     <Button
                       onClick={onInstall}
                       variant="outline"
@@ -150,15 +153,17 @@ export default function AccountContent({ agent, authStatus, onLogin, onInstall }
                       )}
                     </Button>
                   )}
-                  <Button
-                    onClick={onLogin}
-                    className={`${config.buttonClass} text-white`}
-                    size="sm"
-                    disabled={authStatus.installing}
-                  >
-                    <LogIn className="mr-2 h-4 w-4" />
-                    {authStatus.authenticated ? t('agents.login.reLoginButton') : t('agents.login.button')}
-                  </Button>
+                  {authStatus.method !== 'api_key' && (
+                    <Button
+                      onClick={onLogin}
+                      className={`${config.buttonClass} text-white`}
+                      size="sm"
+                      disabled={authStatus.installing}
+                    >
+                      <LogIn className="mr-2 h-4 w-4" />
+                      {authStatus.authenticated ? t('agents.login.reLoginButton') : t('agents.login.button')}
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>

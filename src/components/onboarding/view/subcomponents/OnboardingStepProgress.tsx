@@ -5,7 +5,7 @@ type OnboardingStepProgressProps = {
 };
 
 const onboardingSteps = [
-  { title: 'Git Configuration', icon: GitBranch, required: true },
+  { title: 'Git Configuration', icon: GitBranch, required: false },
   { title: 'Connect Agents', icon: LogIn, required: false },
 ];
 

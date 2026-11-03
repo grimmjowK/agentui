@@ -32,6 +32,27 @@ const toErrorMessage = (error: unknown): string => (
   error instanceof Error ? error.message : FALLBACK_UNKNOWN_ERROR
 );
 
+export const extractApiErrorMessage = (payload: unknown, fallback: string): string => {
+  if (!payload || typeof payload !== 'object') {
+    return fallback;
+  }
+  const record = payload as Record<string, unknown>;
+  const err = record.error;
+  if (typeof err === 'string' && err.trim()) {
+    return err;
+  }
+  if (err && typeof err === 'object') {
+    const message = (err as Record<string, unknown>).message;
+    if (typeof message === 'string' && message.trim()) {
+      return message;
+    }
+  }
+  if (typeof record.message === 'string' && record.message.trim()) {
+    return record.message;
+  }
+  return fallback;
+};
+
 const toProviderAuthStatus = (
   payload: ProviderAuthStatusPayload,
   fallbackError: string | null = null,
@@ -40,7 +61,7 @@ const toProviderAuthStatus = (
   authenticated: Boolean(payload.authenticated),
   email: payload.email ?? null,
   method: payload.method ?? null,
-  error: payload.error ?? fallbackError,
+  error: typeof payload.error === 'string' ? payload.error : fallbackError,
   loading: false,
 });
 
@@ -129,11 +150,11 @@ export function useProviderAuthStatus(
       const payload = (await response.json().catch(() => ({}))) as {
         success?: boolean;
         data?: ProviderAuthStatusPayload;
-        error?: string;
+        error?: unknown;
       };
 
       if (!response.ok || !payload.data) {
-        const errorMessage = payload.error || 'Failed to install CLI';
+        const errorMessage = extractApiErrorMessage(payload, 'Failed to install CLI');
         setProviderAuthStatus((previous) => ({
           ...previous,
           [provider]: {

@@ -78,7 +78,7 @@ export function resolveAntigravityExecutablePath(
     : (process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'));
   const fallbackDirs = [
     path.join(home, '.local', 'bin'),
-    path.join(localAppData, 'agy', 'bin'),
+    ...(platform === 'win32' ? [path.join(localAppData, 'agy', 'bin')] : []),
     '/opt/homebrew/bin',
     '/usr/local/bin',
     path.join(home, '.gemini', 'antigravity', 'bin'),

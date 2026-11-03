@@ -20,6 +20,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [gitName, setGitName] = useState('');
   const [gitEmail, setGitEmail] = useState('');
+  const [initialGitConfig, setInitialGitConfig] = useState({ gitName: '', gitEmail: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [activeLoginProvider, setActiveLoginProvider] = useState<LLMProvider | null>(null);
@@ -40,6 +41,9 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       }
 
       const payload = (await response.json()) as { gitName?: string; gitEmail?: string };
+      const loadedName = payload.gitName || '';
+      const loadedEmail = payload.gitEmail || '';
+      setInitialGitConfig({ gitName: loadedName, gitEmail: loadedEmail });
       if (payload.gitName) {
         setGitName(payload.gitName);
       }
@@ -84,6 +88,11 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     }
   };
 
+  const handleSkipStep = () => {
+    setErrorMessage('');
+    setCurrentStep((previous) => previous + 1);
+  };
+
   const handleNextStep = async () => {
     setErrorMessage('');
 
@@ -92,12 +101,21 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       return;
     }
 
-    if (!gitName.trim() || !gitEmail.trim()) {
-      setErrorMessage('Both git name and email are required.');
+    const trimmedName = gitName.trim();
+    const trimmedEmail = gitEmail.trim();
+
+    // Empty or unchanged from auto-detected system config -> advance without overwriting global git config
+    if ((!trimmedName && !trimmedEmail) || (trimmedName === initialGitConfig.gitName && trimmedEmail === initialGitConfig.gitEmail)) {
+      setCurrentStep((previous) => previous + 1);
       return;
     }
 
-    if (!gitEmailPattern.test(gitEmail)) {
+    if (!trimmedName || !trimmedEmail) {
+      setErrorMessage('Please enter both git name and email, or click Skip.');
+      return;
+    }
+
+    if (!gitEmailPattern.test(trimmedEmail)) {
       setErrorMessage('Please enter a valid email address.');
       return;
     }
@@ -107,7 +125,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       const response = await authenticatedFetch('/api/user/git-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gitName, gitEmail }),
+        body: JSON.stringify({ gitName: trimmedName, gitEmail: trimmedEmail }),
       });
 
       if (!response.ok) {
@@ -146,10 +164,6 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       setIsSubmitting(false);
     }
   };
-
-  const isCurrentStepValid = currentStep === 0
-    ? Boolean(gitName.trim() && gitEmail.trim() && gitEmailPattern.test(gitEmail))
-    : true;
 
   return (
     <>
@@ -192,23 +206,32 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
               <div className="flex items-center gap-3">
                 {currentStep < 1 ? (
-                  <button
-                    onClick={handleNextStep}
-                    disabled={!isCurrentStepValid || isSubmitting}
-                    className="flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 font-medium text-white transition-colors duration-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        Next
-                        <ChevronRight className="h-4 w-4" />
-                      </>
-                    )}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleSkipStep}
+                      disabled={isSubmitting}
+                      className="rounded-lg px-4 py-3 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Skip
+                    </button>
+                    <button
+                      onClick={handleNextStep}
+                      disabled={isSubmitting}
+                      className="flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-3 font-medium text-white transition-colors duration-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          Next
+                          <ChevronRight className="h-4 w-4" />
+                        </>
+                      )}
+                    </button>
+                  </>
                 ) : (
                   <button
                     onClick={handleFinish}

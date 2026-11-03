@@ -1,4 +1,5 @@
 import { Check, Download, Loader2 } from 'lucide-react';
+import { IS_PLATFORM } from '../../../../constants/config';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type { LLMProvider } from '../../../../types/app';
 import type { ProviderAuthStatus } from '../../../provider-auth/types';
@@ -24,13 +25,16 @@ export default function AgentConnectionCard({
   onLogin,
   onInstall,
 }: AgentConnectionCardProps) {
-  const containerClassName = status.authenticated ? connectedClassName : 'border-border bg-card';
+  const isReady = status.authenticated && status.installed;
+  const showInstallButton = !IS_PLATFORM && !status.loading && (!status.installed || Boolean(status.installing)) && Boolean(onInstall);
+  const showLoginButton = !status.loading && !status.authenticated;
+  const containerClassName = isReady ? connectedClassName : 'border-border bg-card';
 
   const statusText = status.loading
     ? 'Checking...'
     : status.installing
       ? 'Installing CLI...'
-    : status.authenticated
+    : isReady
       ? status.installSuccess
         ? `Installed & connected (${status.email || 'Connected'})`
         : status.email || 'Connected'
@@ -38,7 +42,7 @@ export default function AgentConnectionCard({
         ? 'CLI installed successfully — click Login to connect'
       : status.error || 'Not connected';
 
-  const statusTextClassName = !status.loading && !status.installing && !status.authenticated && status.error && !status.installSuccess
+  const statusTextClassName = !status.loading && !status.installing && !isReady && status.error && !status.installSuccess
     ? 'text-xs text-red-600 dark:text-red-400'
     : status.installSuccess
       ? 'text-xs text-green-600 dark:text-green-400'
@@ -55,15 +59,15 @@ export default function AgentConnectionCard({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 font-medium text-foreground">
               {title}
-              {status.authenticated && <Check className="h-4 w-4 text-green-500" />}
+              {isReady && <Check className="h-4 w-4 text-green-500" />}
             </div>
             <div className={`break-words ${statusTextClassName}`}>{statusText}</div>
           </div>
         </div>
 
-        {!status.authenticated && !status.loading && (
+        {(showInstallButton || showLoginButton) && (
           <div className="flex flex-shrink-0 items-center gap-2">
-            {(!status.installed || status.installing) && onInstall && (
+            {showInstallButton && (
               <button
                 onClick={onInstall}
                 disabled={status.installing}
@@ -82,13 +86,15 @@ export default function AgentConnectionCard({
                 )}
               </button>
             )}
-            <button
-              onClick={onLogin}
-              disabled={status.installing}
-              className={`${loginButtonClassName} rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
-            >
-              Login
-            </button>
+            {showLoginButton && (
+              <button
+                onClick={onLogin}
+                disabled={status.installing}
+                className={`${loginButtonClassName} rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                Login
+              </button>
+            )}
           </div>
         )}
       </div>
