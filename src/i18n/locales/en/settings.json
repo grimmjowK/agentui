@@ -335,12 +335,20 @@
       },
       "gemini": {
         "description": "Google Gemini AI assistant"
+      },
+      "antigravity": {
+        "description": "Google Antigravity CLI assistant (agy)"
       }
     },
     "connectionStatus": "Connection Status",
     "enable": "Enable",
     "disable": "Disable",
     "lastEnabledTooltip": "At least one agent must be enabled",
+    "install": {
+      "button": "Install",
+      "installing": "Installing...",
+      "success": "CLI installed successfully"
+    },
     "login": {
       "title": "Login",
       "reAuthenticate": "Re-authenticate",

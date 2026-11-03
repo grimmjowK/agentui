@@ -10,24 +10,24 @@ type CursorLoginStatus = {
   error?: string;
 };
 
-let installedCache: { installed: boolean; checkedAt: number } | null = null;
-const INSTALL_CACHE_TTL_MS = 60_000;
+let installedCache = false;
 
 export class CursorProviderAuth implements IProviderAuth {
   /**
    * Checks whether the cursor-agent CLI is available on this host.
    */
   private checkInstalled(): boolean {
-    if (installedCache && (installedCache.installed || Date.now() - installedCache.checkedAt < INSTALL_CACHE_TTL_MS)) {
-      return installedCache.installed;
+    if (installedCache) {
+      return true;
     }
     try {
       // spawn.sync 找不到命令（ENOENT）或超时不会抛错，只体现在返回值的 error 上
       const installed = !spawn.sync('cursor-agent', ['--version'], { stdio: 'ignore', timeout: 5000 }).error;
-      installedCache = { installed, checkedAt: Date.now() };
+      if (installed) {
+        installedCache = true;
+      }
       return installed;
     } catch {
-      installedCache = { installed: false, checkedAt: Date.now() };
       return false;
     }
   }

@@ -24,8 +24,7 @@ type GeminiAuthType =
   | 'cloud-shell'
   | null;
 
-const installedCache = new Map<string, { installed: boolean; checkedAt: number }>();
-const INSTALL_CACHE_TTL_MS = 60_000;
+const installedCache = new Map<string, boolean>();
 
 export class GeminiProviderAuth implements IProviderAuth {
   /**
@@ -41,17 +40,17 @@ export class GeminiProviderAuth implements IProviderAuth {
    */
   private checkInstalled(): boolean {
     const cliPath = process.env.GEMINI_PATH || 'gemini';
-    const cached = installedCache.get(cliPath);
-    if (cached && (cached.installed || Date.now() - cached.checkedAt < INSTALL_CACHE_TTL_MS)) {
-      return cached.installed;
+    if (installedCache.get(cliPath)) {
+      return true;
     }
     try {
       // spawn.sync 找不到命令（ENOENT）或超时不会抛错，只体现在返回值的 error 上
       const installed = !spawn.sync(cliPath, ['--version'], { stdio: 'ignore', timeout: 5000 }).error;
-      installedCache.set(cliPath, { installed, checkedAt: Date.now() });
+      if (installed) {
+        installedCache.set(cliPath, true);
+      }
       return installed;
     } catch {
-      installedCache.set(cliPath, { installed: false, checkedAt: Date.now() });
       return false;
     }
   }

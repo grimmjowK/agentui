@@ -114,7 +114,7 @@
 
 #### Scenario: 原生模块 ABI
 - **WHEN** 后端子进程在打包产物中启动
-- **THEN** `better-sqlite3`（按 Electron ABI 重编）与 `node-pty`（N-API prebuild，未重编）均可被正常加载，数据库读写与终端会话均可用
+- **THEN** `better-sqlite3@13` 与 `node-pty`（均为 N-API prebuild，未重编）均可被正常加载，数据库读写与终端会话均可用
 
 #### Scenario: 应用根路径解析
 - **WHEN** 后端在打包产物中调用 `findAppRoot`

@@ -335,12 +335,20 @@
       },
       "gemini": {
         "description": "Google Gemini AI 助手"
+      },
+      "antigravity": {
+        "description": "Google Antigravity CLI 助手 (agy)"
       }
     },
     "connectionStatus": "连接状态",
     "enable": "启用",
     "disable": "禁用",
     "lastEnabledTooltip": "至少需要保留一个启用的智能体",
+    "install": {
+      "button": "安装",
+      "installing": "安装中...",
+      "success": "CLI 安装成功"
+    },
     "login": {
       "title": "登录",
       "reAuthenticate": "重新认证",

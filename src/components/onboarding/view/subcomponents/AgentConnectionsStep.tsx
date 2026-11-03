@@ -5,6 +5,7 @@ import AgentConnectionCard from './AgentConnectionCard';
 type AgentConnectionsStepProps = {
   providerStatuses: ProviderAuthStatusMap;
   onOpenProviderLogin: (provider: LLMProvider) => void;
+  onOpenProviderInstall: (provider: LLMProvider) => void;
 };
 
 const providerCards = [
@@ -36,11 +37,19 @@ const providerCards = [
     iconContainerClassName: 'bg-teal-100 dark:bg-teal-900/30',
     loginButtonClassName: 'bg-teal-600 hover:bg-teal-700',
   },
+  {
+    provider: 'antigravity' as const,
+    title: 'Antigravity',
+    connectedClassName: 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800',
+    iconContainerClassName: 'bg-indigo-100 dark:bg-indigo-900/30',
+    loginButtonClassName: 'bg-indigo-600 hover:bg-indigo-700',
+  },
 ];
 
 export default function AgentConnectionsStep({
   providerStatuses,
   onOpenProviderLogin,
+  onOpenProviderInstall,
 }: AgentConnectionsStepProps) {
   return (
     <div className="space-y-6">
@@ -62,6 +71,7 @@ export default function AgentConnectionsStep({
             iconContainerClassName={providerCard.iconContainerClassName}
             loginButtonClassName={providerCard.loginButtonClassName}
             onLogin={() => onOpenProviderLogin(providerCard.provider)}
+            onInstall={() => onOpenProviderInstall(providerCard.provider)}
           />
         ))}
       </div>

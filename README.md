@@ -158,17 +158,6 @@ npm run desktop:package
 
 Builds are **unsigned and unnotarized** (`identity: null` in `electron-builder.config.js`), so macOS Gatekeeper blocks the first launch — right-click → *Open* to get past it.
 
-#### Native module ABI
-
-`better-sqlite3` is a native module, and its compiled binary matches only one Node ABI at a time. Switching between the web and desktop targets requires a rebuild:
-
-```
-npm run desktop:rebuild            # → Electron ABI   (desktop:dev / desktop:package)
-npm run desktop:restore-node-abi   # → system Node ABI (npm run dev / npm run server)
-```
-
-The `desktop:*` scripts already invoke the right one, and `desktop:package` restores the Node ABI when it finishes. If you hit `NODE_MODULE_VERSION ... does not match`, run the command for the target you want.
-
 ### CLI (`cloudcli`)
 
 `cloudcli` is the npm `bin` entry (`dist-server/server/cli.js`), not a standalone executable — the target machine still needs Node.js v22+. To install a local build globally:

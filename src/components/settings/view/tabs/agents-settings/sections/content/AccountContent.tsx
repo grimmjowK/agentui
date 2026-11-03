@@ -1,5 +1,6 @@
-import { LogIn } from 'lucide-react';
+import { CheckCircle2, Download, Loader2, LogIn } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { IS_PLATFORM } from '../../../../../../../constants/config';
 import { Badge, Button } from '../../../../../../../shared/view/ui';
 import SessionProviderLogo from '../../../../../../llm-logo-provider/SessionProviderLogo';
 import type { AgentProvider, AuthStatus } from '../../../../../types/types';
@@ -8,6 +9,7 @@ type AccountContentProps = {
   agent: AgentProvider;
   authStatus: AuthStatus;
   onLogin: () => void;
+  onInstall?: () => void;
 };
 
 type AgentVisualConfig = {
@@ -65,9 +67,12 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
   },
 };
 
-export default function AccountContent({ agent, authStatus, onLogin }: AccountContentProps) {
+export default function AccountContent({ agent, authStatus, onLogin, onInstall }: AccountContentProps) {
   const { t } = useTranslation('settings');
   const config = agentConfig[agent];
+  const showInstallButton = !IS_PLATFORM && !authStatus.loading && (!authStatus.installed || Boolean(authStatus.installing)) && Boolean(onInstall);
+  const showLoginButton = !authStatus.loading && authStatus.installed && !authStatus.installing && authStatus.method !== 'api_key';
+  const showLoginSection = showLoginButton || showInstallButton;
 
   return (
     <div className="space-y-6">
@@ -115,7 +120,7 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
             </div>
           </div>
 
-          {authStatus.method !== 'api_key' && (
+          {showLoginSection && (
             <div className="border-t border-border/50 pt-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -128,14 +133,48 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
                       : t('agents.login.description', { agent: config.name })}
                   </div>
                 </div>
-                <Button
-                  onClick={onLogin}
-                  className={`${config.buttonClass} text-white`}
-                  size="sm"
-                >
-                  <LogIn className="mr-2 h-4 w-4" />
-                  {authStatus.authenticated ? t('agents.login.reLoginButton') : t('agents.login.button')}
-                </Button>
+                <div className="flex items-center gap-2">
+                  {showInstallButton && (
+                    <Button
+                      onClick={onInstall}
+                      variant="outline"
+                      size="sm"
+                      disabled={authStatus.installing}
+                    >
+                      {authStatus.installing ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          {t('agents.install.installing', { defaultValue: 'Installing...' })}
+                        </>
+                      ) : (
+                        <>
+                          <Download className="mr-2 h-4 w-4" />
+                          {t('agents.install.button', { defaultValue: 'Install' })}
+                        </>
+                      )}
+                    </Button>
+                  )}
+                  {showLoginButton && (
+                    <Button
+                      onClick={onLogin}
+                      className={`${config.buttonClass} text-white`}
+                      size="sm"
+                      disabled={authStatus.installing}
+                    >
+                      <LogIn className="mr-2 h-4 w-4" />
+                      {authStatus.authenticated ? t('agents.login.reLoginButton') : t('agents.login.button')}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {authStatus.installSuccess && (
+            <div className="border-t border-border/50 pt-4">
+              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                <span>{t('agents.install.success', { defaultValue: 'CLI installed successfully' })}</span>
               </div>
             </div>
           )}

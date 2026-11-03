@@ -42,25 +42,19 @@ CloudCLI UI 现在是「Express + WebSocket 后端 + Vite/React 前端」的本�
 
 **备选（已否决）**：main 进程内直接 `import` 后端。省掉一次进程启动（约 1–2 秒），但崩溃隔离、重启语义、原生模块加载失败的可诊断性全部变差。
 
-### D3：后端子进程用 Electron 的 Node（`ELECTRON_RUN_AS_NODE=1`），只重编 better-sqlite3
+### D3：后端子进程用 Electron 的 Node（`ELECTRON_RUN_AS_NODE=1`），全部使用 N-API prebuild 零重编
 
-**选择**：`spawn(process.execPath, [serverEntry], { env: { ELECTRON_RUN_AS_NODE: '1', ... } })`，打包时用 `@electron/rebuild` **仅**把 `better-sqlite3` 按 Electron ABI 重编。
+**选择**：`spawn(process.execPath, [serverEntry], { env: { ELECTRON_RUN_AS_NODE: '1', ... } })`，升级 `better-sqlite3@^13.0.3` 并在 `electron-builder.config.js` 设置 `npmRebuild: false`，所有原生模块均走 N-API prebuild，无需 `@electron/rebuild` 重编。
 
-**理由**：不需要额外打包一份 Node 二进制（约 50MB）。两个原生模块的情况并不相同，已核对当前 `node_modules`：
+**理由**：不需要额外打包一份 Node 二进制（约 50MB）。生产依赖中的三个原生模块均已提供跨平台 N-API 预编译产物：
 
 | 模块 | 产物 | 结论 |
 | --- | --- | --- |
-| `better-sqlite3@12` | `build/Release/better_sqlite3.node`（node-gyp，绑 V8 API） | 受 `NODE_MODULE_VERSION` 约束，**必须**按 Electron ABI 重编 |
+| `better-sqlite3@13` | `prebuilds/<platform>-<arch>.node`（node-addon-api，N-API） | ABI 无关，系统 Node 与 Electron 下直接共用，**不重编** |
 | `node-pty@1.2.0-beta` | `prebuilds/<platform>-<arch>/pty.node`（prebuildify，N-API） | ABI 无关，Electron 下直接可用，**不重编** |
+| `bcrypt@6` | `prebuilds/<platform>-<arch>/bcrypt.napi.node`（prebuildify，N-API） | ABI 无关，Electron 下直接可用，**不重编** |
 
-对 node-pty 跑 `@electron/rebuild --force` 会把现成的 N-API prebuild 换成一次本地源码编译 —— 那是引入风险而不是消除风险（需要 Xcode CLT / VS Build Tools，且 beta 版源码编译路径远不如 prebuild 稳）。因此 rebuild 步骤必须用 `--only better-sqlite3` 限定范围，而不是全量 rebuild。
-
-**备选（保留为回退方案）**：像 deepseek-harness 那样在 `extraResources` 内置一份真 Node 二进制来跑后端。好处是现有 npm prebuild 直接可用、零重编，Electron 升级不影响后端。如果 better-sqlite3 在某个平台上重编反复失败，切到这个方案，改动只在 spawn 的第一个参数与打包配置。
-
-**实现中确认的两个后果**（已实测，Node 22 ABI 147 vs Electron 44 ABI 149）：
-
-1. **开发态同样需要重编**。`desktop:dev` 直接跑 `electron electron/main.js` 会在后端子进程加载 better-sqlite3 时立刻崩溃，所以脚本定义为 `npm run desktop:rebuild && electron electron/main.js`；`@electron/rebuild` 对已是目标 ABI 的模块会跳过，只有首次慢。
-2. **重编会把仓库的 better-sqlite3 切到 Electron ABI，从而让 `npm run server` / `npm run dev` 跑不起来**——同一份 `node_modules` 不能同时满足两个 ABI。为此提供 `npm run desktop:restore-node-abi`（即 `npm rebuild better-sqlite3`），并把它串在 `desktop:package` 末尾自动恢复；打包中途失败时需要手动跑一次。
+对这些已自带 N-API prebuild 的模块跑 `@electron/rebuild` / `node-gyp` 反而会把现成的预编译二进制换成一次本地源码编译（在未装 Xcode CLT / Visual Studio C++ Build Tools 的机器上直接失败）。因此将 `better-sqlite3` 从 v12（V8 API）升级到 v13（N-API），并在 `electron-builder.config.js` 中显式设置 `npmRebuild: false`，彻底消除 `desktop:rebuild` / `desktop:restore-node-abi` 以及开发态与桌面态切换时的 ABI 冲突。
 
 ### D4：端口通过子进程 stdout 单行交接
 
@@ -107,7 +101,7 @@ CloudCLI UI 现在是「Express + WebSocket 后端 + Vite/React 前端」的本�
 
 ## Risks / Trade-offs
 
-- **原生模块 ABI 不匹配** → 后端子进程启动即崩溃，且错误信息（`NODE_MODULE_VERSION` 不符）对终端用户无意义。缓解：打包流程中固化 `@electron/rebuild --only better-sqlite3`（按 D3，node-pty 不参与）；任务里加一条打包产物冒烟检查，实际拉起后端并完成一次 SQLite 读写与一次 pty 会话；失败则按 D3 备选切到内置 Node。
+- **原生模块兼容性** → 已通过升级 `better-sqlite3@^13.0.3` 使全部生产原生依赖统一为 N-API prebuild，并在 `electron-builder.config.js` 设置 `npmRebuild: false`，避免触发 `node-gyp` 本地源码编译或 `NODE_MODULE_VERSION` 冲突。
 
 - **PATH 补全在非常规 shell 下失效**（fish、用户自定义 rc 有交互式输出等） → 外部 CLI 仍然找不到。缓解：`$SHELL -ilc` 调用加超时与失败兜底（退回当前 PATH），并让失败信息带上实际使用的 PATH，使问题可自助诊断。
 

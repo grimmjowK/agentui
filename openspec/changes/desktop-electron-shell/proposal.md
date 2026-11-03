@@ -13,7 +13,7 @@ CloudCLI UI 目前只能以「先起服务、再开浏览器」的方式使用�
 - 桌面端免登录：main 进程用 Electron `safeStorage` 持久化桌面专用凭据，首次启动自动完成注册/登录并把 token 注入页面。**不复用 `IS_PLATFORM` 的未认证路径，并在 spawn 后端前显式剔除 `VITE_IS_PLATFORM`。**
 - 新增 electron-builder 打包配置，产出 macOS / Windows 安装包；`dist/`、`dist-server/`、`node_modules` 走 `extraResources` 不进 asar。
 - 处理 GUI 启动环境的 `PATH` 问题，保证 `claude`/`codex`/`gemini`/`cursor` 等外部 CLI 可被 spawn 到。
-- `better-sqlite3` 按 Electron ABI 重编（`node-pty` 走 N-API prebuild，不参与重编）。
+- `better-sqlite3` 升级至 v13（N-API prebuild），与 `node-pty`、`bcrypt` 一起直接跨 Node / Electron ABI 共用，无需重编。
 - 新增 npm 脚本：`desktop:dev`、`desktop:build`、`desktop:package`。
 
 不在本次范围内：自动更新（electron-updater）、代码签名与公证、Linux 发行包、应用内插件安装体系。
@@ -31,7 +31,7 @@ CloudCLI UI 目前只能以「先起服务、再开浏览器」的方式使用�
 **新增**
 - `electron/main.js`、`electron/preload.js`、`electron/startup.html`
 - `electron-builder.config.js`
-- devDependencies：`electron`、`electron-builder`、`@electron/rebuild`
+- devDependencies：`electron`、`electron-builder`
 
 **修改**
 - `server/index.js`：listen 回调中增加一行端口回报（1 行）
@@ -44,7 +44,7 @@ CloudCLI UI 目前只能以「先起服务、再开浏览器」的方式使用�
 - 现有 `npm run dev` / CLI 分发方式（`npx cloudcli`）继续可用
 
 **风险点**
-- `better-sqlite3`（node-gyp / V8 API）ABI 不匹配会导致后端子进程启动即崩溃。`node-pty` 是 N-API prebuild，不受影响 —— 但也因此**不能**对它做全量 rebuild。
+- 原生模块需确保使用 N-API prebuild（`better-sqlite3@13`、`node-pty`、`bcrypt`），并在 `electron-builder.config.js` 禁用 `npmRebuild`，避免触发本地 `node-gyp` 源码编译。
 - macOS 从 Finder 启动时 `PATH` 极简，外部 CLI 找不到 —— 这是桌面化后最容易出现的运行时故障。
 - asar 打包会破坏 `server/utils/runtime-paths.js` 的 `findAppRoot` 向上查找逻辑。
 - 安装包体积：`node_modules` 实测 991 MB，整棵进 `extraResources` 后 macOS 包预计 500 MB 量级。

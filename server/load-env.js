@@ -32,3 +32,34 @@ const DEFAULT_DATABASE_PATH = path.join(os.homedir(), '.cloudcli', 'auth.db');
 if (!process.env.DATABASE_PATH) {
   process.env.DATABASE_PATH = DEFAULT_DATABASE_PATH;
 }
+
+// Ensure standard user-level CLI install directories are present on PATH so newly installed
+// CLIs (agy, cursor-agent, npm global packages) are immediately discoverable without restarting.
+{
+  const home = os.homedir();
+  const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  const extraBinDirs = process.platform === 'win32'
+    ? [
+        path.join(localAppData, 'agy', 'bin'),
+        path.join(localAppData, 'cursor-agent'),
+        path.join(appData, 'npm'),
+        path.join(home, '.local', 'bin'),
+      ]
+    : [
+        path.join(home, '.local', 'bin'),
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        path.join(home, '.gemini', 'antigravity', 'bin'),
+      ];
+  const currentEntries = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const seen = new Set(currentEntries.map((entry) => (process.platform === 'win32' ? entry.toLowerCase() : entry)));
+  for (const dir of extraBinDirs) {
+    const key = process.platform === 'win32' ? dir.toLowerCase() : dir;
+    if (!seen.has(key)) {
+      seen.add(key);
+      currentEntries.push(dir);
+    }
+  }
+  process.env.PATH = currentEntries.join(path.delimiter);
+}

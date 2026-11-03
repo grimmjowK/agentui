@@ -48,6 +48,7 @@ function AgentToggleSwitch({
 export default function AgentsSettingsTab({
   providerAuthStatus,
   onProviderLogin,
+  onProviderInstall,
   claudePermissions,
   onClaudePermissionsChange,
   cursorPermissions,
@@ -85,25 +86,31 @@ export default function AgentsSettingsTab({
     claude: {
       authStatus: providerAuthStatus.claude,
       onLogin: () => onProviderLogin('claude'),
+      onInstall: () => onProviderInstall('claude'),
     },
     cursor: {
       authStatus: providerAuthStatus.cursor,
       onLogin: () => onProviderLogin('cursor'),
+      onInstall: () => onProviderInstall('cursor'),
     },
     codex: {
       authStatus: providerAuthStatus.codex,
       onLogin: () => onProviderLogin('codex'),
+      onInstall: () => onProviderInstall('codex'),
     },
     gemini: {
       authStatus: providerAuthStatus.gemini,
       onLogin: () => onProviderLogin('gemini'),
+      onInstall: () => onProviderInstall('gemini'),
     },
     antigravity: {
       authStatus: providerAuthStatus.antigravity,
       onLogin: () => onProviderLogin('antigravity'),
+      onInstall: () => onProviderInstall('antigravity'),
     },
   }), [
     onProviderLogin,
+    onProviderInstall,
     providerAuthStatus.claude,
     providerAuthStatus.cursor,
     providerAuthStatus.codex,

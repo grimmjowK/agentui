@@ -24,6 +24,8 @@ export default {
   // asar 内只放外壳代码。根 package.json 一并带上，Electron 需要它定位 main 入口。
   files: ['electron/**/*', 'package.json'],
   asar: true,
+  // better-sqlite3@13、node-pty、bcrypt 均为 N-API prebuild，ABI 无关，禁止 electron-builder 调 node-gyp 重编。
+  npmRebuild: false,
 
   // 根 package.json 的 main 必须保持指向 CLI 入口（npx cloudcli 依赖它），
   // 所以只在打包产物内覆写为 Electron 入口，源文件不动。
