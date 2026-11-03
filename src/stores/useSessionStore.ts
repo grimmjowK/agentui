@@ -188,12 +188,16 @@ function dedupeAdjacentAssistantEchoes(merged: NormalizedMessage[]): NormalizedM
 function isErrorAlreadyShown(error: NormalizedMessage, before: NormalizedMessage[]): boolean {
   const text = (error.content || '').trim();
   if (!text) return false;
-  return before.some((m) => {
-    if (m.kind !== 'error' && !(m.kind === 'text' && m.role === 'assistant')) return false;
+  // 只在本轮内查找：遇到用户消息即停，重试后同样的失败仍需提示
+  for (let i = before.length - 1; i >= 0; i--) {
+    const m = before[i];
+    if (m.kind === 'text' && m.role === 'user') return false;
+    if (m.kind !== 'error' && !(m.kind === 'text' && m.role === 'assistant')) continue;
     const shown = (m.content || '').trim();
     // ponytail: 子串匹配，短于 20 字的文本（如 "Error"）不参与，避免误吞不同的错误
-    return shown.length >= 20 && text.includes(shown);
-  });
+    if (shown.length >= 20 && text.includes(shown)) return true;
+  }
+  return false;
 }
 
 /**
@@ -204,17 +208,22 @@ function isErrorAlreadyShown(error: NormalizedMessage, before: NormalizedMessage
  */
 export function interleaveByTimestamp(base: NormalizedMessage[], extra: NormalizedMessage[]): NormalizedMessage[] {
   const out: NormalizedMessage[] = [];
+  const undated: NormalizedMessage[] = [];
   let i = 0;
   for (const m of extra) {
     const t = Date.parse(m.timestamp);
+    if (Number.isNaN(t)) {
+      undated.push(m);
+      continue;
+    }
     // ponytail: 依赖客户端与服务端时钟基本一致；远程部署时钟偏差超过一轮对话间隔才会错位
-    while (i < base.length && (Number.isNaN(t) || !(Date.parse(base[i].timestamp) > t))) {
+    while (i < base.length && !(Date.parse(base[i].timestamp) > t)) {
       out.push(base[i++]);
     }
     out.push(m);
   }
   while (i < base.length) out.push(base[i++]);
-  return out;
+  return out.concat(undated);
 }
 
 export function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[]): NormalizedMessage[] {
