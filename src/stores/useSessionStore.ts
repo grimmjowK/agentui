@@ -154,6 +154,10 @@ function userTextFingerprint(m: NormalizedMessage): string | null {
 function dedupeAdjacentAssistantEchoes(merged: NormalizedMessage[]): NormalizedMessage[] {
   const out: NormalizedMessage[] = [];
   for (const m of merged) {
+    // 错误往往已经以正文形式出现过一次（如 Claude 先流出 "API Error: ..." 助手消息，
+    // SDK 再抛出 "Claude Code returned an error result: API Error: ..."），
+    // 实时错误行只是它的包装，再渲染一遍就是冗余。
+    if (m.kind === 'error' && isErrorAlreadyShown(m, out)) continue;
     const prev = out[out.length - 1];
     if (prev) {
       if (prev.kind === 'stream_delta' && m.kind === 'text' && m.role === 'assistant') {
@@ -181,7 +185,48 @@ function dedupeAdjacentAssistantEchoes(merged: NormalizedMessage[]): NormalizedM
   return out;
 }
 
-function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[]): NormalizedMessage[] {
+function isErrorAlreadyShown(error: NormalizedMessage, before: NormalizedMessage[]): boolean {
+  const text = (error.content || '').trim();
+  if (!text) return false;
+  // 只在本轮内查找：遇到用户消息即停，重试后同样的失败仍需提示
+  for (let i = before.length - 1; i >= 0; i--) {
+    const m = before[i];
+    if (m.kind === 'text' && m.role === 'user') return false;
+    if (m.kind !== 'error' && !(m.kind === 'text' && m.role === 'assistant')) continue;
+    const shown = (m.content || '').trim();
+    // ponytail: 子串匹配，短于 20 字的文本（如 "Error"）不参与，避免误吞不同的错误
+    if (shown.length >= 20 && text.includes(shown)) return true;
+  }
+  return false;
+}
+
+/**
+ * 把实时独有的消息（保留的错误、中断标记、未被服务端认领的乐观用户消息、
+ * 仍在流式中的回复）按时间戳插回服务端序列，而不是一律追加到末尾。
+ * 否则 refresh 之后旧错误会沉到新回复下面，未匹配上的用户提问会跑到回答后面。
+ * 时间戳无效的消息维持原行为：放在最后。
+ */
+export function interleaveByTimestamp(base: NormalizedMessage[], extra: NormalizedMessage[]): NormalizedMessage[] {
+  const out: NormalizedMessage[] = [];
+  const undated: NormalizedMessage[] = [];
+  let i = 0;
+  for (const m of extra) {
+    const t = Date.parse(m.timestamp);
+    if (Number.isNaN(t)) {
+      undated.push(m);
+      continue;
+    }
+    // ponytail: 依赖客户端与服务端时钟基本一致；远程部署时钟偏差超过一轮对话间隔才会错位
+    while (i < base.length && !(Date.parse(base[i].timestamp) > t)) {
+      out.push(base[i++]);
+    }
+    out.push(m);
+  }
+  while (i < base.length) out.push(base[i++]);
+  return out.concat(undated);
+}
+
+export function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[]): NormalizedMessage[] {
   if (realtime.length === 0) return server;
   if (server.length === 0) return dedupeAdjacentAssistantEchoes(realtime);
   const serverIds = new Set(server.map(m => m.id));
@@ -213,7 +258,7 @@ function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[
         return images ? { ...m, images } : m;
       });
   if (extra.length === 0) return base;
-  return dedupeAdjacentAssistantEchoes([...base, ...extra]);
+  return dedupeAdjacentAssistantEchoes(interleaveByTimestamp(base, extra));
 }
 
 function compareMessagesByTimestamp(left: NormalizedMessage, right: NormalizedMessage): number {
