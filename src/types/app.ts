@@ -45,10 +45,7 @@ export interface Project {
   fullPath: string;
   path?: string;
   isStarred?: boolean;
-  sessions?: ProjectSession[];
-  cursorSessions?: ProjectSession[];
-  codexSessions?: ProjectSession[];
-  antigravitySessions?: ProjectSession[];
+  sessionsByProvider?: Partial<Record<LLMProvider, ProjectSession[]>>;
   sessionMeta?: ProjectSessionMeta;
   taskmaster?: ProjectTaskmasterInfo;
   [key: string]: unknown;

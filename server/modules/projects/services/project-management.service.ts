@@ -29,10 +29,7 @@ type ProjectApiView = {
   customName: string | null;
   isArchived: boolean;
   isStarred: boolean;
-  sessions: [];
-  cursorSessions: [];
-  codexSessions: [];
-  antigravitySessions: [];
+  sessionsByProvider: Record<string, never[]>;
   sessionMeta: {
     hasMore: false;
     total: 0;
@@ -80,10 +77,7 @@ function mapProjectRowToApiView(projectRow: ProjectRepositoryRow): ProjectApiVie
     customName: projectRow.custom_project_name,
     isArchived: Boolean(projectRow.isArchived),
     isStarred: Boolean(projectRow.isStarred),
-    sessions: [],
-    cursorSessions: [],
-    codexSessions: [],
-    antigravitySessions: [],
+    sessionsByProvider: {},
     sessionMeta: {
       hasMore: false,
       total: 0,

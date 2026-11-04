@@ -1,5 +1,6 @@
 import { authenticatedFetch } from '../../../utils/api';
-import type { LLMProvider, ProjectSession } from '../../../types/app';
+import type { LLMProvider, Project } from '../../../types/app';
+import { getProjectSessions } from '../../../utils/projectSessions';
 
 import { useApiSource } from './useApiSource';
 
@@ -9,12 +10,7 @@ export type SessionResult = {
   provider?: LLMProvider;
 };
 
-interface SessionsResponse {
-  sessions?: ProjectSession[];
-  cursorSessions?: ProjectSession[];
-  codexSessions?: ProjectSession[];
-  antigravitySessions?: ProjectSession[];
-}
+type SessionsResponse = Pick<Project, 'sessionsByProvider'>;
 
 export function useSessionsSource(projectId: string | undefined, enabled: boolean) {
   return useApiSource<SessionResult, SessionsResponse>({
@@ -28,13 +24,7 @@ export function useSessionsSource(projectId: string | undefined, enabled: boolea
       );
     },
     parse: (data) => {
-      const all: ProjectSession[] = [
-        ...(data.sessions ?? []),
-        ...(data.cursorSessions ?? []),
-        ...(data.codexSessions ?? []),
-        ...(data.antigravitySessions ?? []).map((session) => ({ ...session, __provider: 'antigravity' as const })),
-      ];
-      return all.map<SessionResult>((s) => ({
+      return getProjectSessions(data).map<SessionResult>((s) => ({
         id: s.id,
         label: (s.title || s.summary || s.name || s.id) as string,
         provider: s.__provider,

@@ -181,7 +181,7 @@ export function useSidebarController({
     if (projects.length > 0 && !isLoading) {
       const loadedProjects = new Set<string>();
       projects.forEach((project) => {
-        if (project.sessions && project.sessions.length >= 0) {
+        if (project.sessionsByProvider) {
           loadedProjects.add(project.projectId);
         }
       });

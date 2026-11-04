@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 
 import { api } from '../utils/api';
+import { getProjectSessions, mapProjectSessions } from '../utils/projectSessions';
 import type {
   AppSocketMessage,
   AppTab,
@@ -50,7 +51,6 @@ const fetchProjectList = async (): Promise<Project[]> => {
 const projectsHaveChanges = (
   prevProjects: Project[],
   nextProjects: Project[],
-  includeExternalSessions: boolean,
 ): boolean => {
   if (prevProjects.length !== nextProjects.length) {
     return true;
@@ -62,27 +62,14 @@ const projectsHaveChanges = (
       return true;
     }
 
-    const baseChanged =
+    return (
       nextProject.projectId !== prevProject.projectId ||
       nextProject.displayName !== prevProject.displayName ||
       nextProject.fullPath !== prevProject.fullPath ||
       Boolean(nextProject.isStarred) !== Boolean(prevProject.isStarred) ||
       serialize(nextProject.sessionMeta) !== serialize(prevProject.sessionMeta) ||
-      serialize(nextProject.sessions) !== serialize(prevProject.sessions) ||
-      serialize(nextProject.taskmaster) !== serialize(prevProject.taskmaster);
-
-    if (baseChanged) {
-      return true;
-    }
-
-    if (!includeExternalSessions) {
-      return false;
-    }
-
-    return (
-      serialize(nextProject.cursorSessions) !== serialize(prevProject.cursorSessions) ||
-      serialize(nextProject.codexSessions) !== serialize(prevProject.codexSessions) ||
-      serialize(nextProject.antigravitySessions) !== serialize(prevProject.antigravitySessions)
+      serialize(nextProject.sessionsByProvider) !== serialize(prevProject.sessionsByProvider) ||
+      serialize(nextProject.taskmaster) !== serialize(prevProject.taskmaster)
     );
   });
 };
@@ -111,15 +98,6 @@ const mergeTaskMasterCache = (nextProjects: Project[], previousProjects: Project
       taskmaster: cachedTaskMasterInfo,
     };
   });
-};
-
-const getProjectSessions = (project: Project): ProjectSession[] => {
-  return [
-    ...(project.sessions ?? []),
-    ...(project.codexSessions ?? []),
-    ...(project.cursorSessions ?? []),
-    ...(project.antigravitySessions ?? []),
-  ];
 };
 
 const countLoadedProjectSessions = (project: Project): number => getProjectSessions(project).length;
@@ -162,10 +140,8 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
 
     const mergedProject: Project = {
       ...incomingProject,
-      sessions: mergeSessionProviderLists(incomingProject.sessions ?? [], previousProject.sessions ?? []),
-      cursorSessions: mergeSessionProviderLists(incomingProject.cursorSessions ?? [], previousProject.cursorSessions ?? []),
-      codexSessions: mergeSessionProviderLists(incomingProject.codexSessions ?? [], previousProject.codexSessions ?? []),
-      antigravitySessions: mergeSessionProviderLists(incomingProject.antigravitySessions ?? [], previousProject.antigravitySessions ?? []),
+      sessionsByProvider: mapProjectSessions(incomingProject.sessionsByProvider, (incoming, provider) =>
+        mergeSessionProviderLists(incoming, previousProject.sessionsByProvider?.[provider] ?? [])),
     };
 
     const totalSessions = Number(incomingProject.sessionMeta?.total ?? previousLoadedCount);
@@ -181,14 +157,12 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
 
 const mergeProjectSessionPage = (
   existingProject: Project,
-  sessionsPage: Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'antigravitySessions' | 'sessionMeta'>,
+  sessionsPage: Pick<Project, 'sessionsByProvider' | 'sessionMeta'>,
 ): Project => {
   const mergedProject: Project = {
     ...existingProject,
-    sessions: mergeSessionProviderLists(existingProject.sessions ?? [], sessionsPage.sessions ?? []),
-    cursorSessions: mergeSessionProviderLists(existingProject.cursorSessions ?? [], sessionsPage.cursorSessions ?? []),
-    codexSessions: mergeSessionProviderLists(existingProject.codexSessions ?? [], sessionsPage.codexSessions ?? []),
-    antigravitySessions: mergeSessionProviderLists(existingProject.antigravitySessions ?? [], sessionsPage.antigravitySessions ?? []),
+    sessionsByProvider: mapProjectSessions(existingProject.sessionsByProvider, (existing, provider) =>
+      mergeSessionProviderLists(existing, sessionsPage.sessionsByProvider?.[provider] ?? [])),
   };
 
   const totalSessions = Number(sessionsPage.sessionMeta?.total ?? existingProject.sessionMeta?.total ?? 0);
@@ -323,7 +297,7 @@ export function useProjectsState({
           return mergedProjects;
         }
 
-        return projectsHaveChanges(prevProjects, mergedProjects, true)
+        return projectsHaveChanges(prevProjects, mergedProjects)
           ? mergedProjects
           : prevProjects;
       });
@@ -476,7 +450,7 @@ export function useProjectsState({
     }
 
     setProjects((previousProjects) =>
-      projectsHaveChanges(previousProjects, updatedProjects, true) ? updatedProjects : previousProjects,
+      projectsHaveChanges(previousProjects, updatedProjects) ? updatedProjects : previousProjects,
     );
 
     if (!selectedProject) {
@@ -524,62 +498,17 @@ export function useProjectsState({
 
     // Project membership is resolved through `projectId` after the migration.
     for (const project of projects) {
-      const claudeSession = project.sessions?.find((session) => session.id === sessionId);
-      if (claudeSession) {
+      const match = getProjectSessions(project).find((session) => session.id === sessionId);
+      if (match) {
         const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
         const shouldUpdateSession =
-          selectedSession?.id !== sessionId || selectedSession.__provider !== 'claude';
+          selectedSession?.id !== sessionId || selectedSession.__provider !== match.__provider;
 
         if (shouldUpdateProject) {
           setSelectedProject(project);
         }
         if (shouldUpdateSession) {
-          setSelectedSession({ ...claudeSession, __provider: 'claude' });
-        }
-        return;
-      }
-
-      const cursorSession = project.cursorSessions?.find((session) => session.id === sessionId);
-      if (cursorSession) {
-        const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
-        const shouldUpdateSession =
-          selectedSession?.id !== sessionId || selectedSession.__provider !== 'cursor';
-
-        if (shouldUpdateProject) {
-          setSelectedProject(project);
-        }
-        if (shouldUpdateSession) {
-          setSelectedSession({ ...cursorSession, __provider: 'cursor' });
-        }
-        return;
-      }
-
-      const codexSession = project.codexSessions?.find((session) => session.id === sessionId);
-      if (codexSession) {
-        const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
-        const shouldUpdateSession =
-          selectedSession?.id !== sessionId || selectedSession.__provider !== 'codex';
-
-        if (shouldUpdateProject) {
-          setSelectedProject(project);
-        }
-        if (shouldUpdateSession) {
-          setSelectedSession({ ...codexSession, __provider: 'codex' });
-        }
-        return;
-      }
-
-      const antigravitySession = project.antigravitySessions?.find((session) => session.id === sessionId);
-      if (antigravitySession) {
-        const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
-        const shouldUpdateSession =
-          selectedSession?.id !== sessionId || selectedSession.__provider !== 'antigravity';
-
-        if (shouldUpdateProject) {
-          setSelectedProject(project);
-        }
-        if (shouldUpdateSession) {
-          setSelectedSession({ ...antigravitySession, __provider: 'antigravity' });
+          setSelectedSession(match);
         }
         return;
       }
@@ -690,28 +619,15 @@ export function useProjectsState({
 
       setProjects((prevProjects) =>
         prevProjects.map((project) => {
-          const sessions = project.sessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
-          const cursorSessions = project.cursorSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
-          const codexSessions = project.codexSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
-          const antigravitySessions = project.antigravitySessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
-
-          const removedFromProject = (
-            sessions.length !== (project.sessions?.length ?? 0)
-            || cursorSessions.length !== (project.cursorSessions?.length ?? 0)
-            || codexSessions.length !== (project.codexSessions?.length ?? 0)
-            || antigravitySessions.length !== (project.antigravitySessions?.length ?? 0)
-          );
-
+          const removedFromProject = getProjectSessions(project).some((session) => session.id === sessionIdToDelete);
           if (!removedFromProject) {
             return project;
           }
 
           const updatedProject: Project = {
             ...project,
-            sessions,
-            cursorSessions,
-            codexSessions,
-            antigravitySessions,
+            sessionsByProvider: mapProjectSessions(project.sessionsByProvider, (sessions) =>
+              sessions.filter((session) => session.id !== sessionIdToDelete)),
           };
 
           const totalSessions = Math.max(0, Number(project.sessionMeta?.total ?? 0) - 1);
@@ -735,7 +651,7 @@ export function useProjectsState({
       const mergedProjects = mergeExpandedSessionPages(projects, projectsWithTaskMaster);
 
       setProjects((prevProjects) =>
-        projectsHaveChanges(prevProjects, mergedProjects, true) ? mergedProjects : prevProjects,
+        projectsHaveChanges(prevProjects, mergedProjects) ? mergedProjects : prevProjects,
       );
 
       if (!selectedProject) {
@@ -804,7 +720,7 @@ export function useProjectsState({
       throw new Error(message);
     }
 
-    const sessionsPage = (await response.json()) as Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'antigravitySessions' | 'sessionMeta'>;
+    const sessionsPage = (await response.json()) as Pick<Project, 'sessionsByProvider' | 'sessionMeta'>;
 
     let mergedProjectForSelection: Project | null = null;
     setProjects((previousProjects) =>

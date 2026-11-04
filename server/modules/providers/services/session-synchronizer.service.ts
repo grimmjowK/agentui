@@ -3,7 +3,7 @@ import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type { LLMProvider } from '@/shared/types.js';
 
 type SessionSynchronizeResult = {
-  processedByProvider: Record<LLMProvider, number>;
+  processedByProvider: Partial<Record<LLMProvider, number>>;
   failures: string[];
 };
 
@@ -12,49 +12,26 @@ type SessionSynchronizeResult = {
  */
 export const sessionSynchronizerService = {
   /**
-   * Runs all provider synchronizers and updates scan_state.last_scanned_at.
+   * Runs every registered provider synchronizer. Each provider succeeds or fails
+   * on its own and advances only its own scan cursor, so one failing provider
+   * never blocks the others (design D4).
    */
   async synchronizeSessions(): Promise<SessionSynchronizeResult> {
-    const lastScanAt = scanStateDb.getLastScannedAt();
-    const antigravityLastScanAt = scanStateDb.getLastScannedAt('antigravity');
     const scanBoundary = new Date();
-    const processedByProvider: Record<LLMProvider, number> = {
-      claude: 0,
-      codex: 0,
-      cursor: 0,
-      antigravity: 0,
-    };
+    const processedByProvider: Partial<Record<LLMProvider, number>> = {};
     const failures: string[] = [];
 
-    const results = await Promise.allSettled(
-      providerRegistry.listProviders().map(async (provider) => ({
-        provider: provider.id,
-        processed: await provider.sessionSynchronizer.synchronize(
-          (provider.id === 'antigravity' ? antigravityLastScanAt : lastScanAt) ?? undefined,
-        ),
-      }))
-    );
-
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        processedByProvider[result.value.provider] = result.value.processed;
-        if (result.value.provider === 'antigravity') {
-          scanStateDb.updateLastScannedAt(scanBoundary, 'antigravity');
-        }
-        continue;
+    await Promise.all(providerRegistry.listProviders().map(async (provider) => {
+      try {
+        const since = scanStateDb.getLastScannedAt(provider.id) ?? undefined;
+        processedByProvider[provider.id] = await provider.sessionSynchronizer.synchronize(since);
+        scanStateDb.updateLastScannedAt(scanBoundary, provider.id);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        failures.push(`${provider.id}: ${reason}`);
+        console.warn(`[Sessions] ${provider.id} sync failed; its scan cursor stays put:`, reason);
       }
-
-      const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
-      failures.push(reason);
-    }
-
-    if (failures.length === 0) {
-      scanStateDb.updateLastScannedAt(scanBoundary);
-    } else {
-      console.warn(
-        `[Sessions] Skipping scan_state cursor advance because ${failures.length} provider sync(s) failed.`,
-      );
-    }
+    }));
 
     return {
       processedByProvider,

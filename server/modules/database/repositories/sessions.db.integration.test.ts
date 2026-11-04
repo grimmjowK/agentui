@@ -107,7 +107,7 @@ test('啟動遷移刪除 gemini 索引列，殘留的 gemini 收藏在讀取時�
     const projects = await getProjectsWithSessions({ skipSynchronization: true });
     const project = projects.find((p) => p.fullPath === '/workspace/retired');
     assert.ok(project);
-    assert.deepEqual(project.sessions.map((s) => s.id), ['claude-1']);
+    assert.deepEqual(project.sessionsByProvider.claude!.map((s) => s.id), ['claude-1']);
     assert.equal(JSON.stringify(projects).includes('gemini-2'), false);
   });
 });

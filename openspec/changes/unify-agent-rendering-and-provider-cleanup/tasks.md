@@ -47,11 +47,11 @@
 
 ## 5. 階段二：資料層解耦
 
-- [ ] 5.1 `scanStateDb` 改為以 provider id 存取 `app_config` 的 `scan_cursor:<providerId>`，並在首次啟動時以全域值（antigravity 取原值）初始化
-- [ ] 5.2 `session-synchronizer.service.ts` 改為每個 provider 獨立判斷成敗、獨立推進游標，移除 antigravity 特判與寫死的 `processedByProvider` 初始值；新增「一個 provider 失敗」的測試
-- [ ] 5.3 `ProjectListItem` 改為 `sessionsByProvider`，`projects-with-sessions-fetch.service.ts`、`project-management.service.ts` 改為依 registry 組裝
-- [ ] 5.4 前端新增 `getProjectSessions(project, provider?)` helper，替換 `useProjectsState.ts`、`useSessionsSource.ts`、`sidebar/utils/utils.ts`、`src/types/app.ts` 等所有舊欄位讀取，並更新 `utils.test.ts`
-- [ ] 5.5 `sessions-watcher.service.ts` 讀取 `SESSIONS_WATCHER_POLLING`（預設 `true`）與 `SESSIONS_WATCHER_INTERVAL_MS`（預設 `6000`），並把兩個變數補進 `.env.example`
+- [x] 5.1 `scanStateDb` 改為以 provider id 存取 `app_config` 的 `scan_cursor:<providerId>`，並在首次啟動時以全域值（antigravity 取原值）初始化
+- [x] 5.2 `session-synchronizer.service.ts` 改為每個 provider 獨立判斷成敗、獨立推進游標，移除 antigravity 特判與寫死的 `processedByProvider` 初始值；新增「一個 provider 失敗」的測試
+- [x] 5.3 `ProjectListItem` 改為 `sessionsByProvider`，`projects-with-sessions-fetch.service.ts`、`project-management.service.ts` 改為依 registry 組裝
+- [x] 5.4 前端新增 `getProjectSessions(project, provider?)` helper，替換 `useProjectsState.ts`、`useSessionsSource.ts`、`sidebar/utils/utils.ts`、`src/types/app.ts` 等所有舊欄位讀取，並更新 `utils.test.ts`
+- [x] 5.5 `sessions-watcher.service.ts` 讀取 `SESSIONS_WATCHER_POLLING`（預設 `true`）與 `SESSIONS_WATCHER_INTERVAL_MS`（預設 `6000`），並把兩個變數補進 `.env.example`
 
 ## 6. 階段二：全文檢索
 

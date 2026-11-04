@@ -52,6 +52,12 @@ const WATCHER_IGNORED_PATTERNS = [
   '**/.DS_Store',
 ];
 
+// 預設輪詢：k8s 容器內用 inotify 監聽 depth 6 的大目錄易撞上 max_user_watches（design D7）。
+// 本機或桌面版可設 SESSIONS_WATCHER_POLLING=false 改用原生事件。
+const WATCHER_POLLING = process.env.SESSIONS_WATCHER_POLLING !== 'false';
+const parsedWatcherInterval = Number.parseInt(process.env.SESSIONS_WATCHER_INTERVAL_MS ?? '', 10);
+const WATCHER_INTERVAL_MS = Number.isFinite(parsedWatcherInterval) && parsedWatcherInterval > 0 ? parsedWatcherInterval : 6_000;
+
 const PROJECTS_UPDATE_DEBOUNCE_MS = 500;
 const PROJECTS_UPDATE_MAX_WAIT_MS = 2_000;
 
@@ -244,9 +250,9 @@ export async function initializeSessionsWatcher(): Promise<void> {
         ignoreInitial: true,
         followSymlinks: false,
         depth: 6,
-        usePolling: true,
-        interval: 6_000,
-        binaryInterval: 6_000,
+        usePolling: WATCHER_POLLING,
+        interval: WATCHER_INTERVAL_MS,
+        binaryInterval: WATCHER_INTERVAL_MS,
       });
 
       watcher

@@ -319,6 +319,11 @@ interface IProviderRuntime {
   - 分派層：未知訊息類型與未註冊 provider 一律回 `error`；`get-pending-permissions` 只在有 provider 擁有該活躍會話時回覆（空回覆會清掉其他 provider 經即時流重放的審批）。
   - `shared/providers.ts` 是 provider 清單唯一來源：前後端 `LLMProvider`、前端 `PermissionMode` 皆由此推導；另含 `settingsStorageKey`。統一送出時帶 superset 參數：經確認 `options.skipPermissions` 只有 Cursor 讀、Antigravity 讀 `permissionMode`、Codex 忽略 `toolsSettings`，行為與改動前一致。
   - 4.8 瀏覽器實測：Claude、Codex、Antigravity 的送出、中斷（每次正好一個 `complete(aborted)`）、執行中重新整理後恢復「執行中」並正常收尾全部通過。**Cursor 未實測**（本機未安裝 `cursor-agent`），僅由分派層單元測試覆蓋。
+- **階段二 · 資料層（5.1–5.5）**：
+  - `scanStateDb` 只剩 `app_config` 的 `scan_cursor:<provider>`；尚未有該鍵時讀舊值（antigravity 讀 `antigravity_last_scanned_at`，其他讀 `scan_state`），首輪同步成功後即寫入新鍵。舊的 `scan_state` 表保留不動，回滾時舊程式碼仍可用。
+  - `projects` 模組沒有直接依賴 provider registry（`providers → projects` 已有一條執行期 import，避免加深循環），分組鍵改用 `shared/providers.ts` 的 `PROVIDER_IDS`，與 registry 型別同源。
+  - 前端 `src/utils/projectSessions.ts` 提供 `getProjectSessions(project, provider?)`（帶 `__provider`）與 `mapProjectSessions`；順手修正命令面板中非 Antigravity 的會話少了 `__provider`。
+  - 瀏覽器確認：每個 provider 的游標在啟動同步後各自寫入；側邊欄混合 provider 的會話清單、由 URL 還原會話與 provider 均正常。
 
 ## Open Questions
 
