@@ -27,8 +27,6 @@ interface ChatMessagesPaneProps {
   setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
-  geminiModel: string;
-  setGeminiModel: (model: string) => void;
   antigravityModel?: string;
   setAntigravityModel?: (model: string) => void;
   tasksEnabled: boolean;
@@ -74,8 +72,6 @@ export default function ChatMessagesPane({
   setCursorModel,
   codexModel,
   setCodexModel,
-  geminiModel,
-  setGeminiModel,
   antigravityModel,
   setAntigravityModel,
   tasksEnabled,
@@ -159,8 +155,6 @@ export default function ChatMessagesPane({
           setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
-          geminiModel={geminiModel}
-          setGeminiModel={setGeminiModel}
           antigravityModel={antigravityModel}
           setAntigravityModel={setAntigravityModel}
           tasksEnabled={tasksEnabled}

@@ -71,8 +71,6 @@ function ChatInterface({
     setClaudeModel,
     codexModel,
     setCodexModel,
-    geminiModel,
-    setGeminiModel,
     antigravityModel,
     setAntigravityModel,
     permissionMode,
@@ -191,12 +189,10 @@ function ChatInterface({
     cursorModel,
     claudeModel,
     codexModel,
-    geminiModel,
     antigravityModel,
     setClaudeModel,
     setCursorModel,
     setCodexModel,
-    setGeminiModel,
     setAntigravityModel,
     isLoading,
     canAbortSession,
@@ -311,14 +307,7 @@ function ChatInterface({
   }), [pendingPermissionRequests, handlePermissionDecision]);
 
   if (!selectedProject) {
-    const selectedProviderLabel =
-      provider === 'cursor'
-        ? t('messageTypes.cursor')
-        : provider === 'codex'
-          ? t('messageTypes.codex')
-          : provider === 'gemini'
-            ? t('messageTypes.gemini')
-            : t('messageTypes.claude');
+    const selectedProviderLabel = t(`messageTypes.${provider}`, { defaultValue: provider });
 
     return (
       <div className="flex h-full items-center justify-center">
@@ -354,8 +343,6 @@ function ChatInterface({
           setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
-          geminiModel={geminiModel}
-          setGeminiModel={setGeminiModel}
           antigravityModel={antigravityModel}
           setAntigravityModel={setAntigravityModel}
           tasksEnabled={tasksEnabled}
@@ -444,14 +431,7 @@ function ChatInterface({
           onTextareaInput={handleTextareaInput}
           onInputFocusChange={handleInputFocusChange}
           placeholder={t('input.placeholder', {
-            provider:
-              provider === 'cursor'
-                ? t('messageTypes.cursor')
-                : provider === 'codex'
-                  ? t('messageTypes.codex')
-                  : provider === 'gemini'
-                    ? t('messageTypes.gemini')
-                    : t('messageTypes.claude'),
+            provider: t(`messageTypes.${provider}`, { defaultValue: provider }),
           })}
           isTextareaExpanded={isTextareaExpanded}
           sendByCtrlEnter={sendByCtrlEnter}

@@ -15,7 +15,6 @@ import mime from 'mime-types';
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
-import { createShellSessionLookup } from '@/modules/websocket/services/shell-session-lookup.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -46,19 +45,12 @@ import {
     getActiveCodexSessions,
 } from './openai-codex.js';
 import {
-    spawnGemini,
-    abortGeminiSession,
-    isGeminiSessionActive,
-    getActiveGeminiSessions,
-} from './gemini-cli.js';
-import {
     spawnAntigravity,
     abortAntigravitySession,
     isAntigravitySessionActive,
     reconnectAntigravitySession,
     getActiveAntigravitySessions,
 } from './antigravity-cli.js';
-import sessionManager from './sessionManager.js';
 import {
     stripAnsiSequences,
     normalizeDetectedUrl,
@@ -75,7 +67,6 @@ import settingsRoutes from './routes/settings.js';
 import agentRoutes from './routes/agent.js';
 import projectModuleRoutes from './modules/projects/projects.routes.js';
 import userRoutes from './routes/user.js';
-import geminiRoutes from './routes/gemini.js';
 import pluginsRoutes from './routes/plugins.js';
 import providerRoutes from './modules/providers/provider.routes.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
@@ -92,10 +83,11 @@ const APP_ROOT = findAppRoot(__dirname);
 
 console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
 
-const getShellSessionById = createShellSessionLookup(
-    (sessionId) => sessionManager.getSession(sessionId),
-    (sessionId) => sessionsDb.getSessionById(sessionId),
-);
+// 終端續接：索引中的會話以自身 ID 作為原生 resume ID
+const getShellSessionById = (sessionId) => {
+    const session = sessionsDb.getSessionById(sessionId);
+    return session ? { ...session, cliSessionId: sessionId } : null;
+};
 
 const app = express();
 const server = http.createServer(app);
@@ -112,18 +104,15 @@ const wss = createWebSocketServer(server, {
         queryCodex,
         resolveCodexApproval,
         reconnectCodexSession,
-        spawnGemini,
         spawnAntigravity,
         abortClaudeSDKSession,
         abortCursorSession,
         abortCodexSession,
-        abortGeminiSession,
         abortAntigravitySession,
         resolveToolApproval,
         isClaudeSDKSessionActive,
         isCursorSessionActive,
         isCodexSessionActive,
-        isGeminiSessionActive,
         isAntigravitySessionActive,
         reconnectAntigravitySession,
         reconnectSessionWriter,
@@ -131,7 +120,6 @@ const wss = createWebSocketServer(server, {
         getActiveClaudeSDKSessions,
         getActiveCursorSessions,
         getActiveCodexSessions,
-        getActiveGeminiSessions,
         getActiveAntigravitySessions,
     },
     shell: {
@@ -144,7 +132,6 @@ const wss = createWebSocketServer(server, {
         isChatSessionActive: (sessionId, provider) => {
             if (provider === 'cursor') return isCursorSessionActive(sessionId);
             if (provider === 'codex') return isCodexSessionActive(sessionId);
-            if (provider === 'gemini') return isGeminiSessionActive(sessionId);
             if (provider === 'antigravity') return isAntigravitySessionActive(sessionId);
             return isClaudeSDKSessionActive(sessionId);
         },
@@ -212,9 +199,6 @@ app.use('/api/settings', authenticateToken, settingsRoutes);
 
 // User API Routes (protected)
 app.use('/api/user', authenticateToken, userRoutes);
-
-// Gemini API Routes (protected)
-app.use('/api/gemini', authenticateToken, geminiRoutes);
 
 // Plugins API Routes (protected)
 app.use('/api/plugins', authenticateToken, pluginsRoutes);
@@ -1100,8 +1084,8 @@ app.get('/api/projects/:projectId/sessions/:sessionId/token-usage', authenticate
             });
         }
 
-        // Handle Gemini & Antigravity sessions - they are raw logs in our current setup
-        if (provider === 'gemini' || provider === 'antigravity') {
+        // Antigravity sessions are raw logs without token usage
+        if (provider === 'antigravity') {
             return res.json({
                 used: 0,
                 total: 0,

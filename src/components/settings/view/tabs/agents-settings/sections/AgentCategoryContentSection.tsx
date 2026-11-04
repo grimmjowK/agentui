@@ -18,8 +18,6 @@ export default function AgentCategoryContentSection({
   onAntigravityPermissionsChange,
   codexPermissionMode,
   onCodexPermissionModeChange,
-  geminiPermissionMode,
-  onGeminiPermissionModeChange,
   projects,
 }: AgentCategoryContentSectionProps) {
   return (
@@ -74,14 +72,6 @@ export default function AgentCategoryContentSection({
           agent="codex"
           permissionMode={codexPermissionMode}
           onPermissionModeChange={onCodexPermissionModeChange}
-        />
-      )}
-
-      {selectedCategory === 'permissions' && selectedAgent === 'gemini' && (
-        <PermissionsContent
-          agent="gemini"
-          permissionMode={geminiPermissionMode}
-          onPermissionModeChange={onGeminiPermissionModeChange}
         />
       )}
 

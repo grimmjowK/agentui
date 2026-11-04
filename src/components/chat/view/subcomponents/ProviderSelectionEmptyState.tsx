@@ -11,7 +11,6 @@ import {
   CLAUDE_MODELS,
   CURSOR_MODELS,
   CODEX_MODELS,
-  GEMINI_MODELS,
   PROVIDERS,
 } from "../../../../../shared/modelConstants";
 import type { ProjectSession, LLMProvider } from "../../../../types/app";
@@ -45,8 +44,6 @@ type ProviderSelectionEmptyStateProps = {
   setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
-  geminiModel: string;
-  setGeminiModel: (model: string) => void;
   antigravityModel?: string;
   setAntigravityModel?: (model: string) => void;
   tasksEnabled: boolean;
@@ -70,7 +67,6 @@ const PROVIDER_GROUPS: ProviderGroup[] = PROVIDERS.map((p) => ({
 function getModelConfig(p: LLMProvider) {
   if (p === "claude") return CLAUDE_MODELS;
   if (p === "codex") return CODEX_MODELS;
-  if (p === "gemini") return GEMINI_MODELS;
   if (p === "antigravity") return ANTIGRAVITY_MODELS;
   return CURSOR_MODELS;
 }
@@ -80,12 +76,10 @@ function getCurrentModel(
   c: string,
   cu: string,
   co: string,
-  g: string,
   a?: string,
 ) {
   if (p === "claude") return c;
   if (p === "codex") return co;
-  if (p === "gemini") return g;
   if (p === "antigravity") return a || ANTIGRAVITY_MODELS.DEFAULT;
   return cu;
 }
@@ -94,8 +88,7 @@ function getProviderDisplayName(p: LLMProvider) {
   if (p === "claude") return "Claude";
   if (p === "cursor") return "Cursor";
   if (p === "codex") return "Codex";
-  if (p === "antigravity") return "Antigravity";
-  return "Gemini";
+  return "Antigravity";
 }
 
 export default function ProviderSelectionEmptyState({
@@ -110,8 +103,6 @@ export default function ProviderSelectionEmptyState({
   setCursorModel,
   codexModel,
   setCodexModel,
-  geminiModel,
-  setGeminiModel,
   antigravityModel,
   setAntigravityModel,
   tasksEnabled,
@@ -181,7 +172,6 @@ export default function ProviderSelectionEmptyState({
     claudeModel,
     cursorModel,
     codexModel,
-    geminiModel,
     antigravityModel,
   );
 
@@ -201,9 +191,6 @@ export default function ProviderSelectionEmptyState({
       } else if (providerId === "codex") {
         setCodexModel(modelValue);
         localStorage.setItem("codex-model", modelValue);
-      } else if (providerId === "gemini") {
-        setGeminiModel(modelValue);
-        localStorage.setItem("gemini-model", modelValue);
       } else if (providerId === "antigravity") {
         setAntigravityModel?.(modelValue);
         localStorage.setItem("antigravity-model", modelValue);
@@ -212,7 +199,7 @@ export default function ProviderSelectionEmptyState({
         localStorage.setItem("cursor-model", modelValue);
       }
     },
-    [setClaudeModel, setCursorModel, setCodexModel, setGeminiModel, setAntigravityModel],
+    [setClaudeModel, setCursorModel, setCodexModel, setAntigravityModel],
   );
 
   const handleModelSelect = useCallback(
@@ -335,9 +322,6 @@ export default function ProviderSelectionEmptyState({
                 }),
                 codex: t("providerSelection.readyPrompt.codex", {
                   model: codexModel,
-                }),
-                gemini: t("providerSelection.readyPrompt.gemini", {
-                  model: geminiModel,
                 }),
                 antigravity: t("providerSelection.readyPrompt.antigravity", {
                   model: antigravityModel,

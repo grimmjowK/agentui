@@ -27,12 +27,12 @@
 ## 3. 階段二：Gemini 下線
 
 - [x] 3.1 以任務 1.5 的 fixture 確認 Antigravity 是否用到與 gemini 專用工具設定（`run_shell_command`、`read_file`、`write_file`、`replace` 等）同名的工具，把結論記在 design.md 的 Open Questions
-- [ ] 3.2 刪除 `server/gemini-cli.js`、`server/gemini-response-handler.js`、`server/sessionManager.js`、`server/routes/gemini.js`、`server/modules/providers/list/gemini/`，並移除 `server/index.js`、`routes/agent.js`、`provider.routes.ts`、`provider-auth.service.ts`、`chat-websocket.service.ts` 中的引用
-- [ ] 3.3 `LLMProvider` 型別移除 `'gemini'`，以 `npm run typecheck` 修正所有連帶錯誤（前後端）
-- [ ] 3.4 移除前端 gemini 專用的工具設定、`getToolCategory` 中的 gemini 工具名、provider 選擇與設定頁的 gemini 項目，以及對應 i18n 鍵；3.1 確認為 Antigravity 也在用的工具名則保留
-- [ ] 3.5 watcher 移除 `~/.gemini/tmp`，保留 `~/.gemini/antigravity-cli/brain`、`~/.gemini/antigravity/brain` 與 `ANTIGRAVITY_HOME`
-- [ ] 3.6 新增啟動遷移：刪除 `sessions` 表中 `provider='gemini'` 的索引列（不動磁碟檔案）；讀取到未註冊 provider 的資料時略過並記錄 warn，並以收藏紀錄殘留 gemini 的情境測試
-- [ ] 3.7 刪除 `docs/gemini-cli-protocol.md` 與只服務 gemini 的測試與 fixtures，確認 `antigravity-cli.integration.test.ts` 通過
+- [x] 3.2 刪除 `server/gemini-cli.js`、`server/gemini-response-handler.js`、`server/sessionManager.js`、`server/routes/gemini.js`、`server/modules/providers/list/gemini/`，並移除 `server/index.js`、`routes/agent.js`、`provider.routes.ts`、`provider-auth.service.ts`、`chat-websocket.service.ts` 中的引用
+- [x] 3.3 `LLMProvider` 型別移除 `'gemini'`，以 `npm run typecheck` 修正所有連帶錯誤（前後端）
+- [x] 3.4 移除前端 gemini 專用的工具設定、`getToolCategory` 中的 gemini 工具名、provider 選擇與設定頁的 gemini 項目，以及對應 i18n 鍵；3.1 確認為 Antigravity 也在用的工具名則保留
+- [x] 3.5 watcher 移除 `~/.gemini/tmp`，保留 `~/.gemini/antigravity-cli/brain`、`~/.gemini/antigravity/brain` 與 `ANTIGRAVITY_HOME`
+- [x] 3.6 新增啟動遷移：刪除 `sessions` 表中 `provider='gemini'` 的索引列（不動磁碟檔案）；讀取到未註冊 provider 的資料時略過並記錄 warn，並以收藏紀錄殘留 gemini 的情境測試
+- [x] 3.7 刪除 `docs/gemini-cli-protocol.md` 與只服務 gemini 的測試與 fixtures，確認 `antigravity-cli.integration.test.ts` 通過
 
 ## 4. 階段二：執行層納入 provider 介面
 

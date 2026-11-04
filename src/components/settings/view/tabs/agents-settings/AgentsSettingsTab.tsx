@@ -15,7 +15,6 @@ const AGENT_NAMES: Record<AgentProvider, string> = {
   claude: 'Claude',
   cursor: 'Cursor',
   codex: 'Codex',
-  gemini: 'Gemini',
   antigravity: 'Antigravity',
 };
 
@@ -57,8 +56,6 @@ export default function AgentsSettingsTab({
   onAntigravityPermissionsChange,
   codexPermissionMode,
   onCodexPermissionModeChange,
-  geminiPermissionMode,
-  onGeminiPermissionModeChange,
   projects,
 }: AgentsSettingsTabProps) {
   const { t } = useTranslation('settings');
@@ -68,7 +65,7 @@ export default function AgentsSettingsTab({
   const { enabledAgents, toggleAgent } = useAgentToggle();
 
   const visibleAgents = useMemo<AgentProvider[]>(() => {
-    const all: AgentProvider[] = ['claude', 'cursor', 'codex', 'gemini', 'antigravity'];
+    const all: AgentProvider[] = ['claude', 'cursor', 'codex', 'antigravity'];
     if (isWindowsServer) {
       return all.filter((id) => id !== 'cursor');
     }
@@ -98,11 +95,6 @@ export default function AgentsSettingsTab({
       onLogin: () => onProviderLogin('codex'),
       onInstall: () => onProviderInstall('codex'),
     },
-    gemini: {
-      authStatus: providerAuthStatus.gemini,
-      onLogin: () => onProviderLogin('gemini'),
-      onInstall: () => onProviderInstall('gemini'),
-    },
     antigravity: {
       authStatus: providerAuthStatus.antigravity,
       onLogin: () => onProviderLogin('antigravity'),
@@ -114,7 +106,6 @@ export default function AgentsSettingsTab({
     providerAuthStatus.claude,
     providerAuthStatus.cursor,
     providerAuthStatus.codex,
-    providerAuthStatus.gemini,
     providerAuthStatus.antigravity,
   ]);
 
@@ -176,8 +167,6 @@ export default function AgentsSettingsTab({
             onAntigravityPermissionsChange={onAntigravityPermissionsChange}
             codexPermissionMode={codexPermissionMode}
             onCodexPermissionModeChange={onCodexPermissionModeChange}
-            geminiPermissionMode={geminiPermissionMode}
-            onGeminiPermissionModeChange={onGeminiPermissionModeChange}
             projects={projects}
           />
         </div>

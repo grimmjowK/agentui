@@ -11,7 +11,7 @@ import { sessionsDb } from '@/modules/database/index.js';
  * 所以“收藏不过期”只能靠我们自己留一份副本：收藏时复制，文件更新时刷新，
  * 原文件被 CLI 清掉后读备份。
  *
- * 每个会话一个子目录，文件名沿用原始 basename —— Gemini 依赖 `.json` /
+ * 每个会话一个子目录，文件名沿用原始 basename —— 部分 provider 依赖 `.json` /
  * `.jsonl` 后缀分支解析，扁平命名会丢掉后缀信息。
  */
 const PINNED_ROOT = path.join(os.homedir(), '.cloudcli', 'pinned');

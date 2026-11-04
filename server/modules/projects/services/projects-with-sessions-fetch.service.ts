@@ -15,7 +15,7 @@ type SessionSummary = {
   isStarred: boolean;
 };
 
-type SessionsByProvider = Record<'claude' | 'cursor' | 'codex' | 'gemini' | 'antigravity', SessionSummary[]>;
+type SessionsByProvider = Record<'claude' | 'cursor' | 'codex' | 'antigravity', SessionSummary[]>;
 
 type SessionRepositoryRow = {
   provider: string;
@@ -35,7 +35,6 @@ export type ProjectListItem = {
   sessions: SessionSummary[];
   cursorSessions: SessionSummary[];
   codexSessions: SessionSummary[];
-  geminiSessions: SessionSummary[];
   antigravitySessions: SessionSummary[];
   sessionMeta: {
     hasMore: boolean;
@@ -76,7 +75,6 @@ export type ProjectSessionsPageApiView = {
   sessions: SessionSummary[];
   cursorSessions: SessionSummary[];
   codexSessions: SessionSummary[];
-  geminiSessions: SessionSummary[];
   antigravitySessions: SessionSummary[];
   sessionMeta: {
     hasMore: boolean;
@@ -138,12 +136,20 @@ function mapSessionRowToSummary(row: SessionRepositoryRow): SessionSummary {
   };
 }
 
+const warnedUnknownProviders = new Set<string>();
+
+/** 索引裡殘留未註冊 provider 的列（例如已下線的 gemini）時略過，每個 provider 只警告一次。 */
+function warnUnknownProvider(provider: string): void {
+  if (warnedUnknownProviders.has(provider)) return;
+  warnedUnknownProviders.add(provider);
+  console.warn(`[projects] Skipping sessions from unregistered provider "${provider}"`);
+}
+
 function bucketSessionRowsByProvider(rows: SessionRepositoryRow[]): SessionsByProvider {
   const byProvider: SessionsByProvider = {
     claude: [],
     cursor: [],
     codex: [],
-    gemini: [],
     antigravity: [],
   };
 
@@ -151,6 +157,7 @@ function bucketSessionRowsByProvider(rows: SessionRepositoryRow[]): SessionsByPr
     const provider = row.provider as keyof SessionsByProvider;
     const bucket = byProvider[provider];
     if (!bucket) {
+      warnUnknownProvider(row.provider);
       continue;
     }
 
@@ -258,7 +265,6 @@ export async function getProjectsWithSessions(
       sessions: sessionsPage.sessionsByProvider.claude,
       cursorSessions: sessionsPage.sessionsByProvider.cursor,
       codexSessions: sessionsPage.sessionsByProvider.codex,
-      geminiSessions: sessionsPage.sessionsByProvider.gemini,
       antigravitySessions: sessionsPage.sessionsByProvider.antigravity,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
@@ -315,7 +321,6 @@ export async function getArchivedProjectsWithSessions(
       sessions: sessionsPage.sessionsByProvider.claude,
       cursorSessions: sessionsPage.sessionsByProvider.cursor,
       codexSessions: sessionsPage.sessionsByProvider.codex,
-      geminiSessions: sessionsPage.sessionsByProvider.gemini,
       antigravitySessions: sessionsPage.sessionsByProvider.antigravity,
       sessionMeta: {
         hasMore: sessionsPage.hasMore,
@@ -348,7 +353,6 @@ export async function getProjectSessionsPage(
     sessions: sessionsPage.sessionsByProvider.claude,
     cursorSessions: sessionsPage.sessionsByProvider.cursor,
     codexSessions: sessionsPage.sessionsByProvider.codex,
-    geminiSessions: sessionsPage.sessionsByProvider.gemini,
     antigravitySessions: sessionsPage.sessionsByProvider.antigravity,
     sessionMeta: {
       hasMore: sessionsPage.hasMore,

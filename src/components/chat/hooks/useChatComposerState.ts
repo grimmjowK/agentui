@@ -42,12 +42,10 @@ interface UseChatComposerStateArgs {
   cursorModel: string;
   claudeModel: string;
   codexModel: string;
-  geminiModel: string;
   antigravityModel?: string;
   setClaudeModel: (model: string) => void;
   setCursorModel: (model: string) => void;
   setCodexModel: (model: string) => void;
-  setGeminiModel: (model: string) => void;
   setAntigravityModel?: (model: string) => void;
   isLoading: boolean;
   canAbortSession: boolean;
@@ -120,12 +118,10 @@ export function useChatComposerState({
   cursorModel,
   claudeModel,
   codexModel,
-  geminiModel,
   antigravityModel,
   setClaudeModel,
   setCursorModel,
   setCodexModel,
-  setGeminiModel,
   setAntigravityModel,
   isLoading,
   canAbortSession,
@@ -207,9 +203,6 @@ export function useChatComposerState({
     } else if (provider === 'codex') {
       setCodexModel(modelValue);
       persist('codex-model');
-    } else if (provider === 'gemini') {
-      setGeminiModel(modelValue);
-      persist('gemini-model');
     } else if (provider === 'antigravity') {
       setAntigravityModel?.(modelValue);
       persist('antigravity-model');
@@ -221,7 +214,7 @@ export function useChatComposerState({
       content: `Model switched to: **${modelValue}**`,
       timestamp: Date.now(),
     });
-  }, [provider, selectedSession?.id, setClaudeModel, setCursorModel, setCodexModel, setGeminiModel, setAntigravityModel, addMessage]);
+  }, [provider, selectedSession?.id, setClaudeModel, setCursorModel, setCodexModel, setAntigravityModel, addMessage]);
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -367,7 +360,7 @@ export function useChatComposerState({
           projectId: selectedProject.projectId,
           sessionId: currentSessionId,
           provider,
-          model: provider === 'cursor' ? cursorModel : provider === 'codex' ? codexModel : provider === 'gemini' ? geminiModel : provider === 'antigravity' ? antigravityModel : claudeModel,
+          model: provider === 'cursor' ? cursorModel : provider === 'codex' ? codexModel : provider === 'antigravity' ? antigravityModel : claudeModel,
           tokenUsage: tokenBudget,
         };
 
@@ -420,7 +413,6 @@ export function useChatComposerState({
       codexModel,
       currentSessionId,
       cursorModel,
-      geminiModel,
       handleBuiltInCommand,
       handleCustomCommand,
       input,
@@ -440,8 +432,7 @@ export function useChatComposerState({
   const currentModel = provider === 'claude' ? claudeModel
     : provider === 'cursor' ? cursorModel
     : provider === 'codex' ? codexModel
-    : provider === 'antigravity' ? (antigravityModel || ANTIGRAVITY_MODELS.DEFAULT)
-    : geminiModel;
+    : (antigravityModel || ANTIGRAVITY_MODELS.DEFAULT);
 
   const {
     slashCommands,
@@ -719,11 +710,9 @@ export function useChatComposerState({
               ? 'cursor-tools-settings'
               : provider === 'codex'
                 ? 'codex-settings'
-                : provider === 'gemini'
-                  ? 'gemini-settings'
-                  : provider === 'antigravity'
-                    ? 'antigravity-settings'
-                    : 'claude-settings';
+                : provider === 'antigravity'
+                  ? 'antigravity-settings'
+                  : 'claude-settings';
           const savedSettings = safeLocalStorage.getItem(settingsKey);
           if (savedSettings) {
             return JSON.parse(savedSettings);
@@ -774,22 +763,6 @@ export function useChatComposerState({
             sessionSummary,
             ...effortOption,
             permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
-          },
-        });
-      } else if (provider === 'gemini') {
-        sent = sendMessage({
-          type: 'gemini-command',
-          command: messageContent,
-          sessionId: effectiveSessionId,
-          options: {
-            cwd: resolvedProjectPath,
-            projectPath: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            model: geminiModel,
-            sessionSummary,
-            permissionMode,
-            toolsSettings,
           },
         });
       } else if (provider === 'antigravity') {
@@ -860,7 +833,6 @@ export function useChatComposerState({
       currentSessionId,
       cursorModel,
       executeCommand,
-      geminiModel,
       isLoading,
       onSessionActive,
       onSessionProcessing,
@@ -1096,11 +1068,8 @@ export function useChatComposerState({
             decision: decision.updatedInput || (decision.allow ? 'accept' : 'decline') });
           return;
         }
-        const responseType = provider === 'gemini'
-          ? 'gemini-permission-response'
-          : 'claude-permission-response';
         sendMessage({
-          type: responseType,
+          type: 'claude-permission-response',
           requestId,
           allow: Boolean(decision?.allow),
           updatedInput: decision?.updatedInput,

@@ -28,7 +28,7 @@ const PROVIDER_LABEL_KEYS: Record<string, string> = {
   claude: 'messageTypes.claude',
   codex: 'messageTypes.codex',
   cursor: 'messageTypes.cursor',
-  gemini: 'messageTypes.gemini',
+  antigravity: 'messageTypes.antigravity',
 };
 
 function formatElapsedTime(totalSeconds: number) {

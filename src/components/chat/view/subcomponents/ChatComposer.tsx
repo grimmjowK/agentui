@@ -401,7 +401,7 @@ export default function ChatComposer({
               <ThinkingModeSelector provider={provider} selectedMode={thinkingMode} onModeChange={setThinkingMode} onClose={() => {}} className="" />
             )}
 
-            {/* 只在 provider 实际报告了用量时显示；Gemini / Antigravity / Cursor 无数据，显示 0% 会误导 */}
+            {/* 只在 provider 实际报告了用量时显示；Antigravity / Cursor 无数据，显示 0% 会误导 */}
             {tokenBudget?.total ? <TokenUsagePie used={tokenBudget.used || 0} total={tokenBudget.total} /> : null}
 
             <PromptInputButton

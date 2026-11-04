@@ -63,11 +63,9 @@ type ChatWebSocketDependencies = {
   queryClaudeSDK: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   spawnCursor: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   queryCodex: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
-  spawnGemini: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   abortClaudeSDKSession: (sessionId: string) => Promise<boolean>;
   abortCursorSession: (sessionId: string) => boolean;
   abortCodexSession: (sessionId: string) => boolean;
-  abortGeminiSession: (sessionId: string) => boolean;
   abortAntigravitySession?: (sessionId: string) => boolean;
   spawnAntigravity?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   resolveToolApproval: (
@@ -82,7 +80,6 @@ type ChatWebSocketDependencies = {
   isClaudeSDKSessionActive: (sessionId: string) => boolean;
   isCursorSessionActive: (sessionId: string) => boolean;
   isCodexSessionActive: (sessionId: string) => boolean;
-  isGeminiSessionActive: (sessionId: string) => boolean;
   isAntigravitySessionActive?: (sessionId: string) => boolean;
   reconnectAntigravitySession?: (sessionId: string, writer: WebSocketWriter) => boolean;
   reconnectSessionWriter: (sessionId: string, ws: WebSocket) => boolean;
@@ -90,7 +87,6 @@ type ChatWebSocketDependencies = {
   getActiveClaudeSDKSessions: () => unknown;
   getActiveCursorSessions: () => unknown;
   getActiveCodexSessions: () => unknown;
-  getActiveGeminiSessions: () => unknown;
   getActiveAntigravitySessions?: () => unknown;
 };
 
@@ -98,7 +94,7 @@ type ChatWebSocketDependencies = {
  * Normalizes potentially invalid provider names coming from websocket payloads.
  */
 function readProvider(value: unknown): LLMProvider {
-  if (value === 'claude' || value === 'cursor' || value === 'codex' || value === 'gemini' || value === 'antigravity') {
+  if (value === 'claude' || value === 'cursor' || value === 'codex' || value === 'antigravity') {
     return value;
   }
 
@@ -172,12 +168,6 @@ export function handleChatConnection(
         return;
       }
 
-      if (messageType === 'gemini-command') {
-        warnOnConcurrentShellSession(data.options?.sessionId, 'gemini', writer);
-        await dependencies.spawnGemini(data.command ?? '', data.options, writer);
-        return;
-      }
-
       if (messageType === 'antigravity-command') {
         warnOnConcurrentShellSession(data.options?.sessionId, 'antigravity', writer);
         if (dependencies.spawnAntigravity) {
@@ -209,8 +199,6 @@ export function handleChatConnection(
         } else if (provider === 'codex') {
           if (dependencies.reconnectCodexSession(sessionId, writer)) success = dependencies.abortCodexSession(sessionId);
           if (success) return; // Runtime emits the sole cancellation terminal event.
-        } else if (provider === 'gemini') {
-          success = dependencies.abortGeminiSession(sessionId);
         } else if (provider === 'antigravity') {
           success = dependencies.abortAntigravitySession ? dependencies.abortAntigravitySession(sessionId) : false;
           if (success) return; // The runtime emits completion after the process exits.
@@ -276,8 +264,6 @@ export function handleChatConnection(
           isActive = dependencies.isCursorSessionActive(sessionId);
         } else if (provider === 'codex') {
           isActive = dependencies.reconnectCodexSession(sessionId, writer);
-        } else if (provider === 'gemini') {
-          isActive = dependencies.isGeminiSessionActive(sessionId);
         } else if (provider === 'antigravity') {
           isActive = dependencies.reconnectAntigravitySession
             ? dependencies.reconnectAntigravitySession(sessionId, writer)
@@ -318,7 +304,6 @@ export function handleChatConnection(
             claude: dependencies.getActiveClaudeSDKSessions(),
             cursor: dependencies.getActiveCursorSessions(),
             codex: dependencies.getActiveCodexSessions(),
-            gemini: dependencies.getActiveGeminiSessions(),
             antigravity: dependencies.getActiveAntigravitySessions ? dependencies.getActiveAntigravitySessions() : {},
           },
         });

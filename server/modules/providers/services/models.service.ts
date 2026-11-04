@@ -5,7 +5,7 @@
  * 这里把它们统一成 `{ value, label, description }`，取不到时回落到
  * `shared/modelConstants.js` 的静态清单，保证 UI 永远有东西可选。
  *
- * Cursor / Gemini 目前没有可用的列举接口，直接走静态清单。
+ * Cursor 目前没有可用的列举接口，直接走静态清单。
  */
 
 
@@ -27,7 +27,6 @@ import {
   CLAUDE_MODELS,
   CODEX_MODELS,
   CURSOR_MODELS,
-  GEMINI_MODELS,
 } from '../../../../shared/modelConstants.js';
 
 export interface ProviderModel {
@@ -54,7 +53,6 @@ const FALLBACKS: Record<LLMProvider, { OPTIONS: ProviderModel[] }> = {
   claude: CLAUDE_MODELS,
   codex: CODEX_MODELS,
   cursor: CURSOR_MODELS,
-  gemini: GEMINI_MODELS,
   antigravity: ANTIGRAVITY_MODELS,
 };
 

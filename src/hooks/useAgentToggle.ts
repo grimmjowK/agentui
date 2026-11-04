@@ -8,7 +8,6 @@ const DEFAULT_STATE: AgentToggleState = {
   claude: true,
   cursor: true,
   codex: true,
-  gemini: true,
   antigravity: true,
 };
 

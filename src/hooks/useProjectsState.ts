@@ -82,7 +82,6 @@ const projectsHaveChanges = (
     return (
       serialize(nextProject.cursorSessions) !== serialize(prevProject.cursorSessions) ||
       serialize(nextProject.codexSessions) !== serialize(prevProject.codexSessions) ||
-      serialize(nextProject.geminiSessions) !== serialize(prevProject.geminiSessions) ||
       serialize(nextProject.antigravitySessions) !== serialize(prevProject.antigravitySessions)
     );
   });
@@ -119,7 +118,6 @@ const getProjectSessions = (project: Project): ProjectSession[] => {
     ...(project.sessions ?? []),
     ...(project.codexSessions ?? []),
     ...(project.cursorSessions ?? []),
-    ...(project.geminiSessions ?? []),
     ...(project.antigravitySessions ?? []),
   ];
 };
@@ -167,7 +165,6 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
       sessions: mergeSessionProviderLists(incomingProject.sessions ?? [], previousProject.sessions ?? []),
       cursorSessions: mergeSessionProviderLists(incomingProject.cursorSessions ?? [], previousProject.cursorSessions ?? []),
       codexSessions: mergeSessionProviderLists(incomingProject.codexSessions ?? [], previousProject.codexSessions ?? []),
-      geminiSessions: mergeSessionProviderLists(incomingProject.geminiSessions ?? [], previousProject.geminiSessions ?? []),
       antigravitySessions: mergeSessionProviderLists(incomingProject.antigravitySessions ?? [], previousProject.antigravitySessions ?? []),
     };
 
@@ -184,14 +181,13 @@ const mergeExpandedSessionPages = (previousProjects: Project[], incomingProjects
 
 const mergeProjectSessionPage = (
   existingProject: Project,
-  sessionsPage: Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'antigravitySessions' | 'sessionMeta'>,
+  sessionsPage: Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'antigravitySessions' | 'sessionMeta'>,
 ): Project => {
   const mergedProject: Project = {
     ...existingProject,
     sessions: mergeSessionProviderLists(existingProject.sessions ?? [], sessionsPage.sessions ?? []),
     cursorSessions: mergeSessionProviderLists(existingProject.cursorSessions ?? [], sessionsPage.cursorSessions ?? []),
     codexSessions: mergeSessionProviderLists(existingProject.codexSessions ?? [], sessionsPage.codexSessions ?? []),
-    geminiSessions: mergeSessionProviderLists(existingProject.geminiSessions ?? [], sessionsPage.geminiSessions ?? []),
     antigravitySessions: mergeSessionProviderLists(existingProject.antigravitySessions ?? [], sessionsPage.antigravitySessions ?? []),
   };
 
@@ -573,21 +569,6 @@ export function useProjectsState({
         return;
       }
 
-      const geminiSession = project.geminiSessions?.find((session) => session.id === sessionId);
-      if (geminiSession) {
-        const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
-        const shouldUpdateSession =
-          selectedSession?.id !== sessionId || selectedSession.__provider !== 'gemini';
-
-        if (shouldUpdateProject) {
-          setSelectedProject(project);
-        }
-        if (shouldUpdateSession) {
-          setSelectedSession({ ...geminiSession, __provider: 'gemini' });
-        }
-        return;
-      }
-
       const antigravitySession = project.antigravitySessions?.find((session) => session.id === sessionId);
       if (antigravitySession) {
         const shouldUpdateProject = selectedProject?.projectId !== project.projectId;
@@ -628,11 +609,9 @@ export function useProjectsState({
         ? 'cursor'
         : providerFromStorage === 'codex'
           ? 'codex'
-          : providerFromStorage === 'gemini'
-            ? 'gemini'
-            : providerFromStorage === 'antigravity'
-              ? 'antigravity'
-              : 'claude';
+          : providerFromStorage === 'antigravity'
+            ? 'antigravity'
+            : 'claude';
 
     setSelectedSession({
       id: sessionId,
@@ -714,14 +693,12 @@ export function useProjectsState({
           const sessions = project.sessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
           const cursorSessions = project.cursorSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
           const codexSessions = project.codexSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
-          const geminiSessions = project.geminiSessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
           const antigravitySessions = project.antigravitySessions?.filter((session) => session.id !== sessionIdToDelete) ?? [];
 
           const removedFromProject = (
             sessions.length !== (project.sessions?.length ?? 0)
             || cursorSessions.length !== (project.cursorSessions?.length ?? 0)
             || codexSessions.length !== (project.codexSessions?.length ?? 0)
-            || geminiSessions.length !== (project.geminiSessions?.length ?? 0)
             || antigravitySessions.length !== (project.antigravitySessions?.length ?? 0)
           );
 
@@ -734,7 +711,6 @@ export function useProjectsState({
             sessions,
             cursorSessions,
             codexSessions,
-            geminiSessions,
             antigravitySessions,
           };
 
@@ -828,7 +804,7 @@ export function useProjectsState({
       throw new Error(message);
     }
 
-    const sessionsPage = (await response.json()) as Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'geminiSessions' | 'antigravitySessions' | 'sessionMeta'>;
+    const sessionsPage = (await response.json()) as Pick<Project, 'sessions' | 'cursorSessions' | 'codexSessions' | 'antigravitySessions' | 'sessionMeta'>;
 
     let mergedProjectForSelection: Project | null = null;
     setProjects((previousProjects) =>

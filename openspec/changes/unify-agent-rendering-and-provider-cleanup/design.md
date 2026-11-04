@@ -307,6 +307,12 @@ interface IProviderRuntime {
     3. app-server 的 `commandExecution.command` 帶 shell 包裝（`/bin/zsh -lc '…'`），與歷史 `exec_command` 不一致 → mapper 的 `unwrapShellCommand` 拆掉外層。
   - 降級卡片標題為空時不再顯示孤立的 `/` 分隔符。
   - 尚未處理（非本變更範圍）：側邊欄與頁首仍以 Claude 圖示顯示 Antigravity 會話；Antigravity 的 `<SYSTEM_MESSAGE>`（伺服器重啟通知）會被當成助手文字顯示。
+- **階段二 · Gemini 下線（3.2–3.7）**：
+  - `shell-session-lookup` 的記憶體查詢只服務 gemini（`sessionManager`），已整個刪除，終端續接改為 `server/index.js` 內一行「查索引帶上 `cliSessionId`」。
+  - 啟動遷移 `removeRetiredGeminiSessions` 刪除 `sessions` 表 `provider='gemini'` 的索引列（收藏是同表的 `isStarred` 欄位，一併清除）；專案清單遇到未註冊 provider 的列時略過並每個 provider 警告一次。
+  - 小寫 `exit_plan_mode` 確認只出現在 gemini（本機 Claude 歷史 43 個檔案全用 `ExitPlanMode`），一併刪除。
+  - 刪除 `GeminiLogo` 後改為 `AntigravityLogo`（沿用 `gemini-ai-icon.svg`）；順手修正 Antigravity 會話在側邊欄、頁首、輸入框提示、狀態列錯用 Claude 名稱/圖示的問題（改以 provider id 取 i18n 鍵）。
+  - **保留**：`cloudcli sandbox -a gemini`（`server/cli.js` 與 `docker/gemini/`）是在 docker 裡跑 CLI 的獨立功能，與聊天 provider 無關；`openspec/specs/gemini-*` 於 archive 時依 delta spec 移除。
 
 ## Open Questions
 

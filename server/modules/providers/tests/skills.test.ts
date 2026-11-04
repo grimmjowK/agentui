@@ -400,10 +400,10 @@ test('providerSkillsService lists codex repository, user, and system skills', { 
 });
 
 /**
- * This test covers Gemini and Cursor skill directory rules, including shared
+ * This test covers Cursor skill directory rules, including shared
  * `.agents/skills` project support.
  */
-test('providerSkillsService lists gemini and cursor skills from their configured directories', { concurrency: false }, async () => {
+test('providerSkillsService lists cursor skills from their configured directories', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-gc-'));
   const workspacePath = path.join(tempRoot, 'workspace');
   await fs.mkdir(workspacePath, { recursive: true });
@@ -411,22 +411,10 @@ test('providerSkillsService lists gemini and cursor skills from their configured
   const restoreHomeDir = patchHomeDir(tempRoot);
   try {
     await writeSkill(
-      path.join(tempRoot, '.gemini', 'skills'),
-      'gemini-user-dir',
-      'gemini-user',
-      'Gemini user skill',
-    );
-    await writeSkill(
       path.join(tempRoot, '.agents', 'skills'),
       'agents-user-dir',
       'agents-user',
       'Agents user skill',
-    );
-    await writeSkill(
-      path.join(workspacePath, '.gemini', 'skills'),
-      'gemini-project-dir',
-      'gemini-project',
-      'Gemini project skill',
     );
     await writeSkill(
       path.join(workspacePath, '.agents', 'skills'),
@@ -446,14 +434,6 @@ test('providerSkillsService lists gemini and cursor skills from their configured
       'cursor-user',
       'Cursor user skill',
     );
-
-    const geminiSkills = await providerSkillsService.listProviderSkills('gemini', { workspacePath });
-    const geminiByName = new Map(geminiSkills.map((skill) => [skill.name, skill]));
-    assert.equal(geminiByName.get('gemini-user')?.scope, 'user');
-    assert.equal(geminiByName.get('agents-user')?.scope, 'user');
-    assert.equal(geminiByName.get('gemini-project')?.scope, 'project');
-    assert.equal(geminiByName.get('agents-project')?.scope, 'project');
-    assert.equal(geminiByName.get('gemini-project')?.command, '/gemini-project');
 
     const cursorSkills = await providerSkillsService.listProviderSkills('cursor', { workspacePath });
     const cursorByName = new Map(cursorSkills.map((skill) => [skill.name, skill]));

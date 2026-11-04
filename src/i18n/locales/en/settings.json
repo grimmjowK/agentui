@@ -333,9 +333,6 @@
       "codex": {
         "description": "OpenAI Codex AI assistant"
       },
-      "gemini": {
-        "description": "Google Gemini AI assistant"
-      },
       "antigravity": {
         "description": "Google Antigravity CLI assistant (agy)"
       }

@@ -46,6 +46,15 @@ const tableExists = (db: Database, tableName: string): boolean =>
 const getTableInfo = (db: Database, tableName: string): TableInfoRow[] =>
   db.prepare(`PRAGMA table_info(${tableName})`).all() as TableInfoRow[];
 
+/** Gemini provider 已下線：只刪索引列，磁碟上的 Gemini 檔案屬於使用者資料，不動。 */
+const removeRetiredGeminiSessions = (db: Database): void => {
+  if (!tableExists(db, 'sessions')) return;
+  const { changes } = db.prepare("DELETE FROM sessions WHERE provider = 'gemini'").run();
+  if (changes > 0) {
+    console.log(`Running migration: Removed ${changes} retired Gemini session index rows`);
+  }
+};
+
 const migrateLegacySessionNames = (db: Database): void => {
   const hasLegacySessionNamesTable = tableExists(db, 'session_names');
   const hasSessionsTable = tableExists(db, 'sessions');
@@ -436,6 +445,7 @@ export const runMigrations = (db: Database) => {
       'BOOLEAN DEFAULT 0'
     );
     migrateLegacySessionNames(db);
+    removeRetiredGeminiSessions(db);
     ensureProjectsForSessionPaths(db);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');

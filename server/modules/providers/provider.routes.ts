@@ -190,7 +190,6 @@ const parseProvider = (value: unknown): LLMProvider => {
     normalized === 'claude'
     || normalized === 'codex'
     || normalized === 'cursor'
-    || normalized === 'gemini'
     || normalized === 'antigravity'
   ) {
     return normalized;
@@ -444,9 +443,7 @@ router.get(
       throw new AppError('Session not found.', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
     }
 
-    // 索引里的 session_id 即各 CLI 的原生 ID（Gemini 也是按转录文件建索引）。
-    // ponytail: Gemini 本次运行中新建、尚未入索引的会话只在内存 sessionManager 里有原生 ID 映射，
-    // 这里查不到会 404；provider 模块不能直接依赖根目录的 sessionManager，需要时改为依赖注入
+    // 索引里的 session_id 即各 CLI 的原生 ID。
     const provider = indexed.provider || readOptionalQueryString(req.query.provider) || 'claude';
     res.json(createApiSuccessResponse({
       sessionId,

@@ -208,7 +208,7 @@ interface ToolDisplayConfig {
 | TaskUpdate | one-line | hide success | Shows `#id → status` |
 | TaskList | one-line | collapsible task | Progress bar, status icons |
 | TaskGet | one-line | collapsible task | Task details with status |
-| ExitPlanMode | collapsible (markdown) | collapsible markdown | Also registered as `exit_plan_mode` |
+| ExitPlanMode | plan (markdown) | hidden | |
 | Task / Agent | subagent container | collapsible markdown | `Agent` is Claude's new name for `Task` |
 | WebSearch / WebFetch | one-line | collapsible text | Query / URL |
 | TerminalInput | terminal one-line | hide success | Codex `write_stdin`; empty `chars` = waiting for output |

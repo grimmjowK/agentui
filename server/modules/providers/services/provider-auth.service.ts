@@ -22,9 +22,6 @@ function buildInstallShellCommand(provider: LLMProvider, platform: NodeJS.Platfo
   if (provider === 'codex') {
     return 'npm install -g @openai/codex';
   }
-  if (provider === 'gemini') {
-    return 'npm install -g @google/gemini-cli';
-  }
   return isWindows
     ? 'irm https://antigravity.google/cli/install.ps1 | iex'
     : 'curl -fsSL https://antigravity.google/cli/install.sh | bash';

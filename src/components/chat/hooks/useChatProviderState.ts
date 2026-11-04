@@ -6,7 +6,6 @@ import {
   CLAUDE_MODELS,
   CODEX_MODELS,
   CURSOR_MODELS,
-  GEMINI_MODELS,
 } from '../../../../shared/modelConstants';
 import type { PendingPermissionRequest, PermissionMode } from '../types/types';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
@@ -38,7 +37,6 @@ const MODEL_DEFAULTS: Record<LLMProvider, string> = {
   claude: CLAUDE_MODELS.DEFAULT,
   cursor: CURSOR_MODELS.DEFAULT,
   codex: CODEX_MODELS.DEFAULT,
-  gemini: GEMINI_MODELS.DEFAULT,
   antigravity: ANTIGRAVITY_MODELS.DEFAULT,
 };
 
@@ -67,9 +65,6 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   const [codexModel, setCodexModel] = useState<string>(() => {
     return localStorage.getItem('codex-model') || CODEX_MODELS.DEFAULT;
   });
-  const [geminiModel, setGeminiModel] = useState<string>(() => {
-    return localStorage.getItem('gemini-model') || GEMINI_MODELS.DEFAULT;
-  });
   const [antigravityModel, setAntigravityModel] = useState<string>(() => {
     return localStorage.getItem('antigravity-model') || ANTIGRAVITY_MODELS.DEFAULT;
   });
@@ -87,7 +82,6 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
       claude: setClaudeModel,
       cursor: setCursorModel,
       codex: setCodexModel,
-      gemini: setGeminiModel,
       antigravity: setAntigravityModel,
     };
     const setModel = setters[provider];
@@ -251,8 +245,6 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     setClaudeModel,
     codexModel,
     setCodexModel,
-    geminiModel,
-    setGeminiModel,
     antigravityModel,
     setAntigravityModel,
     permissionMode,

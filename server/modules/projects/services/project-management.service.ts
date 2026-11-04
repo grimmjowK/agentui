@@ -32,7 +32,6 @@ type ProjectApiView = {
   sessions: [];
   cursorSessions: [];
   codexSessions: [];
-  geminiSessions: [];
   antigravitySessions: [];
   sessionMeta: {
     hasMore: false;
@@ -84,7 +83,6 @@ function mapProjectRowToApiView(projectRow: ProjectRepositoryRow): ProjectApiVie
     sessions: [],
     cursorSessions: [],
     codexSessions: [],
-    geminiSessions: [],
     antigravitySessions: [],
     sessionMeta: {
       hasMore: false,

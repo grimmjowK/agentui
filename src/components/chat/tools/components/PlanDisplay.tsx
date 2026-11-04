@@ -40,7 +40,7 @@ export const PlanDisplay: React.FC<PlanDisplayProps> = ({
   const permissionCtx = usePermission();
 
   const pendingRequest = permissionCtx?.pendingPermissionRequests.find(
-    (r) => r.toolName === 'ExitPlanMode' || r.toolName === 'exit_plan_mode'
+    (r) => r.toolName === 'ExitPlanMode'
   );
 
   const handleBuild = () => {

@@ -8,7 +8,6 @@ import { userDb, apiKeysDb, githubTokensDb, projectsDb } from '../modules/databa
 import { queryClaudeSDK } from '../claude-sdk.js';
 import { spawnCursor } from '../cursor-cli.js';
 import { queryCodex } from '../openai-codex.js';
-import { spawnGemini } from '../gemini-cli.js';
 import { spawnAntigravity } from '../antigravity-cli.js';
 import { Octokit } from '@octokit/rest';
 import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, ANTIGRAVITY_MODELS } from '../../shared/modelConstants.js';
@@ -634,7 +633,7 @@ class ResponseCollector {
  *                          - Source for auto-generated branch names (if createBranch=true and no branchName)
  *                          - Fallback for PR title if no commits are made
  *
- * @param {string} provider - (Optional) AI provider to use. Options: 'claude' | 'cursor' | 'codex' | 'gemini' | 'antigravity'
+ * @param {string} provider - (Optional) AI provider to use. Options: 'claude' | 'cursor' | 'codex' | 'antigravity'
  *                           Default: 'claude'
  *
  * @param {boolean} stream - (Optional) Enable Server-Sent Events (SSE) streaming for real-time updates.
@@ -646,7 +645,7 @@ class ResponseCollector {
  *
  *                        Claude models: 'sonnet' (default), 'opus', 'haiku', 'opusplan', 'sonnet[1m]'
  *                        Cursor models: 'gpt-5' (default), 'gpt-5.2', 'gpt-5.2-high', 'sonnet-4.5', 'opus-4.5',
- *                                       'gemini-3-pro', 'composer-1', 'auto', 'gpt-5.1', 'gpt-5.1-high',
+ *                                       'composer-1', 'auto', 'gpt-5.1', 'gpt-5.1-high',
  *                                       'gpt-5.1-codex', 'gpt-5.1-codex-high', 'gpt-5.1-codex-max',
  *                                       'gpt-5.1-codex-max-high', 'opus-4.1', 'grok', and thinking variants
  *                        Codex models: 'gpt-5.2' (default), 'gpt-5.1-codex-max', 'o3', 'o4-mini'
@@ -752,7 +751,7 @@ class ResponseCollector {
  * Input Validations (400 Bad Request):
  *   - Either githubUrl OR projectPath must be provided (not neither)
  *   - message must be non-empty string
- *   - provider must be 'claude', 'cursor', 'codex', 'gemini', or 'antigravity'
+ *   - provider must be 'claude', 'cursor', 'codex', or 'antigravity'
  *   - createBranch/createPR requires githubUrl OR projectPath (not neither)
  *   - branchName must pass Git naming rules (if provided)
  *
@@ -860,8 +859,8 @@ router.post('/', validateExternalApiKey, async (req, res) => {
     return res.status(400).json({ error: 'message is required' });
   }
 
-  if (!['claude', 'cursor', 'codex', 'gemini', 'antigravity'].includes(provider)) {
-    return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", "gemini", or "antigravity"' });
+  if (!['claude', 'cursor', 'codex', 'antigravity'].includes(provider)) {
+    return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", or "antigravity"' });
   }
 
   // Validate GitHub branch/PR creation requirements
@@ -970,16 +969,6 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         sessionId: sessionId || null,
         model: model || CODEX_MODELS.DEFAULT,
         permissionMode: 'bypassPermissions'
-      }, writer);
-    } else if (provider === 'gemini') {
-      console.log('✨ Starting Gemini CLI session');
-
-      await spawnGemini(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model,
-        skipPermissions: true // CLI mode bypasses permissions
       }, writer);
     } else if (provider === 'antigravity') {
       console.log('🌌 Starting Antigravity CLI session');

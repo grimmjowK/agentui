@@ -5,7 +5,7 @@
  *   - 后端跑独立子进程（D2），以 SERVER_PORT=0 绑 127.0.0.1，通过 stdout 交接端口（D4）
  *   - 窗口在后端就绪前停在本地启动页（D8），就绪后导航到 http://127.0.0.1:<port>
  *   - 免登录走「持久化凭据 + 现有 /api/auth 接口」，绝不复用 IS_PLATFORM 免认证路径（D5）
- *   - GUI 启动时补全 PATH，否则 claude/codex/gemini/cursor 一律找不到（D7）
+ *   - GUI 启动时补全 PATH，否则 claude/codex/agy/cursor 一律找不到（D7）
  */
 
 import { app, BrowserWindow, shell, ipcMain, safeStorage, nativeTheme, screen, Menu, Notification } from 'electron';

@@ -19,7 +19,6 @@ const RESUME_ARGS: Record<string, (id: string) => string> = {
   claude: (id) => `claude --resume ${id}`,
   codex: (id) => `codex resume ${id}`,
   cursor: (id) => `cursor-agent --resume=${id}`,
-  gemini: (id) => `gemini --resume ${id}`,
   antigravity: (id) => `agy --conversation ${id}`,
 };
 

@@ -9,7 +9,6 @@ import {
   CLAUDE_MODELS,
   CODEX_MODELS,
   CURSOR_MODELS,
-  GEMINI_MODELS,
 } from '../../../../../shared/modelConstants';
 
 type ModelOption = { value: string; label: string; description?: string };
@@ -18,7 +17,6 @@ const MODELS_BY_PROVIDER: Record<string, { OPTIONS: ModelOption[] }> = {
   claude: CLAUDE_MODELS,
   codex: CODEX_MODELS,
   cursor: CURSOR_MODELS,
-  gemini: GEMINI_MODELS,
   antigravity: ANTIGRAVITY_MODELS,
 };
 

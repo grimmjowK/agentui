@@ -17,7 +17,6 @@ export const SKILLS_SUPPORTED_PROVIDERS: ReadonlySet<LLMProvider> = new Set([
   'claude',
   'cursor',
   'codex',
-  'gemini',
   'antigravity',
 ]);
 
