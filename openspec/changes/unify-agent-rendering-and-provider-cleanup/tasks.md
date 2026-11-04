@@ -93,5 +93,5 @@
 
 ## 11. 收尾與文件同步
 
-- [ ] 11.1 每個階段結束時執行 `npm run typecheck`、`npm run lint`、`npm run build` 與相關測試，全部通過才進入下一階段
-- [ ] 11.2 更新 `server/SERVER.md`、`server/modules/MODULES.md`、`server/modules/providers/README.md`、`src/components/chat/tools/README.md`，移除 gemini 相關說明，補上 runtime 介面、`chat-command`、兩個 mapper、`sessionsByProvider`、provider 資訊表、搜尋提取方法、Session Artifacts 與統一審批收件匣
+- [x] 11.1 每個階段結束時執行 `npm run typecheck`、`npm run lint`、`npm run build` 與相關測試，全部通過才進入下一階段
+- [x] 11.2 更新 `server/SERVER.md`、`server/modules/MODULES.md`、`server/modules/providers/README.md`、`src/components/chat/tools/README.md`，移除 gemini 相關說明，補上 runtime 介面、`chat-command`、兩個 mapper、`sessionsByProvider`、provider 資訊表、搜尋提取方法、Session Artifacts 與統一審批收件匣

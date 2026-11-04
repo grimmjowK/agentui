@@ -6,13 +6,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 import crossSpawn from 'cross-spawn';
-import { mapAgyStepUpdate } from './modules/providers/list/antigravity/antigravity-tool-mapper.js';
 
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { createNormalizedMessage, generateMessageId } from './shared/utils.js';
 import { resolveAntigravityExecutablePath } from './shared/antigravity-cli-path.js';
 import { ensureAntigravitySessionInCliStore } from './shared/antigravity-session-store.js';
-import { providerRegistry } from './modules/providers/provider.registry.js';
+import { mapAgyStepUpdate, providerRegistry } from './modules/providers/index.js';
 import { sessionsDb } from './modules/database/index.js';
 
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
