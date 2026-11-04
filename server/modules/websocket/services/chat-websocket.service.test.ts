@@ -100,3 +100,21 @@ test('check-session-status 透過 runtime.reconnect 回報狀態', async () => {
   await send({ type: 'check-session-status', provider: 'cursor', sessionId: 'live' });
   assert.deepEqual(ws.sent[0], { type: 'session-status', sessionId: 'live', provider: 'cursor', isProcessing: true });
 });
+
+test('chat-steer：provider 未實作時回傳 steer-rejected', async () => {
+  const { ws, send } = connect({ claude: fakeRuntime() });
+  await send({ type: 'chat-steer', provider: 'claude', sessionId: 's1', text: 'hi', clientId: 'c1' });
+  assert.deepEqual(ws.sent[0], { type: 'steer-rejected', provider: 'claude', sessionId: 's1', clientId: 'c1', text: 'hi', reason: 'unsupported' });
+});
+
+test('chat-steer：分派到 runtime.steer 並依結果回覆', async () => {
+  const calls: unknown[] = [];
+  let ok = true;
+  const { ws, send } = connect({ codex: fakeRuntime({ steer: async (...args) => { calls.push(args); return ok ? { ok } : { ok, reason: 'turn_not_started' }; } }) });
+  await send({ type: 'chat-steer', provider: 'codex', sessionId: 's1', text: 'hi', clientId: 'c1' });
+  ok = false;
+  await send({ type: 'chat-steer', provider: 'codex', sessionId: 's1', text: 'again', clientId: 'c2' });
+  assert.deepEqual(calls, [['s1', 7, 'hi'], ['s1', 7, 'again']]);
+  assert.equal(ws.sent[0].type, 'steer-accepted');
+  assert.deepEqual(ws.sent[1], { type: 'steer-rejected', provider: 'codex', sessionId: 's1', clientId: 'c2', text: 'again', reason: 'turn_not_started' });
+});

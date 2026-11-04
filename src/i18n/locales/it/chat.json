@@ -230,5 +230,9 @@
   },
   "messageMinimap": {
     "jumpToMessage": "Vai a questo messaggio"
+  },
+  "steer": {
+    "hint": "Invia ora per aggiungere l'istruzione al turno in corso",
+    "rejected": "Impossibile aggiungere l'istruzione al turno in corso ({{reason}}). Il testo è stato conservato."
   }
 }

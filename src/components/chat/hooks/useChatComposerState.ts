@@ -10,6 +10,7 @@ import type {
   TouchEvent,
 } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { useTranslation } from 'react-i18next';
 
 import { PROVIDER_INFO } from '../../../../shared/providers';
 import { authenticatedFetch } from '../../../utils/api';
@@ -147,6 +148,12 @@ export function useChatComposerState({
   const [uploadingImages, setUploadingImages] = useState<Map<string, number>>(new Map());
   const [imageErrors, setImageErrors] = useState<Map<string, string>>(new Map());
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
+  const { t } = useTranslation('chat');
+  // 執行中插話（design D9）：等待後端回覆期間不能再送第二則
+  const pendingSteerRef = useRef<{ clientId: string; text: string } | null>(null);
+  const [isSteerPending, setIsSteerPending] = useState(false);
+  const steerSessionId = currentSessionId || selectedSession?.id || null;
+  const canSteer = isLoading && PROVIDER_INFO[provider].capabilities.midTurnSteer && Boolean(steerSessionId);
   // 推理强度（effort）。跨消息、跨会话保持，不再每次发送后重置
   const [thinkingMode, setThinkingMode] = useState(() => safeLocalStorage.getItem(EFFORT_STORAGE_KEY) || 'default');
   useEffect(() => {
@@ -552,6 +559,20 @@ export function useChatComposerState({
         return;
       }
 
+      if (canSteer && !pendingCommand && steerSessionId) {
+        if (!currentInput.trim() || pendingSteerRef.current) return;
+        const clientId = crypto.randomUUID();
+        pendingSteerRef.current = { clientId, text: currentInput };
+        setIsSteerPending(true);
+        const sent = sendMessage({ type: 'chat-steer', provider, sessionId: steerSessionId, text: currentInput, clientId });
+        if (!sent) {
+          pendingSteerRef.current = null;
+          setIsSteerPending(false);
+          addMessage({ type: 'error', content: t('steer.rejected', { reason: 'disconnected' }), timestamp: new Date() });
+        }
+        return;
+      }
+
       if (!currentInput.trim() || isLoading || !selectedProject) {
         return;
       }
@@ -763,6 +784,9 @@ export function useChatComposerState({
       slashCommands,
       thinkingMode,
       pendingCommand,
+      canSteer,
+      steerSessionId,
+      t,
     ],
   );
 
@@ -1010,9 +1034,46 @@ export function useChatComposerState({
     [onInputFocusChange],
   );
 
+  /** 後端回覆 steer-accepted / steer-rejected：成功才清空輸入並加入使用者訊息，失敗保留輸入。 */
+  const handleSteerResult = useCallback(
+    (result: { type: string; clientId?: string | null; reason?: string }) => {
+      const pending = pendingSteerRef.current;
+      if (!pending || result.clientId !== pending.clientId) return;
+      pendingSteerRef.current = null;
+      setIsSteerPending(false);
+
+      if (result.type !== 'steer-accepted') {
+        addMessage({ type: 'error', content: t('steer.rejected', { reason: result.reason ?? 'rejected' }), timestamp: new Date() });
+        return;
+      }
+
+      addMessage({ type: 'user', content: pending.text, timestamp: new Date() });
+      // 等待期間若使用者已改寫輸入，就不覆蓋
+      if (inputValueRef.current === pending.text) {
+        setInput('');
+        inputValueRef.current = '';
+        setIsTextareaExpanded(false);
+        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      }
+      setTimeout(() => scrollToBottom(), 100);
+    },
+    [addMessage, scrollToBottom, t],
+  );
+
+  // 這一輪結束後就不會再有回覆，放掉等待狀態
+  useEffect(() => {
+    if (!isLoading && pendingSteerRef.current) {
+      pendingSteerRef.current = null;
+      setIsSteerPending(false);
+    }
+  }, [isLoading]);
+
   return {
     input,
     setInput,
+    canSteer,
+    isSteerPending,
+    handleSteerResult,
     textareaRef,
     inputHighlightRef,
     isTextareaExpanded,

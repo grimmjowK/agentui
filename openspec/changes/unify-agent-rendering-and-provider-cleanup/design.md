@@ -334,6 +334,12 @@ interface IProviderRuntime {
   - 型別立即抓到的差異：`initialize` 的 `clientInfo.title` 與 `capabilities.requestAttestation` 在 0.163 為必填（補上 `null` / `false`）；審批參數已沒有 `availableDecisions`（只有 0.155 會送），程式本來就會退回預設集合，改為明確當成舊欄位讀取；`webSearch.action` 是依種類帶 `query` 或 `url` 的 union。
   - `openai-codex.ts` 原本直接 import 其他模組內部檔案，轉成 `.ts` 後被 boundaries 規則檢查到，改從 `providers`、`websocket` 的入口引入；`notification-orchestrator.js` 歸入 `backend-legacy-runtime`。
   - 以真實 codex 0.163.0 跑一輪（建立會話 → Bash 工具 → 回覆）確認：`session_created`、`tool_use`、`status`、串流、`text`、`complete` 皆正常。
+- **階段三 · 執行中插話（8.0–8.5）**：
+  - **8.0 實測（codex 0.163.0）**：`turn/steer` 回傳 `{ turnId }`（同一輪）。插話內容寫進 rollout，形狀與一般使用者訊息相同：`response_item/message(role: user)` 加上 `event_msg/item_completed`（`UserMessage`），時間位置在送出插話的當下，也就是工具呼叫之前。現有的 rollout 映射本來就會把它還原成使用者訊息，所以歷史映射不需要修改。
+  - 前置條件與 RPC 呼叫抽成 `steerRun(state, …)`，方便以假 run 測試；任何失敗只回傳 `{ ok: false, reason }`，不呼叫 `fail()`。
+  - WebSocket 回覆 `steer-accepted` / `steer-rejected`，帶回前端送出的 `clientId`。前端收到 accepted 才加入使用者訊息並清空輸入；rejected 時保留輸入並顯示錯誤訊息。等待回覆期間不能再送第二則。
+  - 瀏覽器實測：Codex 執行 `sleep 20` 期間插話，這一輪沒有中斷，最終回覆遵循插話內容；重新整理後插話仍在原位置。Claude 的送出按鈕在執行中仍為停用（`midTurnSteer: false`）。
+  - 已知、與插話無關：Codex 執行中，即時畫面會把第一則助手文字與工具卡片各顯示兩次，重新整理後正常。沒有插話時也會發生，另行處理。
 
 ## Open Questions
 

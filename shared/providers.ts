@@ -59,7 +59,7 @@ export const PROVIDER_INFO: Record<LLMProvider, ProviderInfo> = {
     settingsStorageKey: 'cursor-tools-settings',
   },
   codex: {
-    capabilities: { midTurnSteer: false, images: false, effort: true, artifacts: false },
+    capabilities: { midTurnSteer: true, images: false, effort: true, artifacts: false },
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions'],
     defaultPermissionMode: 'default',
     mapPermissionMode: (mode) => (mode === 'plan' ? 'default' : mode),

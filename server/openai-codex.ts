@@ -266,6 +266,42 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
   }
 }
 
+type SteerableRun = Pick<RunState, 'userId' | 'turnId' | 'finished' | 'interrupted'> & {
+  rpc: Pick<CodexAppServer, 'request'> | null;
+};
+
+/**
+ * 依 D9 的前置條件把追加指令送進目前的 turn。任何失敗都只回傳 `{ ok: false }`，
+ * 不呼叫 fail()、不關閉 app-server，這一輪照常執行。
+ */
+export async function steerRun(
+  state: SteerableRun | undefined,
+  threadId: string,
+  userId: string | number | null,
+  text: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  if (!state) return { ok: false, reason: 'not_running' };
+  if (userId === null || state.userId === null || String(state.userId) !== String(userId)) {
+    return { ok: false, reason: 'not_owner' };
+  }
+  if (state.finished || state.interrupted) return { ok: false, reason: 'not_running' };
+  if (!state.turnId || !state.rpc) return { ok: false, reason: 'turn_not_started' };
+  if (!text.trim()) return { ok: false, reason: 'empty' };
+  try {
+    await state.rpc.request('turn/steer', {
+      threadId, expectedTurnId: state.turnId,
+      input: [{ type: 'text', text, text_elements: [] }],
+    }, 10000);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: (error as Error).message };
+  }
+}
+
+export function steerCodexSession(sessionId: string, userId: string | number | null, text: string) {
+  return steerRun(activeCodexSessions.get(sessionId), sessionId, userId, text);
+}
+
 export function resolveCodexApproval(requestId: string, userId: string | number | null, threadId: string, decision: unknown) {
   return codexApprovals.decide(requestId, userId, threadId, decision);
 }

@@ -283,5 +283,9 @@
   },
   "messageMinimap": {
     "jumpToMessage": "跳转到这条消息"
+  },
+  "steer": {
+    "hint": "现在发送会追加到正在执行的这一轮",
+    "rejected": "没能追加到正在执行的这一轮（{{reason}}），输入内容已保留，可以重新发送。"
   }
 }

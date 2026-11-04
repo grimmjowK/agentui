@@ -169,6 +169,9 @@ function ChatInterface({
     isInputFocused,
     pendingCommand,
     clearPendingCommand,
+    canSteer,
+    isSteerPending,
+    handleSteerResult,
     handleModelSwitch,
     currentModel,
     isModelMenuOpen,
@@ -249,6 +252,7 @@ function ChatInterface({
     onSessionNotProcessing,
     onNavigateToSession,
     onWebSocketReconnect: handleWebSocketReconnect,
+    onSteerResult: handleSteerResult,
     sessionStore,
   });
 
@@ -359,6 +363,8 @@ function ChatInterface({
           handleGrantToolPermission={handleGrantToolPermission}
           claudeStatus={claudeStatus}
           isLoading={isLoading}
+          canSteer={canSteer}
+          isSteerPending={isSteerPending}
           onAbortSession={handleAbortSession}
           provider={provider}
           permissionMode={permissionMode}

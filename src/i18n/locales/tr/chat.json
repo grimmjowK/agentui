@@ -230,5 +230,9 @@
   },
   "messageMinimap": {
     "jumpToMessage": "Bu mesaja atla"
+  },
+  "steer": {
+    "hint": "Şimdi gönderirsen talimat çalışan tura eklenir",
+    "rejected": "Talimat çalışan tura eklenemedi ({{reason}}). Metnin korundu, yeniden gönderebilirsin."
   }
 }

@@ -6,6 +6,7 @@ import {
   isCodexSessionActive,
   queryCodex,
   reconnectCodexSession,
+  steerCodexSession,
 } from '../../../../openai-codex.js';
 
 /** Wraps server/openai-codex.ts. The runtime emits its own terminal event after an abort. */
@@ -19,6 +20,10 @@ export class CodexRuntimeProvider implements IProviderRuntime {
     // (also verifies the caller owns the run).
     const ok = this.reconnect(sessionId, writer) && Boolean(abortCodexSession(sessionId));
     return { ok, emitsTerminal: true };
+  }
+
+  steer(sessionId: string, userId: string | number | null, text: string): Promise<{ ok: boolean; reason?: string }> {
+    return steerCodexSession(sessionId, userId, text);
   }
 
   isActive(sessionId: string): boolean {

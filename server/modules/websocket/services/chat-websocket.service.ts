@@ -163,6 +163,25 @@ export function handleChatConnection(
         return;
       }
 
+      if (messageType === 'chat-steer') {
+        const { id, runtime } = resolveRuntime(registry, data.provider);
+        const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
+        const text = typeof data.text === 'string' ? data.text : '';
+        const result = runtime.steer
+          ? await runtime.steer(sessionId, writer.userId, text)
+          : { ok: false, reason: 'unsupported' };
+        // clientId 原樣回傳，前端據此對應是哪一次送出
+        writer.send({
+          type: result.ok ? 'steer-accepted' : 'steer-rejected',
+          provider: id,
+          sessionId,
+          clientId: data.clientId ?? null,
+          text,
+          ...(result.ok ? {} : { reason: result.reason ?? 'rejected' }),
+        });
+        return;
+      }
+
       if (messageType === 'codex-permission-response') {
         const ok = dependencies.resolveCodexApproval(String(data.requestId || ''), writer.userId,
           String(data.sessionId || ''), data.decision);

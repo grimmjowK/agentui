@@ -68,6 +68,8 @@ interface UseChatRealtimeHandlersArgs {
   onSessionNotProcessing?: (sessionId?: string | null) => void;
   onNavigateToSession?: (sessionId: string, options?: SessionNavigationOptions) => void;
   onWebSocketReconnect?: () => void;
+  /** chat-steer 的結果，交給輸入區處理。 */
+  onSteerResult?: (result: { type: string; clientId?: string | null; reason?: string }) => void;
   sessionStore: SessionStore;
 }
 
@@ -94,6 +96,7 @@ export function useChatRealtimeHandlers({
   onSessionNotProcessing,
   onNavigateToSession,
   onWebSocketReconnect,
+  onSteerResult,
   sessionStore,
 }: UseChatRealtimeHandlersArgs) {
   const paletteOps = usePaletteOps();
@@ -119,6 +122,11 @@ export function useChatRealtimeHandlers({
       switch (messageType) {
         case 'websocket-reconnected':
           onWebSocketReconnect?.();
+          return;
+
+        case 'steer-accepted':
+        case 'steer-rejected':
+          onSteerResult?.(msg);
           return;
 
         case 'pending-permissions-response': {
@@ -433,6 +441,7 @@ export function useChatRealtimeHandlers({
     onSessionNotProcessing,
     onNavigateToSession,
     onWebSocketReconnect,
+    onSteerResult,
     sessionStore,
     paletteOps,
   ]);

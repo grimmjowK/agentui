@@ -70,7 +70,11 @@ export interface IProviderRuntime {
   /** Re-attaches a running session to a new writer; returns whether it is still running. */
   reconnect(sessionId: string, writer: ProviderRuntimeWriter): boolean;
   listActive(): unknown;
-  steer?(sessionId: string, userId: unknown, text: string): Promise<{ ok: boolean; reason?: string }>;
+  /**
+   * 執行中追加指令，不中斷這一輪（design D9）。前置條件不成立或 provider 拒絕時回傳
+   * `{ ok: false, reason }`，這一輪照常執行。
+   */
+  steer?(sessionId: string, userId: string | number | null, text: string): Promise<{ ok: boolean; reason?: string }>;
   getPendingApprovals?(userId: string | number | null, sessionId?: string): PendingApprovalItem[];
 }
 

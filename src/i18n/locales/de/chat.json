@@ -230,5 +230,9 @@
   },
   "messageMinimap": {
     "jumpToMessage": "Zu dieser Nachricht springen"
+  },
+  "steer": {
+    "hint": "Jetzt senden, um die Anweisung zum laufenden Durchgang hinzuzufügen",
+    "rejected": "Die Anweisung konnte dem laufenden Durchgang nicht hinzugefügt werden ({{reason}}). Dein Text bleibt erhalten."
   }
 }

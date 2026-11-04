@@ -58,6 +58,9 @@ interface ChatComposerProps {
   handleGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
   claudeStatus: { text: string; tokens: number; can_interrupt: boolean } | null;
   isLoading: boolean;
+  /** 執行中仍可送出，改為插話（provider 支援 midTurnSteer）。 */
+  canSteer?: boolean;
+  isSteerPending?: boolean;
   onAbortSession: () => void;
   provider: Provider | string;
   permissionMode: PermissionMode | string;
@@ -120,6 +123,8 @@ export default function ChatComposer({
   handleGrantToolPermission,
   claudeStatus,
   isLoading,
+  canSteer = false,
+  isSteerPending = false,
   onAbortSession,
   provider,
   permissionMode,
@@ -454,7 +459,9 @@ export default function ChatComposer({
               onOpenChange={onModelMenuOpenChange}
             />
             <PromptInputSubmit
-              disabled={(!input.trim() && !pendingCommand) || isLoading}
+              disabled={(!input.trim() && !pendingCommand) || (isLoading && !canSteer) || isSteerPending}
+              status={canSteer ? 'ready' : undefined}
+              title={canSteer ? t('steer.hint') : undefined}
               className="h-10 w-10 sm:h-10 sm:w-10"
               onMouseDown={(event) => {
                 event.preventDefault();

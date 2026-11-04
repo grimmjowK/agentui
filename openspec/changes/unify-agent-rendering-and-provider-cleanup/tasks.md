@@ -69,12 +69,12 @@
 
 ## 8. 階段三：執行中插話
 
-- [ ] 8.0 用真實 Codex 插話一次，檢查 rollout 是否寫入插話內容、條目形狀與時間位置，結論記入 design.md；未寫入則 8.1–8.5 不實作、`midTurnSteer` 維持 `false`
-- [ ] 8.1 Codex runtime 轉接實作 `steer(sessionId, userId, text)`：依 spec 檢查前置條件後呼叫 `turn/steer`（帶 `expectedTurnId`），失敗時回傳 `{ ok: false, reason }`，不中止這一輪；歷史映射把 rollout 中的插話條目還原為使用者訊息；資訊表中 codex 的 `midTurnSteer` 設為 `true`
-- [ ] 8.2 `chat-websocket.service.ts` 新增 `chat-steer { provider, sessionId, text }`，分派到 `runtime.steer`；provider 未實作或回傳失敗時送出 `steer-rejected`
-- [ ] 8.3 為插話的前置條件與失敗處理新增測試：turn 尚未開始、其他使用者、已按中斷、provider 未實作、app-server 回傳錯誤時這一輪繼續執行
-- [ ] 8.4 前端輸入區依資訊表在執行中保持可送出並改走 `chat-steer`，插話成功時在對話流加入使用者訊息，被拒絕時保留輸入並顯示提示，補 i18n
-- [ ] 8.5 在本機以真實 Codex 驗證：執行中插話被採納且這一輪未中斷、重新整理後插話仍在原位置；Claude 執行中送出按鈕仍為停用
+- [x] 8.0 用真實 Codex 插話一次，檢查 rollout 是否寫入插話內容、條目形狀與時間位置，結論記入 design.md；未寫入則 8.1–8.5 不實作、`midTurnSteer` 維持 `false`
+- [x] 8.1 Codex runtime 轉接實作 `steer(sessionId, userId, text)`：依 spec 檢查前置條件後呼叫 `turn/steer`（帶 `expectedTurnId`），失敗時回傳 `{ ok: false, reason }`，不中止這一輪；歷史映射把 rollout 中的插話條目還原為使用者訊息；資訊表中 codex 的 `midTurnSteer` 設為 `true`
+- [x] 8.2 `chat-websocket.service.ts` 新增 `chat-steer { provider, sessionId, text }`，分派到 `runtime.steer`；provider 未實作或回傳失敗時送出 `steer-rejected`
+- [x] 8.3 為插話的前置條件與失敗處理新增測試：turn 尚未開始、其他使用者、已按中斷、provider 未實作、app-server 回傳錯誤時這一輪繼續執行
+- [x] 8.4 前端輸入區依資訊表在執行中保持可送出並改走 `chat-steer`，插話成功時在對話流加入使用者訊息，被拒絕時保留輸入並顯示提示，補 i18n
+- [x] 8.5 在本機以真實 Codex 驗證：執行中插話被採納且這一輪未中斷、重新整理後插話仍在原位置；Claude 執行中送出按鈕仍為停用
 
 ## 9. 階段三：Session Artifacts 側邊欄（對話流外能力 #13，僅在任務 1.5 確認有產物時實作）
 
