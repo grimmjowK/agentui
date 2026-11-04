@@ -324,10 +324,15 @@ interface IProviderRuntime {
   - `projects` 模組沒有直接依賴 provider registry（`providers → projects` 已有一條執行期 import，避免加深循環），分組鍵改用 `shared/providers.ts` 的 `PROVIDER_IDS`，與 registry 型別同源。
   - 前端 `src/utils/projectSessions.ts` 提供 `getProjectSessions(project, provider?)`（帶 `__provider`）與 `mapProjectSessions`；順手修正命令面板中非 Antigravity 的會話少了 `__provider`。
   - 瀏覽器確認：每個 provider 的游標在啟動同步後各自寫入；側邊欄混合 provider 的會話清單、由 URL 還原會話與 provider 均正常。
+- **階段二 · 全文檢索（6.1–6.5）**：
+  - `SearchableMessage.role` 另有 `'summary'`：只用來產生結果的會話摘要，以最後一則為準，不參與比對。這樣 Claude 的 summary 行、leafUuid 與 compact summary 優先序，以及 Codex「以最後一則使用者訊息為摘要」都留在各自的 facet，搜尋服務只剩「summary → 最後一則使用者 → 最後一則助手」的通用規則。
+  - 基準比對：以真實資料庫的 Claude 540 筆、Codex 114 筆會話跑 10 組關鍵字，搬移前後的命中會話與片段相同；唯一差異是另一個視窗在兩次執行之間寫入的會話。
+  - Antigravity 只搜尋 `USER_INPUT`（取 `<USER_REQUEST>` 內文）與 `PLANNER_RESPONSE` 的 `content`，不含工具輸出（`GENERIC`）與 `SYSTEM_MESSAGE`。
+  - **cursor（6.4）**：開發機的 `~/.cursor/projects` 與 `~/.cursor/chats` 皆為空，也沒有安裝 cursor-agent，無法以真實資料確認，所以先不實作。現有 synchronizer 會從這些 JSONL 的 `role: 'user'` 行讀 `message.content[0].text` 當會話名稱，可見至少有使用者文字；取得真實檔案後確認助手訊息的形狀，再補 `extractSearchableMessages`。在那之前搜尋回應的 `unsearchableProviders` 為 `['cursor']`，側邊欄會顯示提示。
 
 ## Open Questions
 
-- cursor 的 `~/.cursor/projects/**.jsonl` 是否含有可搜尋的訊息文字？（D5，實作時以真實資料確認）
+- cursor 的 `~/.cursor/projects/**.jsonl` 是否含有可搜尋的訊息文字？（D5）**未能確認**：開發機沒有 cursor 資料，暫不實作，見上方「階段二 · 全文檢索」。
 - ~~Antigravity 是否會產生與 gemini 同名的工具？~~ **會**：`read_file`、`write_file` 與 gemini 工具設定同名。但 Antigravity 已在後端映射為 `Read`/`Write`，前端不再依賴這些名稱，因此 gemini 專用工具設定可以全部刪除（3.1）。
 - ~~Antigravity CLI 是否會在 `brain/<id>/` 頂層寫出 `.md` 產物？~~ **會**：實測寫出 `task.md`（附 `task.md.metadata.json`，含 `summary`、`updatedAt`、`userFacing`），頂層另有 `scratch/`、`.user_uploaded/`、`.system_generated/` 目錄。第 9 組依 D15 實作，只讀頂層 `.md`。
 - `turn/steer` 的插話內容是否寫入 rollout？條目形狀為何？（D9 的開關，任務 8.1 實測）

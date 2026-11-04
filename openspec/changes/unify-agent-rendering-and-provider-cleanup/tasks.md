@@ -55,11 +55,11 @@
 
 ## 6. 階段二：全文檢索
 
-- [ ] 6.1 `IProviderSessions` 新增可選的 `extractSearchableMessages(filePath)`；先在改動前錄下一組 Claude/Codex 的搜尋基準結果
-- [ ] 6.2 把 `session-conversations-search.service.ts` 中 Claude、Codex 的提取邏輯搬進各自的 facet，搜尋範圍改為依實作動態決定，並以 6.1 的基準確認結果不變
-- [ ] 6.3 實作 Antigravity 的 `extractSearchableMessages`（讀 `transcript.jsonl`），新增測試
-- [ ] 6.4 用真實資料確認 cursor 的 `~/.cursor/projects/**.jsonl` 是否含訊息文字：有則實作提取方法，無則把結論記入 design.md
-- [ ] 6.5 搜尋回應新增 `unsearchableProviders`，前端搜尋結果區顯示提示並補 i18n
+- [x] 6.1 `IProviderSessions` 新增可選的 `extractSearchableMessages(filePath)`；先在改動前錄下一組 Claude/Codex 的搜尋基準結果
+- [x] 6.2 把 `session-conversations-search.service.ts` 中 Claude、Codex 的提取邏輯搬進各自的 facet，搜尋範圍改為依實作動態決定，並以 6.1 的基準確認結果不變
+- [x] 6.3 實作 Antigravity 的 `extractSearchableMessages`（讀 `transcript.jsonl`），新增測試
+- [x] 6.4 用真實資料確認 cursor 的 `~/.cursor/projects/**.jsonl` 是否含訊息文字：有則實作提取方法，無則把結論記入 design.md
+- [x] 6.5 搜尋回應新增 `unsearchableProviders`，前端搜尋結果區顯示提示並補 i18n
 
 ## 7. 階段三：Codex 協議型別
 

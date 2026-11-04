@@ -522,7 +522,7 @@ router.get('/search/sessions', asyncHandler(async (req: Request, res: Response) 
   });
 
   try {
-    await sessionConversationsSearchService.search({
+    const { unsearchableProviders } = await sessionConversationsSearchService.search({
       query,
       limit,
       signal: abortController.signal,
@@ -541,7 +541,7 @@ router.get('/search/sessions', asyncHandler(async (req: Request, res: Response) 
     });
 
     if (!closed) {
-      res.write('event: done\ndata: {}\n\n');
+      res.write(`event: done\ndata: ${JSON.stringify({ unsearchableProviders })}\n\n`);
     }
   } catch (error) {
     console.error('Error searching conversations:', error);

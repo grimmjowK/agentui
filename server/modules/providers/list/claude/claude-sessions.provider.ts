@@ -6,6 +6,7 @@ import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
+import { extractClaudeSearchableMessages } from '@/modules/providers/list/claude/claude-searchable-messages.js';
 
 const PROVIDER = 'claude';
 
@@ -395,6 +396,8 @@ function buildAttachmentMessageFields(attachment: AnyRecord): {
 }
 
 export class ClaudeSessionsProvider implements IProviderSessions {
+  extractSearchableMessages = extractClaudeSearchableMessages;
+
   /**
    * Normalizes one Claude JSONL entry or live SDK stream event into the shared
    * message shape consumed by REST and WebSocket clients.

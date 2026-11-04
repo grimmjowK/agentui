@@ -133,7 +133,23 @@ export interface IProviderMcp {
 export interface IProviderSessions {
   normalizeMessage(raw: unknown, sessionId: string | null): NormalizedMessage[];
   fetchHistory(sessionId: string, options?: FetchHistoryOptions): Promise<FetchHistoryResult>;
+  /**
+   * 從會話檔案提取可搜尋的訊息（design D5）。未實作的 provider 不在全文檢索範圍內，
+   * 搜尋回應會以 `unsearchableProviders` 告知。
+   */
+  extractSearchableMessages?(filePath: string): AsyncIterable<SearchableMessage>;
 }
+
+/** 全文檢索用的一則訊息。 */
+export type SearchableMessage = {
+  /** 多個會話共用一個檔案時（Claude）標明所屬會話；省略則屬於該檔案對應的會話。 */
+  sessionId?: string;
+  /** `summary` 只用來產生結果的會話摘要（最後一則為準），不參與比對。 */
+  role: 'user' | 'assistant' | 'summary';
+  text: string;
+  timestamp?: string | null;
+  messageUuid?: string | null;
+};
 
 // ---------------------------
 //----------------- PROVIDER SESSION SYNCHRONIZER INTERFACE ------------

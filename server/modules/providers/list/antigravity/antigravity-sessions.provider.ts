@@ -3,9 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 
-import type { IProviderSessions } from '@/shared/interfaces.js';
+import type { IProviderSessions, SearchableMessage } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
-import { createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
+import { createNormalizedMessage, generateMessageId, readJsonlEntries } from '@/shared/utils.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 import {
   agyToolId,
@@ -16,6 +16,13 @@ import {
 } from '@/modules/providers/list/antigravity/antigravity-tool-mapper.js';
 
 const PROVIDER = 'antigravity';
+
+/** USER_INPUT 的內容包在 `<USER_REQUEST>` 裡，外層還有系統附加的中繼資料。 */
+function readUserRequest(content: unknown): string {
+  const text = typeof content === 'string' ? content : '';
+  const match = text.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
+  return match ? match[1].trim() : text;
+}
 
 export class AntigravitySessionsProvider implements IProviderSessions {
   /**
@@ -55,6 +62,24 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     }
 
     return [];
+  }
+
+  /**
+   * 搜尋只看使用者輸入（USER_INPUT）與模型回覆（PLANNER_RESPONSE 的 content），
+   * 不含工具輸出（GENERIC）與系統訊息。
+   */
+  async *extractSearchableMessages(filePath: string): AsyncGenerator<SearchableMessage> {
+    for await (const entry of readJsonlEntries(filePath)) {
+      const timestamp = entry.created_at ? String(entry.created_at) : null;
+      if (entry.type === 'USER_INPUT') {
+        const text = readUserRequest(entry.content);
+        if (text.trim()) {
+          yield { role: 'user', text, timestamp };
+        }
+      } else if (entry.type === 'PLANNER_RESPONSE' && typeof entry.content === 'string' && entry.content.trim()) {
+        yield { role: 'assistant', text: entry.content, timestamp };
+      }
+    }
   }
 
   /**
@@ -118,11 +143,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
           // 1. Antigravity transcript format
           // USER_INPUT step
           if (entry.type === 'USER_INPUT' || entry.source === 'USER_EXPLICIT') {
-            let content = typeof entry.content === 'string' ? entry.content : '';
-            const requestMatch = content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-            if (requestMatch) {
-              content = requestMatch[1].trim();
-            }
+            const content = readUserRequest(entry.content);
             if (content.trim()) {
               normalized.push(
                 createNormalizedMessage({

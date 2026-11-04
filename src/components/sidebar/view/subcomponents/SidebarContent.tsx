@@ -173,6 +173,14 @@ export default function SidebarContent({
 }: SidebarContentProps) {
   const showConversationSearch = searchMode === 'conversations' && searchFilter.trim().length >= 2;
   const hasPartialResults = conversationResults && conversationResults.results.length > 0;
+  const unsearchableProviders = conversationResults?.unsearchableProviders ?? [];
+  const unsearchableNotice = unsearchableProviders.length > 0 ? (
+    <p className="px-1 text-[11px] text-muted-foreground/70">
+      {t('search.unsearchableProviders', {
+        providers: unsearchableProviders.map((provider) => t(`chat:messageTypes.${provider}`)).join(', '),
+      })}
+    </p>
+  ) : null;
   const groupedArchivedSessions = groupArchivedSessionsByProject(archivedSessions);
 
   return (
@@ -220,6 +228,7 @@ export default function SidebarContent({
               </div>
               <h3 className="mb-2 text-base font-medium text-foreground md:mb-1">{t('search.noResults')}</h3>
               <p className="text-sm text-muted-foreground">{t('search.tryDifferentQuery')}</p>
+              {unsearchableNotice && <div className="mt-3">{unsearchableNotice}</div>}
             </div>
           ) : hasPartialResults ? (
             <div className="space-y-3 px-2">
@@ -244,6 +253,7 @@ export default function SidebarContent({
                   />
                 </div>
               )}
+              {unsearchableNotice}
               {conversationResults.results.map((projectResult) => (
                 <div key={projectResult.projectName} className="space-y-1">
                   <div className="flex items-center gap-1.5 px-1 py-1">

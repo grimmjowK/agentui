@@ -120,7 +120,8 @@
     "matches_one": "{{count}} eşleşme",
     "matches_other": "{{count}} eşleşme",
     "projectsScanned_one": "{{count}} proje tarandı",
-    "projectsScanned_other": "{{count}} proje tarandı"
+    "projectsScanned_other": "{{count}} proje tarandı",
+    "unsearchableProviders": "Aranmadı: {{providers}} konuşmaları"
   },
   "deleteConfirmation": {
     "deleteProject": "Projeyi Kaldır",

@@ -120,7 +120,8 @@
     "matches_one": "{{count}} Treffer",
     "matches_other": "{{count}} Treffer",
     "projectsScanned_one": "{{count}} Projekt durchsucht",
-    "projectsScanned_other": "{{count}} Projekte durchsucht"
+    "projectsScanned_other": "{{count}} Projekte durchsucht",
+    "unsearchableProviders": "Nicht durchsucht: {{providers}}-Unterhaltungen"
   },
   "deleteConfirmation": {
     "deleteProject": "Projekt entfernen",

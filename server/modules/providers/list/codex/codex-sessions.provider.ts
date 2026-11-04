@@ -6,6 +6,7 @@ import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMess
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 import { mapRolloutEntry, type MappedMessage } from '@/modules/providers/list/codex/codex-item-mapper.js';
+import { extractCodexSearchableMessages } from '@/modules/providers/list/codex/codex-searchable-messages.js';
 
 const PROVIDER = 'codex';
 
@@ -245,6 +246,8 @@ async function getCodexSessionMessages(
 }
 
 export class CodexSessionsProvider implements IProviderSessions {
+  extractSearchableMessages = extractCodexSearchableMessages;
+
   /**
    * Normalizes a persisted Codex JSONL entry.
    *

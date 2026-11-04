@@ -123,7 +123,8 @@
     "matches_one": "{{count}} 个匹配",
     "matches_other": "{{count}} 个匹配",
     "projectsScanned_one": "{{count}} 个项目已扫描",
-    "projectsScanned_other": "{{count}} 个项目已扫描"
+    "projectsScanned_other": "{{count}} 个项目已扫描",
+    "unsearchableProviders": "未搜索：{{providers}} 的会话"
   },
   "deleteConfirmation": {
     "deleteProject": "移除项目",
