@@ -5,14 +5,14 @@ import os from 'os';
 import { promises as fs } from 'fs';
 import crypto from 'crypto';
 import { userDb, apiKeysDb, githubTokensDb, projectsDb } from '../modules/database/index.js';
-import { queryClaudeSDK } from '../claude-sdk.js';
-import { spawnCursor } from '../cursor-cli.js';
-import { queryCodex } from '../openai-codex.js';
-import { spawnAntigravity } from '../antigravity-cli.js';
+import { providerRegistry } from '../modules/providers/index.js';
 import { Octokit } from '@octokit/rest';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, ANTIGRAVITY_MODELS } from '../../shared/modelConstants.js';
+import { CODEX_MODELS, ANTIGRAVITY_MODELS } from '../../shared/modelConstants.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { normalizeProjectPath } from '../shared/utils.js';
+
+// Claude and Cursor fall back to their own CLI defaults when no model is given.
+const DEFAULT_MODELS = { codex: CODEX_MODELS.DEFAULT, antigravity: ANTIGRAVITY_MODELS.DEFAULT };
 
 const router = express.Router();
 
@@ -938,49 +938,18 @@ router.post('/', validateExternalApiKey, async (req, res) => {
       });
     }
 
-    // Start the appropriate session
-    if (provider === 'claude') {
-      console.log('🤖 Starting Claude SDK session');
-
-      await queryClaudeSDK(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model,
-        permissionMode: 'bypassPermissions' // Bypass all permissions for API calls
-      }, writer);
-
-    } else if (provider === 'cursor') {
-      console.log('🖱️ Starting Cursor CLI session');
-
-      await spawnCursor(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model || undefined,
-        skipPermissions: true // Bypass permissions for Cursor
-      }, writer);
-    } else if (provider === 'codex') {
-      console.log('🤖 Starting Codex SDK session');
-
-      await queryCodex(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model || CODEX_MODELS.DEFAULT,
-        permissionMode: 'bypassPermissions'
-      }, writer);
-    } else if (provider === 'antigravity') {
-      console.log('🌌 Starting Antigravity CLI session');
-
-      await spawnAntigravity(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model || ANTIGRAVITY_MODELS.DEFAULT,
-        permissionMode: 'bypassPermissions' // External API runs without interactive approval
-      }, writer);
-    }
+    // Start the session through the provider registry. External API runs never
+    // wait for interactive approval: Claude/Codex/Antigravity read permissionMode,
+    // Cursor reads skipPermissions.
+    console.log(`🤖 Starting ${provider} session`);
+    await providerRegistry.resolveProvider(provider).runtime.start(message.trim(), {
+      projectPath: finalProjectPath,
+      cwd: finalProjectPath,
+      sessionId: sessionId || null,
+      model: model || DEFAULT_MODELS[provider],
+      permissionMode: 'bypassPermissions',
+      skipPermissions: true,
+    }, writer);
 
     // Handle GitHub branch and PR creation after successful agent completion
     let branchInfo = null;

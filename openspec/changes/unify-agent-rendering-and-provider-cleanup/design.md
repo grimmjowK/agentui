@@ -313,6 +313,12 @@ interface IProviderRuntime {
   - 小寫 `exit_plan_mode` 確認只出現在 gemini（本機 Claude 歷史 43 個檔案全用 `ExitPlanMode`），一併刪除。
   - 刪除 `GeminiLogo` 後改為 `AntigravityLogo`（沿用 `gemini-ai-icon.svg`）；順手修正 Antigravity 會話在側邊欄、頁首、輸入框提示、狀態列錯用 Claude 名稱/圖示的問題（改以 provider id 取 i18n 鍵）。
   - **保留**：`cloudcli sandbox -a gemini`（`server/cli.js` 與 `docker/gemini/`）是在 docker 裡跑 CLI 的獨立功能，與聊天 provider 無關；`openspec/specs/gemini-*` 於 archive 時依 delta spec 移除。
+- **階段二 · 執行層（4.1–4.8）**：
+  - `IProviderRuntime` 的 writer 用結構型別 `ProviderRuntimeWriter`，WebSocket 與 `routes/agent.js` 的 SSE writer 共用。轉接層在方法內才讀取 import 的根目錄函式，避開 `claude-sdk.js` ↔ provider registry 的 ESM 循環（伺服器啟動冒煙測試通過）。
+  - eslint `backend-legacy-runtime` 元素加入四個根目錄執行檔，允許 provider 轉接層 import。
+  - 分派層：未知訊息類型與未註冊 provider 一律回 `error`；`get-pending-permissions` 只在有 provider 擁有該活躍會話時回覆（空回覆會清掉其他 provider 經即時流重放的審批）。
+  - `shared/providers.ts` 是 provider 清單唯一來源：前後端 `LLMProvider`、前端 `PermissionMode` 皆由此推導；另含 `settingsStorageKey`。統一送出時帶 superset 參數：經確認 `options.skipPermissions` 只有 Cursor 讀、Antigravity 讀 `permissionMode`、Codex 忽略 `toolsSettings`，行為與改動前一致。
+  - 4.8 瀏覽器實測：Claude、Codex、Antigravity 的送出、中斷（每次正好一個 `complete(aborted)`）、執行中重新整理後恢復「執行中」並正常收尾全部通過。**Cursor 未實測**（本機未安裝 `cursor-agent`），僅由分派層單元測試覆蓋。
 
 ## Open Questions
 

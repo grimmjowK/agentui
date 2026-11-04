@@ -65,14 +65,8 @@ function ChatInterface({
   const {
     provider,
     setProvider,
-    cursorModel,
-    setCursorModel,
-    claudeModel,
-    setClaudeModel,
-    codexModel,
-    setCodexModel,
-    antigravityModel,
-    setAntigravityModel,
+    modelByProvider,
+    setModelFor,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -186,14 +180,8 @@ function ChatInterface({
     provider,
     permissionMode,
     cyclePermissionMode,
-    cursorModel,
-    claudeModel,
-    codexModel,
-    antigravityModel,
-    setClaudeModel,
-    setCursorModel,
-    setCodexModel,
-    setAntigravityModel,
+    modelByProvider,
+    setModelFor,
     isLoading,
     canAbortSession,
     tokenBudget,
@@ -337,14 +325,8 @@ function ChatInterface({
           provider={provider}
           setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
           textareaRef={textareaRef}
-          claudeModel={claudeModel}
-          setClaudeModel={setClaudeModel}
-          cursorModel={cursorModel}
-          setCursorModel={setCursorModel}
-          codexModel={codexModel}
-          setCodexModel={setCodexModel}
-          antigravityModel={antigravityModel}
-          setAntigravityModel={setAntigravityModel}
+          modelByProvider={modelByProvider}
+          setModelFor={setModelFor}
           tasksEnabled={tasksEnabled}
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}

@@ -1,3 +1,4 @@
+export { providerRegistry } from './provider.registry.js';
 export { sessionSynchronizerService } from './services/session-synchronizer.service.js';
 export { providerSkillsService } from './services/skills.service.js';
 export { sessionPinService } from './services/session-pin.service.js';

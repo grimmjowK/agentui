@@ -21,14 +21,8 @@ interface ChatMessagesPaneProps {
   provider: LLMProvider;
   setProvider: (provider: LLMProvider) => void;
   textareaRef: RefObject<HTMLTextAreaElement>;
-  claudeModel: string;
-  setClaudeModel: (model: string) => void;
-  cursorModel: string;
-  setCursorModel: (model: string) => void;
-  codexModel: string;
-  setCodexModel: (model: string) => void;
-  antigravityModel?: string;
-  setAntigravityModel?: (model: string) => void;
+  modelByProvider: Record<LLMProvider, string>;
+  setModelFor: (provider: LLMProvider, model: string) => void;
   tasksEnabled: boolean;
   isTaskMasterInstalled: boolean | null;
   onShowAllTasks?: (() => void) | null;
@@ -66,14 +60,8 @@ export default function ChatMessagesPane({
   provider,
   setProvider,
   textareaRef,
-  claudeModel,
-  setClaudeModel,
-  cursorModel,
-  setCursorModel,
-  codexModel,
-  setCodexModel,
-  antigravityModel,
-  setAntigravityModel,
+  modelByProvider,
+  setModelFor,
   tasksEnabled,
   isTaskMasterInstalled,
   onShowAllTasks,
@@ -149,14 +137,8 @@ export default function ChatMessagesPane({
           provider={provider}
           setProvider={setProvider}
           textareaRef={textareaRef}
-          claudeModel={claudeModel}
-          setClaudeModel={setClaudeModel}
-          cursorModel={cursorModel}
-          setCursorModel={setCursorModel}
-          codexModel={codexModel}
-          setCodexModel={setCodexModel}
-          antigravityModel={antigravityModel}
-          setAntigravityModel={setAntigravityModel}
+          modelByProvider={modelByProvider}
+          setModelFor={setModelFor}
           tasksEnabled={tasksEnabled}
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}

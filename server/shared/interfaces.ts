@@ -25,6 +25,53 @@ export interface IProvider {
   readonly skills: IProviderSkills;
   readonly sessions: IProviderSessions;
   readonly sessionSynchronizer: IProviderSessionSynchronizer;
+  readonly runtime: IProviderRuntime;
+}
+
+// ---------------------------
+//----------------- PROVIDER RUNTIME INTERFACE ------------
+/**
+ * Transport accepted by provider runtimes: WebSocket writers (chat panel) and
+ * SSE writers (external agent API) share this structural shape.
+ */
+export type ProviderRuntimeWriter = {
+  send(data: unknown): void;
+  userId?: string | number | null;
+  /** Raw socket, present on WebSocket writers only. */
+  ws?: unknown;
+  setSessionId?(sessionId: string): void;
+};
+
+/** One pending tool-approval request awaiting a user decision. */
+export type PendingApprovalItem = {
+  requestId: string;
+  toolName: string;
+  input?: unknown;
+  context?: unknown;
+  sessionId: string;
+  receivedAt: Date | string;
+};
+
+/**
+ * Execution contract for one provider (design D11).
+ *
+ * Adapters wrap the existing root-level runtime functions without changing
+ * their internal behavior; provider-specific quirks are absorbed here.
+ */
+export interface IProviderRuntime {
+  /** Starts (or resumes, via `options.sessionId` / `options.resume`) one chat run. */
+  start(command: string, options: Record<string, unknown>, writer: ProviderRuntimeWriter): Promise<void>;
+  /**
+   * Interrupts a run. `emitsTerminal` tells the dispatcher whether the runtime
+   * itself sends the terminal `complete` event, so every abort yields exactly one.
+   */
+  abort(sessionId: string, writer: ProviderRuntimeWriter): Promise<{ ok: boolean; emitsTerminal: boolean }>;
+  isActive(sessionId: string): boolean;
+  /** Re-attaches a running session to a new writer; returns whether it is still running. */
+  reconnect(sessionId: string, writer: ProviderRuntimeWriter): boolean;
+  listActive(): unknown;
+  steer?(sessionId: string, userId: unknown, text: string): Promise<{ ok: boolean; reason?: string }>;
+  getPendingApprovals?(userId: string | number | null, sessionId?: string): PendingApprovalItem[];
 }
 
 // ---------------------------

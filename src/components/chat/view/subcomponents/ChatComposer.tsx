@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { PROVIDER_INFO, isLLMProvider } from '../../../../../shared/providers';
 import type {
   ChangeEvent,
   ClipboardEvent,
@@ -397,7 +398,7 @@ export default function ChatComposer({
               </div>
             </button>
 
-            {(provider === 'claude' || provider === 'codex') && (
+            {isLLMProvider(provider) && PROVIDER_INFO[provider].capabilities.effort && (
               <ThinkingModeSelector provider={provider} selectedMode={thinkingMode} onModeChange={setThinkingMode} onClose={() => {}} className="" />
             )}
 

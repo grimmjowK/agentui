@@ -11,7 +11,7 @@ import type {
 } from 'react';
 import { useDropzone } from 'react-dropzone';
 
-import { ANTIGRAVITY_MODELS } from '../../../../shared/modelConstants';
+import { PROVIDER_INFO } from '../../../../shared/providers';
 import { authenticatedFetch } from '../../../utils/api';
 import { EFFORT_STORAGE_KEY, resolveEffort } from '../constants/thinkingModes';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
@@ -39,14 +39,8 @@ interface UseChatComposerStateArgs {
   provider: LLMProvider;
   permissionMode: PermissionMode | string;
   cyclePermissionMode: () => void;
-  cursorModel: string;
-  claudeModel: string;
-  codexModel: string;
-  antigravityModel?: string;
-  setClaudeModel: (model: string) => void;
-  setCursorModel: (model: string) => void;
-  setCodexModel: (model: string) => void;
-  setAntigravityModel?: (model: string) => void;
+  modelByProvider: Record<LLMProvider, string>;
+  setModelFor: (provider: LLMProvider, model: string) => void;
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
@@ -115,14 +109,8 @@ export function useChatComposerState({
   provider,
   permissionMode,
   cyclePermissionMode,
-  cursorModel,
-  claudeModel,
-  codexModel,
-  antigravityModel,
-  setClaudeModel,
-  setCursorModel,
-  setCodexModel,
-  setAntigravityModel,
+  modelByProvider,
+  setModelFor,
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -190,23 +178,9 @@ export function useChatComposerState({
   const handleModelSwitch = useCallback((modelValue: string) => {
     // 已有 session 只記到該 session；新 session 才更新全域預設
     const sessionId = selectedSession?.id;
-    const persist = (globalKey: string) => {
-      if (sessionId) saveSessionModel(sessionId, modelValue);
-      else localStorage.setItem(globalKey, modelValue);
-    };
-    if (provider === 'claude') {
-      setClaudeModel(modelValue);
-      persist('claude-model');
-    } else if (provider === 'cursor') {
-      setCursorModel(modelValue);
-      persist('cursor-model');
-    } else if (provider === 'codex') {
-      setCodexModel(modelValue);
-      persist('codex-model');
-    } else if (provider === 'antigravity') {
-      setAntigravityModel?.(modelValue);
-      persist('antigravity-model');
-    }
+    setModelFor(provider, modelValue);
+    if (sessionId) saveSessionModel(sessionId, modelValue);
+    else localStorage.setItem(`${provider}-model`, modelValue);
     setInput('');
     inputValueRef.current = '';
     addMessage({
@@ -214,7 +188,7 @@ export function useChatComposerState({
       content: `Model switched to: **${modelValue}**`,
       timestamp: Date.now(),
     });
-  }, [provider, selectedSession?.id, setClaudeModel, setCursorModel, setCodexModel, setAntigravityModel, addMessage]);
+  }, [provider, selectedSession?.id, setModelFor, addMessage]);
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -360,7 +334,7 @@ export function useChatComposerState({
           projectId: selectedProject.projectId,
           sessionId: currentSessionId,
           provider,
-          model: provider === 'cursor' ? cursorModel : provider === 'codex' ? codexModel : provider === 'antigravity' ? antigravityModel : claudeModel,
+          model: modelByProvider[provider],
           tokenUsage: tokenBudget,
         };
 
@@ -408,11 +382,8 @@ export function useChatComposerState({
       }
     },
     [
-      antigravityModel,
-      claudeModel,
-      codexModel,
+      modelByProvider,
       currentSessionId,
-      cursorModel,
       handleBuiltInCommand,
       handleCustomCommand,
       input,
@@ -429,10 +400,7 @@ export function useChatComposerState({
     inputValueRef.current = '';
   }, []);
 
-  const currentModel = provider === 'claude' ? claudeModel
-    : provider === 'cursor' ? cursorModel
-    : provider === 'codex' ? codexModel
-    : (antigravityModel || ANTIGRAVITY_MODELS.DEFAULT);
+  const currentModel = modelByProvider[provider];
 
   const {
     slashCommands,
@@ -705,15 +673,7 @@ export function useChatComposerState({
 
       const getToolsSettings = () => {
         try {
-          const settingsKey =
-            provider === 'cursor'
-              ? 'cursor-tools-settings'
-              : provider === 'codex'
-                ? 'codex-settings'
-                : provider === 'antigravity'
-                  ? 'antigravity-settings'
-                  : 'claude-settings';
-          const savedSettings = safeLocalStorage.getItem(settingsKey);
+          const savedSettings = safeLocalStorage.getItem(PROVIDER_INFO[provider].settingsStorageKey);
           if (savedSettings) {
             return JSON.parse(savedSettings);
           }
@@ -732,74 +692,28 @@ export function useChatComposerState({
       const resolvedProjectPath = selectedProject.fullPath || selectedProject.path || '';
       const sessionSummary = getNotificationSessionSummary(selectedSession, currentInput);
 
-      let sent = false;
-      if (provider === 'cursor') {
-        sent = sendMessage({
-          type: 'cursor-command',
-          command: messageContent,
+      // 單一送出路徑：各家參數差異由 provider 資訊表決定（design D10/D12）。
+      // runtime 只讀自己認得的欄位：Cursor 讀 skipPermissions，其餘讀 permissionMode。
+      const info = PROVIDER_INFO[provider];
+      const sent = sendMessage({
+        type: 'chat-command',
+        provider,
+        command: messageContent,
+        sessionId: effectiveSessionId,
+        options: {
+          cwd: resolvedProjectPath,
+          projectPath: resolvedProjectPath,
           sessionId: effectiveSessionId,
-          options: {
-            cwd: resolvedProjectPath,
-            projectPath: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            model: cursorModel,
-            skipPermissions: toolsSettings?.skipPermissions || false,
-            sessionSummary,
-            toolsSettings,
-          },
-        });
-      } else if (provider === 'codex') {
-        sent = sendMessage({
-          type: 'codex-command',
-          command: messageContent,
-          sessionId: effectiveSessionId,
-          options: {
-            cwd: resolvedProjectPath,
-            projectPath: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            model: codexModel,
-            sessionSummary,
-            ...effortOption,
-            permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
-          },
-        });
-      } else if (provider === 'antigravity') {
-        sent = sendMessage({
-          type: 'antigravity-command',
-          command: messageContent,
-          sessionId: effectiveSessionId,
-          options: {
-            cwd: resolvedProjectPath,
-            projectPath: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            model: antigravityModel,
-            sessionSummary,
-            permissionMode,
-            toolsSettings,
-            skipPermissions: permissionMode === 'bypassPermissions',
-          },
-        });
-      } else {
-        sent = sendMessage({
-          type: 'claude-command',
-          command: messageContent,
-          options: {
-            projectPath: resolvedProjectPath,
-            cwd: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            toolsSettings,
-            permissionMode,
-            model: claudeModel,
-            sessionSummary,
-            ...effortOption,
-            images: uploadedImages,
-          },
-        });
-      }
+          resume: Boolean(effectiveSessionId),
+          model: modelByProvider[provider],
+          sessionSummary,
+          toolsSettings,
+          skipPermissions: toolsSettings?.skipPermissions || false,
+          permissionMode: info.mapPermissionMode ? info.mapPermissionMode(permissionMode as PermissionMode) : permissionMode,
+          ...(info.capabilities.effort ? effortOption : {}),
+          ...(info.capabilities.images ? { images: uploadedImages } : {}),
+        },
+      });
 
       if (!sent) {
         restoreDraft();
@@ -824,15 +738,12 @@ export function useChatComposerState({
       }
     },
     [
-      antigravityModel,
       selectedSession,
       attachedImages,
-      claudeModel,
-      codexModel,
       currentModel,
       currentSessionId,
-      cursorModel,
       executeCommand,
+      modelByProvider,
       isLoading,
       onSessionActive,
       onSessionProcessing,

@@ -13,44 +13,18 @@ import cors from 'cors';
 import mime from 'mime-types';
 
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
-import { closeSessionsWatcher, initializeSessionsWatcher } from '@/modules/providers/index.js';
+import { closeSessionsWatcher, initializeSessionsWatcher, providerRegistry } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
 import { findAppRoot, getModuleDir } from './utils/runtime-paths.js';
+import { resolveToolApproval } from './claude-sdk.js';
 import {
-    queryClaudeSDK,
-    abortClaudeSDKSession,
-    isClaudeSDKSessionActive,
-    getActiveClaudeSDKSessions,
-    resolveToolApproval,
-    getPendingApprovalsForSession,
-    reconnectSessionWriter,
-} from './claude-sdk.js';
-import {
-    spawnCursor,
-    abortCursorSession,
-    isCursorSessionActive,
-    getActiveCursorSessions,
-} from './cursor-cli.js';
-import {
-    queryCodex,
-    abortCodexSession,
     stopCodexSessionAndWait,
     shutdownCodexSessions,
     resolveCodexApproval,
-    reconnectCodexSession,
-    isCodexSessionActive,
-    getActiveCodexSessions,
 } from './openai-codex.js';
-import {
-    spawnAntigravity,
-    abortAntigravitySession,
-    isAntigravitySessionActive,
-    reconnectAntigravitySession,
-    getActiveAntigravitySessions,
-} from './antigravity-cli.js';
 import {
     stripAnsiSequences,
     normalizeDetectedUrl,
@@ -99,28 +73,9 @@ const wss = createWebSocketServer(server, {
         authenticateWebSocket,
     },
     chat: {
-        queryClaudeSDK,
-        spawnCursor,
-        queryCodex,
+        providerRegistry,
         resolveCodexApproval,
-        reconnectCodexSession,
-        spawnAntigravity,
-        abortClaudeSDKSession,
-        abortCursorSession,
-        abortCodexSession,
-        abortAntigravitySession,
         resolveToolApproval,
-        isClaudeSDKSessionActive,
-        isCursorSessionActive,
-        isCodexSessionActive,
-        isAntigravitySessionActive,
-        reconnectAntigravitySession,
-        reconnectSessionWriter,
-        getPendingApprovalsForSession,
-        getActiveClaudeSDKSessions,
-        getActiveCursorSessions,
-        getActiveCodexSessions,
-        getActiveAntigravitySessions,
     },
     shell: {
         getSessionById: getShellSessionById,
@@ -129,12 +84,8 @@ const wss = createWebSocketServer(server, {
         extractUrlsFromText,
         shouldAutoOpenUrlFromOutput,
         // 终端启动时反查同一个 sessionId 是否已有聊天页会话在跑
-        isChatSessionActive: (sessionId, provider) => {
-            if (provider === 'cursor') return isCursorSessionActive(sessionId);
-            if (provider === 'codex') return isCodexSessionActive(sessionId);
-            if (provider === 'antigravity') return isAntigravitySessionActive(sessionId);
-            return isClaudeSDKSessionActive(sessionId);
-        },
+        isChatSessionActive: (sessionId, provider) =>
+            providerRegistry.resolveProvider(provider || 'claude').runtime.isActive(sessionId),
         stopChatSession: async (sessionId, provider, userId) => {
             if (provider === 'codex') {
                 return stopCodexSessionAndWait(sessionId, userId);

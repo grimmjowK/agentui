@@ -6,6 +6,7 @@ import {
   markShellSessionStale,
 } from '@/modules/websocket/services/shell-websocket.service.js';
 import { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
+import type { IProviderRuntime } from '@/shared/interfaces.js';
 import type {
   AnyRecord,
   AuthenticatedWebSocketRequest,
@@ -25,8 +26,6 @@ type ChatIncomingMessage = AnyRecord & {
   message?: unknown;
   rememberEntry?: unknown;
 };
-
-const DEFAULT_PROVIDER: LLMProvider = 'claude';
 
 /**
  * 同一个 sessionId 如果同时被终端页的 `<cli> --resume` 进程和聊天页的 SDK
@@ -57,17 +56,14 @@ function warnOnConcurrentShellSession(
   );
 }
 
+type ProviderRegistryLike = {
+  listProviders(): Array<{ id: LLMProvider; runtime: IProviderRuntime }>;
+  resolveProvider(provider: string): { id: LLMProvider; runtime: IProviderRuntime };
+};
+
 type ChatWebSocketDependencies = {
+  providerRegistry: ProviderRegistryLike;
   resolveCodexApproval: (requestId: string, userId: string | number | null, threadId: string, decision: unknown) => boolean;
-  reconnectCodexSession: (sessionId: string, writer: WebSocketWriter) => boolean;
-  queryClaudeSDK: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
-  spawnCursor: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
-  queryCodex: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
-  abortClaudeSDKSession: (sessionId: string) => Promise<boolean>;
-  abortCursorSession: (sessionId: string) => boolean;
-  abortCodexSession: (sessionId: string) => boolean;
-  abortAntigravitySession?: (sessionId: string) => boolean;
-  spawnAntigravity?: (command: string, options: unknown, writer: WebSocketWriter) => Promise<unknown>;
   resolveToolApproval: (
     requestId: string,
     payload: {
@@ -77,28 +73,14 @@ type ChatWebSocketDependencies = {
       rememberEntry?: unknown;
     }
   ) => void;
-  isClaudeSDKSessionActive: (sessionId: string) => boolean;
-  isCursorSessionActive: (sessionId: string) => boolean;
-  isCodexSessionActive: (sessionId: string) => boolean;
-  isAntigravitySessionActive?: (sessionId: string) => boolean;
-  reconnectAntigravitySession?: (sessionId: string, writer: WebSocketWriter) => boolean;
-  reconnectSessionWriter: (sessionId: string, ws: WebSocket) => boolean;
-  getPendingApprovalsForSession: (sessionId: string) => unknown[];
-  getActiveClaudeSDKSessions: () => unknown;
-  getActiveCursorSessions: () => unknown;
-  getActiveCodexSessions: () => unknown;
-  getActiveAntigravitySessions?: () => unknown;
 };
 
-/**
- * Normalizes potentially invalid provider names coming from websocket payloads.
- */
-function readProvider(value: unknown): LLMProvider {
-  if (value === 'claude' || value === 'cursor' || value === 'codex' || value === 'antigravity') {
-    return value;
+/** Resolves the payload's provider; an unknown or missing provider is a client error. */
+function resolveRuntime(registry: ProviderRegistryLike, value: unknown): { id: LLMProvider; runtime: IProviderRuntime } {
+  if (typeof value !== 'string' || !value) {
+    throw new Error('provider is required');
   }
-
-  return DEFAULT_PROVIDER;
+  return registry.resolveProvider(value);
 }
 
 /**
@@ -150,70 +132,32 @@ export function handleChatConnection(
         throw new Error('Message type is required');
       }
 
-      if (messageType === 'claude-command') {
-        warnOnConcurrentShellSession(data.options?.sessionId, 'claude', writer);
-        await dependencies.queryClaudeSDK(data.command ?? '', data.options, writer);
-        return;
-      }
+      const registry = dependencies.providerRegistry;
 
-      if (messageType === 'cursor-command') {
-        warnOnConcurrentShellSession(data.options?.sessionId, 'cursor', writer);
-        await dependencies.spawnCursor(data.command ?? '', data.options, writer);
-        return;
-      }
-
-      if (messageType === 'codex-command') {
-
-        await dependencies.queryCodex(data.command ?? '', data.options, writer);
-        return;
-      }
-
-      if (messageType === 'antigravity-command') {
-        warnOnConcurrentShellSession(data.options?.sessionId, 'antigravity', writer);
-        if (dependencies.spawnAntigravity) {
-          await dependencies.spawnAntigravity(data.command ?? '', data.options, writer);
+      if (messageType === 'chat-command') {
+        const { id, runtime } = resolveRuntime(registry, data.provider);
+        // Codex hands the session over from the terminal itself (codex-session-handoff).
+        if (id !== 'codex') {
+          warnOnConcurrentShellSession(data.options?.sessionId, id, writer);
         }
-        return;
-      }
-
-      if (messageType === 'cursor-resume') {
-        await dependencies.spawnCursor(
-          '',
-          {
-            sessionId: data.sessionId,
-            resume: true,
-            cwd: data.options?.cwd,
-          },
-          writer
-        );
+        await runtime.start(data.command ?? '', data.options ?? {}, writer);
         return;
       }
 
       if (messageType === 'abort-session') {
-        const provider = readProvider(data.provider);
+        const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
-        let success = false;
-
-        if (provider === 'cursor') {
-          success = dependencies.abortCursorSession(sessionId);
-        } else if (provider === 'codex') {
-          if (dependencies.reconnectCodexSession(sessionId, writer)) success = dependencies.abortCodexSession(sessionId);
-          if (success) return; // Runtime emits the sole cancellation terminal event.
-        } else if (provider === 'antigravity') {
-          success = dependencies.abortAntigravitySession ? dependencies.abortAntigravitySession(sessionId) : false;
-          if (success) return; // The runtime emits completion after the process exits.
-        } else {
-          success = await dependencies.abortClaudeSDKSession(sessionId);
-        }
-
+        const { ok, emitsTerminal } = await runtime.abort(sessionId, writer);
+        // Exactly one terminal event per abort: skip ours when the runtime sends its own.
+        if (ok && emitsTerminal) return;
         writer.send(
           createNormalizedMessage({
             kind: 'complete',
-            exitCode: success ? 0 : 1,
+            exitCode: ok ? 0 : 1,
             aborted: true,
-            success,
+            success: ok,
             sessionId,
-            provider,
+            provider: id,
           })
         );
         return;
@@ -239,75 +183,45 @@ export function handleChatConnection(
         return;
       }
 
-      if (messageType === 'cursor-abort') {
-        const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
-        const success = dependencies.abortCursorSession(sessionId);
-        writer.send(
-          createNormalizedMessage({
-            kind: 'complete',
-            exitCode: success ? 0 : 1,
-            aborted: true,
-            success,
-            sessionId,
-            provider: 'cursor',
-          })
-        );
-        return;
-      }
-
       if (messageType === 'check-session-status') {
-        const provider = readProvider(data.provider);
+        const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
-        let isActive = false;
-
-        if (provider === 'cursor') {
-          isActive = dependencies.isCursorSessionActive(sessionId);
-        } else if (provider === 'codex') {
-          isActive = dependencies.reconnectCodexSession(sessionId, writer);
-        } else if (provider === 'antigravity') {
-          isActive = dependencies.reconnectAntigravitySession
-            ? dependencies.reconnectAntigravitySession(sessionId, writer)
-            : false;
-        } else {
-          isActive = dependencies.isClaudeSDKSessionActive(sessionId);
-          if (isActive) {
-            dependencies.reconnectSessionWriter(sessionId, ws);
-          }
-        }
-
         writer.send({
           type: 'session-status',
           sessionId,
-          provider,
-          isProcessing: isActive,
+          provider: id,
+          isProcessing: runtime.reconnect(sessionId, writer),
         });
         return;
       }
 
       if (messageType === 'get-pending-permissions') {
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
-        if (sessionId && dependencies.isClaudeSDKSessionActive(sessionId)) {
-          const pending = dependencies.getPendingApprovalsForSession(sessionId);
-          writer.send({
-            type: 'pending-permissions-response',
-            sessionId,
-            data: pending,
-          });
-        }
+        if (!sessionId) return;
+        const sources = registry.listProviders()
+          .filter(({ runtime }) => runtime.getPendingApprovals && runtime.isActive(sessionId));
+        // Only answer when a provider owns this live session; an empty reply would
+        // wipe approvals other providers replay through their realtime stream.
+        if (sources.length === 0) return;
+        writer.send({
+          type: 'pending-permissions-response',
+          sessionId,
+          data: sources.flatMap(({ runtime }) => runtime.getPendingApprovals?.(writer.userId, sessionId) ?? []),
+        });
         return;
       }
 
       if (messageType === 'get-active-sessions') {
         writer.send({
           type: 'active-sessions',
-          sessions: {
-            claude: dependencies.getActiveClaudeSDKSessions(),
-            cursor: dependencies.getActiveCursorSessions(),
-            codex: dependencies.getActiveCodexSessions(),
-            antigravity: dependencies.getActiveAntigravitySessions ? dependencies.getActiveAntigravitySessions() : {},
-          },
+          sessions: Object.fromEntries(
+            registry.listProviders().map(({ id, runtime }) => [id, runtime.listActive()]),
+          ),
         });
+        return;
       }
+
+      throw new Error(`Unknown message type: ${messageType}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[ERROR] Chat WebSocket error:', message);

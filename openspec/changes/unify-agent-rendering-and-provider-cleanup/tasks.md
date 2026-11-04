@@ -36,14 +36,14 @@
 
 ## 4. 階段二：執行層納入 provider 介面
 
-- [ ] 4.1 `server/shared/interfaces.ts` 新增 `IProviderRuntime`（`start`、`abort` 回傳 `{ ok, emitsTerminal }`、`isActive`、`reconnect`、`listActive`、可選的 `steer`、可選的 `getPendingApprovals`），`IProvider` 加上 `runtime`
-- [ ] 4.2 在 claude、cursor、codex、antigravity 的目錄各新增 `<id>-runtime.provider.ts`，包住 `server/` 根目錄的現有函式，不改寫內部邏輯；差異在轉接層吸收（Claude 的 `reconnectSessionWriter` 取原始 ws、Codex 先 reconnect 再 abort、`emitsTerminal` 依 design D11 的表）
-- [ ] 4.3 `chat-websocket.service.ts` 新增 `chat-command` 分派並刪除各 `xxx-command`、`cursor-resume`、`cursor-abort` 分支；`abort-session`、`check-session-status`、`get-active-sessions`、`get-pending-permissions` 改為依 registry 處理；`ChatWebSocketDependencies` 只保留 registry 與審批回應相關函式
-- [ ] 4.4 為分派層新增測試：未註冊的 provider 回傳錯誤、`emitsTerminal` 為 `true` 時不補送結束事件、為 `false` 時補送一次、`get-active-sessions` 的鍵等於已註冊 provider
-- [ ] 4.5 `server/index.js` 移除逐一匯入的執行函式，`routes/agent.js` 改為透過 registry 啟動
-- [ ] 4.6 新增 `shared/providers.ts`（provider 資訊表：`capabilities.midTurnSteer/images/effort/artifacts`、`permissionModes`、`defaultPermissionMode`、`mapPermissionMode`），值與目前前端行為一致
-- [ ] 4.7 前端 `useChatProviderState.ts` 的權限模式預設值改讀資訊表；`useChatComposerState.ts` 的送出改為單一 `chat-command` 路徑，各家模型狀態收斂為 `modelByProvider`，參數依資訊表組裝；中斷與 `ChatInterface.tsx`、`useChatSessionState.ts` 的狀態查詢一併確認走統一訊息
-- [ ] 4.8 grep 確認前端沒有殘留 `-command'` 訊息類型，並在本機對四個 provider 各跑一輪：送出、中斷、重新整理後狀態恢復、Cursor 續接
+- [x] 4.1 `server/shared/interfaces.ts` 新增 `IProviderRuntime`（`start`、`abort` 回傳 `{ ok, emitsTerminal }`、`isActive`、`reconnect`、`listActive`、可選的 `steer`、可選的 `getPendingApprovals`），`IProvider` 加上 `runtime`
+- [x] 4.2 在 claude、cursor、codex、antigravity 的目錄各新增 `<id>-runtime.provider.ts`，包住 `server/` 根目錄的現有函式，不改寫內部邏輯；差異在轉接層吸收（Claude 的 `reconnectSessionWriter` 取原始 ws、Codex 先 reconnect 再 abort、`emitsTerminal` 依 design D11 的表）
+- [x] 4.3 `chat-websocket.service.ts` 新增 `chat-command` 分派並刪除各 `xxx-command`、`cursor-resume`、`cursor-abort` 分支；`abort-session`、`check-session-status`、`get-active-sessions`、`get-pending-permissions` 改為依 registry 處理；`ChatWebSocketDependencies` 只保留 registry 與審批回應相關函式
+- [x] 4.4 為分派層新增測試：未註冊的 provider 回傳錯誤、`emitsTerminal` 為 `true` 時不補送結束事件、為 `false` 時補送一次、`get-active-sessions` 的鍵等於已註冊 provider
+- [x] 4.5 `server/index.js` 移除逐一匯入的執行函式，`routes/agent.js` 改為透過 registry 啟動
+- [x] 4.6 新增 `shared/providers.ts`（provider 資訊表：`capabilities.midTurnSteer/images/effort/artifacts`、`permissionModes`、`defaultPermissionMode`、`mapPermissionMode`），值與目前前端行為一致
+- [x] 4.7 前端 `useChatProviderState.ts` 的權限模式預設值改讀資訊表；`useChatComposerState.ts` 的送出改為單一 `chat-command` 路徑，各家模型狀態收斂為 `modelByProvider`，參數依資訊表組裝；中斷與 `ChatInterface.tsx`、`useChatSessionState.ts` 的狀態查詢一併確認走統一訊息
+- [x] 4.8 grep 確認前端沒有殘留 `-command'` 訊息類型，並在本機對四個 provider 各跑一輪：送出、中斷、重新整理後狀態恢復、Cursor 續接
 
 ## 5. 階段二：資料層解耦
 

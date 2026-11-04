@@ -1,4 +1,6 @@
-export type LLMProvider = 'claude' | 'cursor' | 'codex' | 'antigravity';
+import type { LLMProvider } from '../../shared/providers';
+
+export type { LLMProvider };
 
 export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'tasks' | 'preview' | `plugin:${string}`;
 
