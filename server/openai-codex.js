@@ -7,6 +7,7 @@ import { codexApprovals } from './modules/codex-runtime/index.js';
 import { terminateShellSessionsBySessionId } from './modules/websocket/services/shell-websocket.service.js';
 import { getCodexRuntimeInfo } from './shared/codex-cli-path.js';
 import { createNormalizedMessage } from './shared/utils.js';
+import { mapPlanUpdate, mapThreadItem } from './modules/providers/list/codex/codex-item-mapper.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 
 const CODEX_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh']);
@@ -49,7 +50,8 @@ export async function queryCodex(command, options = {}, writer) {
   let lease;
   let terminalMessage;
   const items = new Map();
-  const streamed = new Set();
+  // delta 的 itemId 與 item/completed 的 item.id 格式不一致（0.163），不能按 id 配對；只記錄是否有未收尾的串流
+  let streaming = false;
   try {
     if (threadId && activeCodexSessions.has(threadId)) throw new Error('Codex session is already running');
     if (threadId) activeCodexSessions.set(threadId, state);
@@ -95,7 +97,7 @@ export async function queryCodex(command, options = {}, writer) {
       if (state.finished) return;
       if (method === 'turn/started') state.turnId = params.turn.id;
       if (method === 'item/agentMessage/delta') {
-        streamed.add(params.itemId);
+        streaming = true;
         emit({ kind: 'stream_delta', content: params.delta });
       }
       if (method === 'item/started' || method === 'item/completed') {
@@ -104,51 +106,14 @@ export async function queryCodex(command, options = {}, writer) {
         items.set(item.id, item);
         const isCompleted = method === 'item/completed';
         if (item.type === 'agentMessage' && isCompleted) {
-          if (streamed.has(item.id)) emit({ kind: 'stream_end' });
+          if (streaming) { streaming = false; emit({ kind: 'stream_end' }); }
           emit({ id: item.id, kind: 'text', role: 'assistant', content: item.text || '' });
-        } else if (item.type === 'commandExecution') {
-          const isError = isCompleted && (item.status === 'failed' || item.status === 'declined' || (typeof item.exitCode === 'number' && item.exitCode !== 0));
-          emit({
-            id: item.id, kind: 'tool_use', toolId: item.id, toolName: 'Bash',
-            toolInput: { command: item.command, cwd: item.cwd }, output: item.aggregatedOutput,
-            exitCode: item.exitCode, status: item.status,
-            ...(isCompleted ? {
-              toolResult: {
-                content: item.aggregatedOutput || (isError ? `Exit code ${item.exitCode ?? 1}` : ''),
-                isError,
-              },
-            } : {}),
-          });
-        } else if (item.type === 'fileChange') {
-          const isError = isCompleted && (item.status === 'failed' || item.status === 'declined');
-          emit({
-            id: item.id, kind: 'tool_use', toolId: item.id, toolName: 'FileChanges',
-            toolInput: item.changes, status: item.status,
-            ...(isCompleted ? {
-              toolResult: {
-                content: isError ? `File changes ${item.status}` : 'Applied file changes',
-                isError,
-              },
-            } : {}),
-          });
-        } else if (item.type === 'mcpToolCall') {
-          const isError = Boolean(item.error) || (isCompleted && item.status === 'failed');
-          const resultContent = item.error
-            ? (typeof item.error === 'string' ? item.error : JSON.stringify(item.error))
-            : item.result !== undefined
-              ? (typeof item.result === 'string' ? item.result : JSON.stringify(item.result))
-              : '';
-          emit({
-            id: item.id, kind: 'tool_use', toolId: item.id, toolName: `${item.server}/${item.tool}`,
-            toolInput: item.arguments, output: item.result, status: item.status, isError,
-            ...(isCompleted ? {
-              toolResult: {
-                content: resultContent,
-                isError,
-              },
-            } : {}),
-          });
+        } else {
+          for (const message of mapThreadItem(item, isCompleted ? 'completed' : 'started')) emit(message);
         }
+      }
+      if (method === 'turn/plan/updated') {
+        for (const message of mapPlanUpdate(params)) emit(message);
       }
       if (method === 'thread/tokenUsage/updated') {
         // last 是最近一轮实际送进模型的量，即上下文占用；total 是整个线程的累计值，会虚高

@@ -18,7 +18,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini"
+    "gemini": "Gemini",
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "도구 설정",
@@ -33,7 +34,10 @@
     "readFile": "파일 읽기",
     "updateTodo": "Todo 리스트 업데이트",
     "readTodo": "Todo 리스트 읽기",
-    "searchResults": "결과"
+    "searchResults": "결과",
+    "waitingOutput": "터미널 출력 대기 중",
+    "runCode": "코드 실행",
+    "changeDeleted": "삭제됨"
   },
   "search": {
     "found": "{{count}}개의 {{type}} 발견",

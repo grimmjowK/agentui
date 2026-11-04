@@ -15,6 +15,19 @@ export default tseslint.config(
     ignores: ["dist/**", "node_modules/**", "public/**"],
   },
   {
+    // 對話流內不得依 provider 分支（openspec tool-call-rendering / design D14）
+    files: ["src/components/chat/tools/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "BinaryExpression[operator=/^[!=]==?$/][left.name='provider'], BinaryExpression[operator=/^[!=]==?$/][left.property.name='provider']",
+          message: "對話流內不得依 provider 分支：差異應在後端映射處理（見 src/components/chat/tools/README.md）。",
+        },
+      ],
+    },
+  },
+  {
     files: ["src/**/*.{ts,tsx,js,jsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     plugins: {

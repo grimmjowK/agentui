@@ -18,7 +18,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini"
+    "gemini": "Gemini",
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "Araç Ayarları",
@@ -33,7 +34,10 @@
     "readFile": "Dosyayı oku",
     "updateTodo": "Yapılacaklar listesini güncelle",
     "readTodo": "Yapılacaklar listesini oku",
-    "searchResults": "sonuç"
+    "searchResults": "sonuç",
+    "waitingOutput": "Terminal çıktısı bekleniyor",
+    "runCode": "Kodu çalıştır",
+    "changeDeleted": "silindi"
   },
   "search": {
     "found": "{{count}} {{type}} bulundu",

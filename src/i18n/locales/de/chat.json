@@ -18,7 +18,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini"
+    "gemini": "Gemini",
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "Werkzeugeinstellungen",
@@ -33,7 +34,10 @@
     "readFile": "Datei lesen",
     "updateTodo": "Aufgabenliste aktualisieren",
     "readTodo": "Aufgabenliste lesen",
-    "searchResults": "Ergebnisse"
+    "searchResults": "Ergebnisse",
+    "waitingOutput": "Warte auf Terminalausgabe",
+    "runCode": "Code ausführen",
+    "changeDeleted": "gelöscht"
   },
   "search": {
     "found": "{{count}} {{type}} gefunden",

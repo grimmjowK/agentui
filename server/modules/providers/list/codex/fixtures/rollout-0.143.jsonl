@@ -1,0 +1,8 @@
+{"timestamp":"2026-08-01T00:00:00.000Z","type":"session_meta","payload":{"id":"s-0143","cli_version":"0.143.0","cwd":"/repo"}}
+{"timestamp":"2026-08-01T00:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"列出檔案並更新計畫"}]}}
+{"timestamp":"2026-08-01T00:00:02.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"先看目錄"}]}}
+{"timestamp":"2026-08-01T00:00:03.000Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_exec_1","name":"exec","input":"const r = await tools.exec_command({cmd:\"ls -la\"});\nconsole.log(r);"}}
+{"timestamp":"2026-08-01T00:00:04.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_exec_1","output":"total 0\n"}}
+{"timestamp":"2026-08-01T00:00:05.000Z","type":"response_item","payload":{"type":"function_call","name":"wait","arguments":"{\"cell_id\":\"1\",\"yield_time_ms\":1000}","call_id":"call_wait_1"}}
+{"timestamp":"2026-08-01T00:00:06.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_wait_1","output":"done"}}
+{"timestamp":"2026-08-01T00:00:07.000Z","type":"compacted","payload":{"message":"summary"}}

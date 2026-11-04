@@ -3,14 +3,18 @@
  * Defines display behavior for all tool types 
  */
 
+import type { TFunction } from 'i18next';
+
+type Translate = TFunction | ((key: string) => string);
+
 export interface ToolDisplayConfig {
   input: {
     type: 'one-line' | 'collapsible' | 'plan' | 'hidden';
     // One-line config
     icon?: string;
     label?: string;
-    getValue?: (input: any) => string;
-    getSecondary?: (input: any) => string | undefined;
+    getValue?: (input: any, t: Translate) => string;
+    getSecondary?: (input: any, t: Translate) => string | undefined;
     action?: 'copy' | 'open-file' | 'jump-to-results' | 'none';
     style?: string;
     wrapText?: boolean;
@@ -22,7 +26,7 @@ export interface ToolDisplayConfig {
       icon?: string;
     };
     // Collapsible config
-    title?: string | ((input: any) => string);
+    title?: string | ((input: any, t: Translate) => string);
     defaultOpen?: boolean;
     contentType?: 'diff' | 'markdown' | 'file-list' | 'todo-list' | 'text' | 'task' | 'question-answer';
     getContentProps?: (input: any, helpers?: any) => any;
@@ -38,6 +42,47 @@ export interface ToolDisplayConfig {
     contentType?: 'markdown' | 'file-list' | 'todo-list' | 'text' | 'success-message' | 'task' | 'question-answer';
     getMessage?: (result: any) => string;
     getContentProps?: (result: any) => any;
+  };
+}
+
+const SUMMARY_KEYS = ['title', 'command', 'query', 'path', 'server'] as const;
+
+/** 通用卡片的次要文字：取第一個存在的字串欄位；輸入不是物件時回傳空字串。 */
+export function getSummaryText(input: unknown): string {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
+  const record = input as Record<string, unknown>;
+  for (const key of SUMMARY_KEYS) {
+    if (typeof record[key] === 'string' && record[key]) return record[key] as string;
+  }
+  return '';
+}
+
+/** 單行工具設定的簡寫：標題 + 一個關鍵參數（+ 可選的次要文字）。 */
+function oneLine(
+  label: string,
+  getValue: (input: any) => unknown,
+  getSecondary?: (input: any) => unknown,
+): ToolDisplayConfig {
+  const str = (value: unknown) => (value === undefined || value === null ? '' : String(value));
+  return {
+    input: {
+      type: 'one-line',
+      label,
+      getValue: (input) => str(input && getValue(input)),
+      getSecondary: getSecondary ? (input) => str(input && getSecondary(input)) || undefined : undefined,
+      action: 'none',
+      colorScheme: {
+        primary: 'text-gray-700 dark:text-gray-300',
+        secondary: 'text-gray-500 dark:text-gray-400',
+        border: 'border-gray-300 dark:border-gray-600',
+        icon: 'text-gray-500 dark:text-gray-400'
+      }
+    },
+    result: {
+      type: 'collapsible',
+      contentType: 'text',
+      getContentProps: (result) => ({ content: String(result?.content || ''), format: 'plain' })
+    }
   };
 }
 
@@ -62,7 +107,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
         }
         return input.command || input.cmd || '';
       },
-      getSecondary: (input) => input.description,
+      getSecondary: (input) => input?.description || input?.cwd,
       action: 'copy',
       style: 'terminal',
       wrapText: true,
@@ -105,8 +150,14 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   Edit: {
     input: {
       type: 'collapsible',
-      title: (input) => {
+      title: (input, t) => {
         const filename = input.file_path?.split('/').pop() || input.file_path || 'file';
+        if (input.changeKind === 'move' && input.move_path) {
+          return `${input.file_path} → ${input.move_path}`;
+        }
+        if (input.changeKind === 'delete') {
+          return `${filename} (${t('tools.changeDeleted')})`;
+        }
         return `${filename}`;
       },
       defaultOpen: false,
@@ -115,8 +166,8 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       getContentProps: (input) => ({
         oldContent: input.old_string,
         newContent: input.new_string,
-        filePath: input.file_path,
-        badge: 'Edit',
+        filePath: input.move_path || input.file_path,
+        badge: input.changeKind === 'delete' ? 'Delete' : input.changeKind === 'move' ? 'Move' : 'Edit',
         badgeColor: 'gray'
       })
     },
@@ -472,6 +523,57 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   },
 
   // ============================================================================
+  // WEB / CODE / TERMINAL TOOLS（Claude 與後端映射後的 Codex 共用）
+  // ============================================================================
+
+  WebSearch: oneLine('Search', (input) => input.query),
+
+  WebFetch: oneLine('Fetch', (input) => input.url, (input) => input.prompt),
+
+  TerminalInput: {
+    input: {
+      type: 'one-line',
+      icon: 'terminal',
+      label: 'stdin',
+      getValue: (input, t) => (input?.chars ? String(input.chars) : t('tools.waitingOutput')),
+      action: 'none',
+      style: 'terminal',
+      colorScheme: {
+        primary: 'text-green-400 font-mono',
+        border: 'border-green-500 dark:border-green-400',
+        icon: 'text-green-500 dark:text-green-400'
+      }
+    },
+    result: { hideOnSuccess: true }
+  },
+
+  CodeRun: {
+    input: {
+      type: 'collapsible',
+      title: (input, t) => input?.title || t('tools.runCode'),
+      defaultOpen: false,
+      contentType: 'text',
+      getContentProps: (input) => ({ content: String(input?.code || ''), format: 'code' })
+    },
+    result: {
+      type: 'collapsible',
+      contentType: 'text',
+      getContentProps: (result) => ({ content: String(result?.content || ''), format: 'plain' })
+    }
+  },
+
+  // ============================================================================
+  // CLAUDE AGENT-RUNTIME TOOLS（單行：標題 + 一個關鍵參數）
+  // ============================================================================
+
+  Monitor: oneLine('Monitor', (input) => input.description || input.command),
+  Skill: oneLine('Skill', (input) => input.skill, (input) => input.args),
+  TaskStop: oneLine('Stop', (input) => input.task_id),
+  ScheduleWakeup: oneLine('Wakeup', (input) => (input.stop ? 'stop' : `${input.delaySeconds ?? ''}s`), (input) => input.reason),
+  ToolSearch: oneLine('ToolSearch', (input) => input.query),
+  SendMessage: oneLine('Message', (input) => input.to || input.recipient, (input) => input.summary),
+
+  // ============================================================================
   // INTERACTIVE TOOLS
   // ============================================================================
 
@@ -763,11 +865,11 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
   Default: {
     input: {
       type: 'collapsible',
-      title: 'Parameters',
+      title: (input) => getSummaryText(input) || '',
       defaultOpen: false,
       contentType: 'text',
       getContentProps: (input) => ({
-        content: typeof input === 'string' ? input : JSON.stringify(input, null, 2),
+        content: typeof input === 'string' ? input : JSON.stringify(input ?? '', null, 2),
         format: 'code'
       })
     },
@@ -781,6 +883,9 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     }
   }
 };
+
+// Claude Code 已把子 agent 工具從 Task 改名為 Agent
+TOOL_CONFIGS.Agent = TOOL_CONFIGS.Task;
 
 /**
  * Get configuration for a tool, with fallback to default
@@ -805,6 +910,11 @@ export function shouldHideToolResult(toolName: string, toolResult: any): boolean
 
   // Hide on success only
   if (config.result.hideOnSuccess && toolResult && !toolResult.isError) {
+    return true;
+  }
+
+  // 成功但沒有任何內容（例如 Codex 的搜尋、計畫）時不渲染空區塊
+  if (toolResult && !toolResult.isError && !toolResult.toolUseResult && !String(toolResult.content ?? '').trim()) {
     return true;
   }
 

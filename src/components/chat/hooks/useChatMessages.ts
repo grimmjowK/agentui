@@ -82,7 +82,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
 
       case 'tool_use': {
         const tr = msg.toolResult || (msg.toolId ? toolResultMap.get(msg.toolId) : null);
-        const isSubagentContainer = msg.toolName === 'Task';
+        const isSubagentContainer = msg.toolName === 'Task' || msg.toolName === 'Agent';
 
         // Build child tools from subagentTools
         const childTools: SubagentChildTool[] = [];

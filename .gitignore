@@ -143,6 +143,7 @@ dev-debug.log
 !/docs/fixtures/
 /docs/fixtures/*
 !/docs/fixtures/codex/
+!/docs/fixtures/antigravity/
 /.venv/
 __pycache__/
 *.pyc

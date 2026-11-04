@@ -7,6 +7,13 @@ import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
+import {
+  agyToolId,
+  decodeTranscriptArgs,
+  isAgyToolError,
+  mapAgyTool,
+  stripStepHeader,
+} from '@/modules/providers/list/antigravity/antigravity-tool-mapper.js';
 
 const PROVIDER = 'antigravity';
 
@@ -88,6 +95,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     }
 
     const normalized: NormalizedMessage[] = [];
+    const toolResults = new Map<string, { content: string; isError: boolean }>();
 
     try {
       const fileStream = fsSync.createReadStream(sessionFilePath);
@@ -131,8 +139,13 @@ export class AntigravitySessionsProvider implements IProviderSessions {
             continue;
           }
 
-          // Skip generic execution output
+          // GENERIC 步驟是工具輸出，以 step_index 配對回 tool_use
           if (entry.type === 'GENERIC') {
+            const output = stripStepHeader(typeof entry.content === 'string' ? entry.content : '');
+            toolResults.set(agyToolId(entry.step_index), {
+              content: output,
+              isError: isAgyToolError(entry.status, output),
+            });
             continue;
           }
 
@@ -158,9 +171,14 @@ export class AntigravitySessionsProvider implements IProviderSessions {
               for (let i = 0; i < entry.tool_calls.length; i++) {
                 const call = entry.tool_calls[i] as AnyRecord;
                 if (!call) continue;
-                const toolName = typeof call.name === 'string' ? call.name : (call.toolName as string) || 'tool';
-                const toolInput = call.args || call.toolInput || {};
-                const toolId = (call.id as string) || `${baseId}_tool_${i}`;
+                const { toolName, toolInput } = mapAgyTool(
+                  typeof call.name === 'string' ? call.name : '',
+                  decodeTranscriptArgs(call.args),
+                );
+                // 第 k 個呼叫的結果在第 step_index + 1 + k 步，與即時 step_update 的 step_index 相同
+                const toolId = typeof entry.step_index === 'number'
+                  ? agyToolId(entry.step_index + 1 + i)
+                  : `${baseId}_tool_${i}`;
 
                 normalized.push(
                   createNormalizedMessage({
@@ -202,6 +220,12 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     } catch (error) {
       console.warn(`Failed to read Antigravity transcript for ${sessionId}:`, error);
       return { messages: [], total: 0, hasMore: false, offset, limit };
+    }
+
+    for (const msg of normalized) {
+      if (msg.kind === 'tool_use' && msg.toolId && toolResults.has(msg.toolId)) {
+        msg.toolResult = toolResults.get(msg.toolId);
+      }
     }
 
     const start = Math.max(0, offset);

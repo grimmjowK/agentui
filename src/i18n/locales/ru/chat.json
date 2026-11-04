@@ -18,7 +18,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini"
+    "gemini": "Gemini",
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "Настройки инструмента",
@@ -33,7 +34,10 @@
     "readFile": "Чтение файла",
     "updateTodo": "Обновить список задач",
     "readTodo": "Прочитать список задач",
-    "searchResults": "результаты"
+    "searchResults": "результаты",
+    "waitingOutput": "Ожидание вывода терминала",
+    "runCode": "Выполнить код",
+    "changeDeleted": "удалён"
   },
   "search": {
     "found": "Найдено {{count}} {{type}}",

@@ -18,7 +18,8 @@
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini"
+    "gemini": "Gemini",
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "工具设置",
@@ -33,7 +34,10 @@
     "readFile": "读取文件",
     "updateTodo": "更新待办列表",
     "readTodo": "读取待办列表",
-    "searchResults": "结果"
+    "searchResults": "结果",
+    "waitingOutput": "等待终端输出",
+    "runCode": "运行代码",
+    "changeDeleted": "已删除"
   },
   "search": {
     "found": "找到 {{count}} 个{{type}}",

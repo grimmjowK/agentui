@@ -17,7 +17,8 @@
     "tool": "ツール",
     "claude": "Claude",
     "cursor": "Cursor",
-    "codex": "Codex"
+    "codex": "Codex",
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "ツール設定",
@@ -32,7 +33,10 @@
     "readFile": "ファイルを読み取り",
     "updateTodo": "Todoリストを更新",
     "readTodo": "Todoリストを読み取り",
-    "searchResults": "件の結果"
+    "searchResults": "件の結果",
+    "waitingOutput": "ターミナル出力を待機中",
+    "runCode": "コードを実行",
+    "changeDeleted": "削除"
   },
   "search": {
     "found": "{{count}}件の{{type}}が見つかりました",

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useAuth } from '../components/auth/context/AuthContext';
 import { IS_PLATFORM } from '../constants/config';
 
@@ -90,11 +91,16 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       websocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (PROJECT_EVENT_TYPES.has(data?.type)) {
-            setLatestProjectEvent(data);
-          } else {
-            setLatestMessage(data);
-          }
+          // latestMessage 是單值 state：連續到達的訊息若批次渲染，只有最後一則會觸發下游 effect，
+          // 其餘（串流 delta、同一事件拆出的多則工具訊息）會遺失。flushSync 讓每則訊息各自渲染並執行 effect。
+          // ponytail: 每則訊息一次同步渲染；若高頻串流造成卡頓，改為訊息佇列 + 訂閱。
+          flushSync(() => {
+            if (PROJECT_EVENT_TYPES.has(data?.type)) {
+              setLatestProjectEvent(data);
+            } else {
+              setLatestMessage(data);
+            }
+          });
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
         }

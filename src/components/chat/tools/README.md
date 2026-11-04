@@ -209,7 +209,12 @@ interface ToolDisplayConfig {
 | TaskList | one-line | collapsible task | Progress bar, status icons |
 | TaskGet | one-line | collapsible task | Task details with status |
 | ExitPlanMode | collapsible (markdown) | collapsible markdown | Also registered as `exit_plan_mode` |
-| Default | collapsible (code) | collapsible text | Fallback for unknown tools |
+| Task / Agent | subagent container | collapsible markdown | `Agent` is Claude's new name for `Task` |
+| WebSearch / WebFetch | one-line | collapsible text | Query / URL |
+| TerminalInput | terminal one-line | hide success | Codex `write_stdin`; empty `chars` = waiting for output |
+| CodeRun | collapsible (code) | collapsible text | Codex `js` / code-mode `exec`; title from `title` |
+| Monitor, Skill, TaskStop, ScheduleWakeup, ToolSearch, SendMessage | one-line | collapsible text | Title + one key parameter |
+| Default | collapsible summary card | collapsible text | Unknown tools: title = tool name, secondary = first of `title`/`command`/`query`/`path`/`server`; raw input collapsed |
 
 ---
 
@@ -222,3 +227,13 @@ interface ToolDisplayConfig {
 - Tool results route through `ToolRenderer` (no duplicate rendering paths)
 - `CollapsibleDisplay` uses children pattern (no wasteful contentProps indirection)
 - Configs are static module-level objects — zero runtime overhead for lookups
+
+---
+
+## Layering Rule（對話流內外分層，design D14）
+
+- **對話流內**（訊息與工具卡片，本目錄與訊息元件）：只接受後端映射後的標準形狀（Claude 工具形狀、`thinking`、壓縮邊界、通用降級卡片）。**不得**出現 `provider === '<id>'` 判斷；ESLint 的 `no-restricted-syntax` 會在本目錄攔下這種寫法。
+- 某個 provider 出現新工具或事件：改的是該 provider 的後端映射（例如 `server/modules/providers/list/codex/codex-item-mapper.ts`），把它映射到既有標準形狀；不是在前端加判斷。
+- **對話流外**（輸入區按鈕、側邊面板、狀態列）：provider 專屬能力放這裡，是否顯示由 provider 資訊表決定。
+- 新增標準形狀（例如未來的行內卡片）屬於跨 provider 的設計決定，需先在 spec 定義，不能為單一 provider 加。
+- 驗收：`npx tsx scripts/tool-coverage-report.mjs` 統計本機存量會話中走通用卡片的比例（Claude < 1%、Codex < 5%）。

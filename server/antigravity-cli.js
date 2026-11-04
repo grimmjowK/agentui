@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import crossSpawn from 'cross-spawn';
+import { mapAgyStepUpdate } from './modules/providers/list/antigravity/antigravity-tool-mapper.js';
 
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { createNormalizedMessage, generateMessageId } from './shared/utils.js';
@@ -146,32 +147,10 @@ export class AntigravityResponseHandler {
         return;
       }
 
-      // Tool use
-      if (step.step_type === 'tool' && step.state === 'ACTIVE') {
-        const toolInfo = step.tool_info || {};
-        const toolName = step.tool_name || toolInfo.name || 'tool';
-        const toolId = `agy_tool_${step.step_index}`;
-        send(this.writer, {
-          sessionId: this.sessionId,
-          kind: 'tool_use',
-          toolName,
-          toolInput: toolInfo.parameters || {},
-          toolId,
-        });
-        return;
-      }
-
-      // Tool result
-      if (step.step_type === 'tool' && step.state === 'DONE') {
-        const toolInfo = step.tool_info || {};
-        const toolId = `agy_tool_${step.step_index}`;
-        send(this.writer, {
-          sessionId: this.sessionId,
-          kind: 'tool_result',
-          toolId,
-          content: typeof toolInfo.output === 'string' ? toolInfo.output : JSON.stringify(toolInfo.output ?? ''),
-          isError: false,
-        });
+      // Tool use / result：與歷史解析共用 antigravity-tool-mapper
+      const mapped = mapAgyStepUpdate(step);
+      if (mapped) {
+        send(this.writer, { sessionId: this.sessionId, ...mapped });
         return;
       }
 
