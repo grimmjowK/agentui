@@ -6,6 +6,7 @@ import { TaskMasterProvider } from './contexts/TaskMasterContext';
 import { TasksSettingsProvider } from './contexts/TasksSettingsContext';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { PluginsProvider } from './contexts/PluginsContext';
+import { PendingApprovalsProvider } from './contexts/PendingApprovalsContext';
 import AppContent from './components/app/AppContent';
 import i18n from './i18n/config.js';
 
@@ -15,6 +16,7 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <WebSocketProvider>
+            <PendingApprovalsProvider>
             <PluginsProvider>
               <TasksSettingsProvider>
                 <TaskMasterProvider>
@@ -29,6 +31,7 @@ export default function App() {
                 </TaskMasterProvider>
               </TasksSettingsProvider>
             </PluginsProvider>
+            </PendingApprovalsProvider>
           </WebSocketProvider>
         </AuthProvider>
       </ThemeProvider>

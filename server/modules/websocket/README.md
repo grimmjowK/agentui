@@ -127,7 +127,7 @@ flowchart TD
   D -->|claude-permission-response| K[resolveToolApproval]
   D -->|cursor-abort| L[abortCursorSession]
   D -->|check-session-status| M[is*SessionActive + optional reconnectSessionWriter]
-  D -->|get-pending-permissions| N[getPendingApprovalsForSession]
+  D -->|get-pending-permissions| N[runtime.getPendingApprovals]
   D -->|get-active-sessions| O[getActive*Sessions]
 ```
 

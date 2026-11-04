@@ -155,5 +155,10 @@
     "restoreProject": "恢复工作区",
     "restore": "恢复会话",
     "deletePermanently": "永久删除"
+  },
+  "pendingApprovals": {
+    "badge": "待审批",
+    "inbox_one": "{{count}} 项待审批",
+    "inbox_other": "{{count}} 项待审批"
   }
 }

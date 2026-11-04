@@ -8,7 +8,8 @@ import {
   CURSOR_MODELS,
 } from '../../../../shared/modelConstants';
 import { PROVIDER_IDS, PROVIDER_INFO, getDefaultPermissionMode } from '../../../../shared/providers';
-import type { PendingPermissionRequest, PermissionMode } from '../types/types';
+import { usePendingApprovals } from '../../../contexts/PendingApprovalsContext';
+import type { PermissionMode } from '../types/types';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
 
 const MODEL_DEFAULTS: Record<LLMProvider, string> = {
@@ -30,7 +31,8 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => (
     getDefaultPermissionMode((localStorage.getItem('selected-provider') as LLMProvider) || 'claude')
   ));
-  const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
+  // 全域待審批池（design D16）：切換 provider 或會話都不清空，畫面只渲染目前會話的項目
+  const { pendingApprovals: pendingPermissionRequests, setPendingApprovals: setPendingPermissionRequests } = usePendingApprovals();
   const [provider, setProvider] = useState<LLMProvider>(() => {
     return (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
   });
@@ -44,7 +46,6 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     }));
   }, []);
 
-  const lastProviderRef = useRef(provider);
 
   // 切換 session（或回到新 session 畫面）時還原該 session 的模型
   useEffect(() => {
@@ -100,20 +101,6 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     setProvider(selectedSession.__provider);
     localStorage.setItem('selected-provider', selectedSession.__provider);
   }, [provider, selectedSession]);
-
-  useEffect(() => {
-    if (lastProviderRef.current === provider) {
-      return;
-    }
-    setPendingPermissionRequests([]);
-    lastProviderRef.current = provider;
-  }, [provider]);
-
-  useEffect(() => {
-    setPendingPermissionRequests((previous) =>
-      previous.filter((request) => !request.sessionId || request.sessionId === selectedSession?.id),
-    );
-  }, [selectedSession?.id]);
 
   useEffect(() => {
     if (provider !== 'cursor') {

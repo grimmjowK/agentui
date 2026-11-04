@@ -84,12 +84,12 @@
 
 ## 10. 階段三：統一權限審批收件匣（#2）
 
-- [ ] 10.1 `server/claude-sdk.js` 的 `waitForToolApproval` 記錄 `userId`，`resolveToolApproval(requestId, userId, payload)` 採嚴格比對（呼叫者缺少 `userId` 或不一致即拒絕，與 `codexApprovals.decide` 一致）；`chat-websocket.service.ts` 被拒時回覆警告；新增「其他使用者越權」與「呼叫者缺少 userId」兩個測試
-- [ ] 10.1a `TOOL_APPROVAL_TIMEOUT_MS` 預設值改為 600000，移除 `electron/main.js:214` 的 `?? '600000'` 覆寫，在 `.env.example` 補上 `CLAUDE_TOOL_APPROVAL_TIMEOUT_MS` 說明；確認逾時時仍送出 `permission_cancelled`
-- [ ] 10.2 `codexApprovals` 新增 `listPending(userId, sessionId?)`；Claude 與 Codex 的 `runtime.getPendingApprovals(userId, sessionId?)` 接通查詢，只回傳該使用者的項目；`chat-websocket.service.ts` 的 `get-pending-permissions` 支援帶 `sessionId`（單一會話）與不帶 `sessionId`（跨所有活躍會話匯總）
-- [ ] 10.3 `useChatRealtimeHandlers.ts` 的 `permission_request`、`complete`、`error` 處理改為只在事件 `sid` 等於目前選中會話時才改變載入中、可中斷與狀態文字（沿用 `isCurrentSession` 寫法）；背景會話的事件只更新全域待審批池；為「看著 S2 時 S1 請求審批」「看著執行中的 S2 時 S1 結束」寫元件測試
-- [ ] 10.4 前端移除 `useChatProviderState.ts` 在切換 provider 或 session 時清空 `pendingPermissionRequests` 的邏輯，改為全域待審批池（於 WebSocket 連線時拉取全量，並在 `complete`/`error`/`permission_cancelled` 時按事件 `sid` 清理）；`PermissionRequestsBanner` 僅過濾渲染當前 `selectedSession?.id` 的項目（需在 10.3 完成後進行）
-- [ ] 10.5 側邊欄會話列表依據全域 `pendingPermissionRequests` 在等待審批的會話旁顯示琥珀色「待審批」徽章，並在側邊欄頂部（有待審批項目時）提供「待審批收件匣」快速跳轉入口，補 i18n
+- [x] 10.1 `server/claude-sdk.js` 的 `waitForToolApproval` 記錄 `userId`，`resolveToolApproval(requestId, userId, payload)` 採嚴格比對（呼叫者缺少 `userId` 或不一致即拒絕，與 `codexApprovals.decide` 一致）；`chat-websocket.service.ts` 被拒時回覆警告；新增「其他使用者越權」與「呼叫者缺少 userId」兩個測試
+- [x] 10.1a `TOOL_APPROVAL_TIMEOUT_MS` 預設值改為 600000，移除 `electron/main.js:214` 的 `?? '600000'` 覆寫，在 `.env.example` 補上 `CLAUDE_TOOL_APPROVAL_TIMEOUT_MS` 說明；確認逾時時仍送出 `permission_cancelled`
+- [x] 10.2 `codexApprovals` 新增 `listPending(userId, sessionId?)`；Claude 與 Codex 的 `runtime.getPendingApprovals(userId, sessionId?)` 接通查詢，只回傳該使用者的項目；`chat-websocket.service.ts` 的 `get-pending-permissions` 支援帶 `sessionId`（單一會話）與不帶 `sessionId`（跨所有活躍會話匯總）
+- [x] 10.3 `useChatRealtimeHandlers.ts` 的 `permission_request`、`complete`、`error` 處理改為只在事件 `sid` 等於目前選中會話時才改變載入中、可中斷與狀態文字（沿用 `isCurrentSession` 寫法）；背景會話的事件只更新全域待審批池；為「看著 S2 時 S1 請求審批」「看著執行中的 S2 時 S1 結束」寫元件測試
+- [x] 10.4 前端移除 `useChatProviderState.ts` 在切換 provider 或 session 時清空 `pendingPermissionRequests` 的邏輯，改為全域待審批池（於 WebSocket 連線時拉取全量，並在 `complete`/`error`/`permission_cancelled` 時按事件 `sid` 清理）；`PermissionRequestsBanner` 僅過濾渲染當前 `selectedSession?.id` 的項目（需在 10.3 完成後進行）
+- [x] 10.5 側邊欄會話列表依據全域 `pendingPermissionRequests` 在等待審批的會話旁顯示琥珀色「待審批」徽章，並在側邊欄頂部（有待審批項目時）提供「待審批收件匣」快速跳轉入口，補 i18n
 
 ## 11. 收尾與文件同步
 

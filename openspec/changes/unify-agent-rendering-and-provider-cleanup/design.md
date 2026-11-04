@@ -344,6 +344,11 @@ interface IProviderRuntime {
   - 只讀 `brain/<sessionId>/` 頂層的 `.md`；`task.md.metadata.json` 與子目錄不讀。標題取第一個 `#` 標題，沒有就用檔名。
   - 路由回 404（會話不在索引）、400（`parseSessionId` 不通過）、`[]`（provider 未實作）。`realpath` 檢查同時涵蓋「會話目錄本身是指向外部的符號連結」與「目錄內的 `.md` 是指向外部的符號連結」兩種情況，都有單元測試。
   - 前端：按鈕放在標題列（`MainContentHeader` 新增 `extraActions` 插槽），面板放在聊天欄與編輯器側欄之間，只在 Chat 分頁顯示。瀏覽器確認：Antigravity 會話顯示「Artifacts 1」並能渲染 task.md；Codex 會話不顯示按鈕。`complete` 時自動刷新只以程式邏輯確認（依事件的 `sessionId` / `actualSessionId` 比對目前會話），沒有再跑一次 Antigravity 實測。
+- **階段三 · 統一審批收件匣（10.1–10.5）**：
+  - Claude 審批改為嚴格綁定 `userId`：`resolveToolApproval(requestId, userId, decision)` 回傳是否處理，WebSocket 被拒時回覆警告。預設逾時改為 10 分鐘，移除 Electron 的覆寫；逾時仍經 `onCancel('timeout')` 送出 `permission_cancelled`（有測試）。
+  - `get-pending-permissions` 不帶 `sessionId` 時跨所有 provider 匯總，每項附 `provider`。拿掉了原本「只在有 provider 持有該活躍會話時才回覆」的保護：Codex 現在也能從 `listPending` 查到待審批項目，空回覆就代表真的沒有，不會誤清 Codex 由即時串流重播的項目。
+  - 前端的全域池放在 `PendingApprovalsContext`（掛在 `WebSocketProvider` 內），狀態轉移是純函式 `applyApprovalEvent`。即時處理器不再改池，只在 `isEventForSession` 判定為目前會話時才改載入/中斷/狀態文字。專案沒有 jsdom / testing-library，10.3 要求的兩個情境改以純函式測試涵蓋（`src/utils/pendingApprovals.test.ts`），沒有寫元件測試。
+  - 瀏覽器實測（Codex 預設模式，寫工作區外的檔案）：收件匣與會話徽章出現；整頁重新載入後，連線時拉取全量即可還原；切到其他會話時不顯示橫幅；從收件匣跳回、允許後，指令執行，收件匣與徽章消失。
 
 ## Open Questions
 

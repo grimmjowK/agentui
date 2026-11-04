@@ -19,7 +19,10 @@ function fakeRuntime(overrides: Partial<IProviderRuntime> = {}): IProviderRuntim
   };
 }
 
-function connect(runtimes: Partial<Record<LLMProvider, IProviderRuntime>>) {
+function connect(
+  runtimes: Partial<Record<LLMProvider, IProviderRuntime>>,
+  resolveToolApproval: (...args: any[]) => boolean = () => true,
+) {
   const ws = Object.assign(new EventEmitter(), {
     readyState: 1,
     sent: [] as Sent[],
@@ -36,7 +39,7 @@ function connect(runtimes: Partial<Record<LLMProvider, IProviderRuntime>>) {
       },
     },
     resolveCodexApproval: () => true,
-    resolveToolApproval: () => {},
+    resolveToolApproval,
   });
   const send = async (message: Sent) => {
     ws.emit('message', Buffer.from(JSON.stringify(message)));
@@ -117,4 +120,32 @@ test('chat-steer：分派到 runtime.steer 並依結果回覆', async () => {
   assert.deepEqual(calls, [['s1', 7, 'hi'], ['s1', 7, 'again']]);
   assert.equal(ws.sent[0].type, 'steer-accepted');
   assert.deepEqual(ws.sent[1], { type: 'steer-rejected', provider: 'codex', sessionId: 's1', clientId: 'c2', text: 'again', reason: 'turn_not_started' });
+});
+
+test('claude-permission-response 帶上呼叫者 userId；被拒時回覆警告', async () => {
+  const calls: unknown[] = [];
+  const { ws, send } = connect({ claude: fakeRuntime() }, (...args) => { calls.push(args.slice(0, 2)); return false; });
+  await send({ type: 'claude-permission-response', requestId: 'r1', sessionId: 's1', allow: true });
+  assert.deepEqual(calls, [['r1', 7]]);
+  assert.equal(ws.sent[0].kind, 'task_notification');
+  assert.equal(ws.sent[0].status, 'warning');
+});
+
+test('get-pending-permissions 不帶 sessionId 時跨 provider 匯總，帶 sessionId 時只查該會話', async () => {
+  const calls: unknown[] = [];
+  const pending = (provider: string) => (userId: unknown, sessionId?: string) => {
+    calls.push([provider, userId, sessionId]);
+    return [{ requestId: `${provider}-1`, toolName: 'Bash', sessionId: 's1', receivedAt: 'now' }];
+  };
+  const { ws, send } = connect({
+    claude: fakeRuntime({ getPendingApprovals: pending('claude') }),
+    codex: fakeRuntime({ getPendingApprovals: pending('codex') }),
+    cursor: fakeRuntime(),
+  });
+  await send({ type: 'get-pending-permissions' });
+  assert.equal(ws.sent[0].sessionId, undefined);
+  assert.deepEqual(ws.sent[0].data.map((item: any) => [item.provider, item.requestId]), [['claude', 'claude-1'], ['codex', 'codex-1']]);
+  await send({ type: 'get-pending-permissions', sessionId: 's1' });
+  assert.equal(ws.sent[1].sessionId, 's1');
+  assert.deepEqual(calls, [['claude', 7, undefined], ['codex', 7, undefined], ['claude', 7, 's1'], ['codex', 7, 's1']]);
 });

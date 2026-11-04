@@ -7,6 +7,7 @@ import type { Project, ProjectSession, LLMProvider } from '../../../../types/app
 import type { SessionWithProvider } from '../../types/types';
 import { createSessionViewModel } from '../../utils/utils';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
+import { usePendingApprovals } from '../../../../contexts/PendingApprovalsContext';
 
 // 收藏态星标：实心紫，和未收藏的灰色描边拉开差距
 const STAR_ACTIVE_CLASS = 'fill-[#9b59b6] text-[#9b59b6]';
@@ -81,6 +82,13 @@ export default function SidebarSessionItem({
 }: SidebarSessionItemProps) {
   const sessionView = createSessionViewModel(session, currentTime, t);
   const isSelected = selectedSession?.id === session.id;
+  const { pendingApprovals } = usePendingApprovals();
+  const isAwaitingApproval = pendingApprovals.some((request) => request.sessionId === session.id);
+  const approvalBadge = isAwaitingApproval ? (
+    <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+      {t('pendingApprovals.badge')}
+    </span>
+  ) : null;
   const compactSessionAge = formatCompactSessionAge(sessionView.sessionTime, currentTime);
 
   // Sessions are owned by a project identified by `projectId` (DB primary key)
@@ -143,6 +151,7 @@ export default function SidebarSessionItem({
                     {sessionView.messageCount}
                   </Badge>
                 )}
+                {approvalBadge}
               </div>
             </div>
 
@@ -199,6 +208,7 @@ export default function SidebarSessionItem({
               </div>
               <div className="mt-0.5 flex items-center">
                 {sessionView.messageCount > 0 && <Badge variant="secondary" className="px-1 py-0 text-xs">{sessionView.messageCount}</Badge>}
+                {approvalBadge}
               </div>
             </div>
           </div>

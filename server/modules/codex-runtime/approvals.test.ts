@@ -111,3 +111,16 @@ test('actual recorded command fixture does not expose unadvertised decisions or 
   assert.equal(approvals.decide(id, 1, 't', 'accept'), true);
   assert.deepEqual(response, { id: 0, result: { decision: 'accept' } });
 });
+
+test('listPending 只列出該使用者的項目，可依會話過濾', () => {
+  const approvals = new CodexApprovals();
+  const add = (userId: string, threadId: string, id: number) => approvals.add({ userId, threadId, turnId: 'turn', instanceId: `r${id}`,
+    request: wire({ id, method: 'item/fileChange/requestApproval', params: {} }), reply: () => {}, notify: () => {} });
+  const mine = add('u1', 't1', 1);
+  add('u1', 't2', 2);
+  add('u2', 't1', 3);
+  assert.deepEqual(approvals.listPending('u1').map((item) => item.sessionId).sort(), ['t1', 't2']);
+  assert.deepEqual(approvals.listPending('u1', 't1').map((item) => item.requestId), [mine]);
+  assert.equal(approvals.listPending('u1')[0].provider, 'codex');
+  assert.deepEqual(approvals.listPending(null), []);
+});

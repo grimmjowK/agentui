@@ -243,7 +243,6 @@ function ChatInterface({
     setCanAbortSession,
     setClaudeStatus,
     setTokenBudget,
-    setPendingPermissionRequests,
     pendingViewSessionRef,
     streamTimerRef,
     accumulatedStreamRef,
@@ -293,10 +292,19 @@ function ChatInterface({
     return () => clearTimeout(timer);
   }, [isLoading, latestMessage, selectedSession, selectedProject, sendMessage]);
 
+  // 全域池含所有會話的項目，這裡只渲染目前會話的（尚未取得 id 的新會話請求也算目前會話）
+  const viewSessionId = selectedSession?.id || currentSessionId || null;
+  const sessionPermissionRequests = useMemo(
+    () => pendingPermissionRequests.filter((request) => (
+      request.sessionId ? request.sessionId === viewSessionId : !selectedSession?.id
+    )),
+    [pendingPermissionRequests, selectedSession?.id, viewSessionId],
+  );
+
   const permissionContextValue = useMemo(() => ({
-    pendingPermissionRequests,
+    pendingPermissionRequests: sessionPermissionRequests,
     handlePermissionDecision,
-  }), [pendingPermissionRequests, handlePermissionDecision]);
+  }), [sessionPermissionRequests, handlePermissionDecision]);
 
   if (!selectedProject) {
     const selectedProviderLabel = t(`messageTypes.${provider}`, { defaultValue: provider });
@@ -358,7 +366,7 @@ function ChatInterface({
         />
 
         <ChatComposer
-          pendingPermissionRequests={pendingPermissionRequests}
+          pendingPermissionRequests={sessionPermissionRequests}
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
           claudeStatus={claudeStatus}

@@ -210,8 +210,6 @@ async function startBackend() {
     ELECTRON_RUN_AS_NODE: '1',
     HOST: '127.0.0.1',
     SERVER_PORT: '0',
-    // 后端默认 55 秒无人审批即拒绝；桌面端常在后台，放宽到与 Codex 一致的 10 分钟（用户显式设置优先）
-    CLAUDE_TOOL_APPROVAL_TIMEOUT_MS: env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS ?? '600000',
     NODE_ENV: app.isPackaged ? 'production' : env.NODE_ENV ?? 'development',
   });
 

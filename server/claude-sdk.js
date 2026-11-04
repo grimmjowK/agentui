@@ -25,14 +25,14 @@ import {
   notifyRunStopped,
   notifyUserIfEnabled
 } from './services/notification-orchestrator.js';
-import { sessionsService } from './modules/providers/services/sessions.service.js';
-import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
+import { providerAuthService, sessionsService } from './modules/providers/index.js';
 import { createNormalizedMessage } from './shared/utils.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
 
-const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 55000;
+// 預設 10 分鐘，與 Codex 審批一致；0 以外的無效值回退預設
+const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 600000;
 
 const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
 const CLAUDE_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -92,7 +92,7 @@ function waitForToolApproval(requestId, options = {}) {
     const resolver = (decision) => {
       finalize(decision);
     };
-    // Attach metadata for getPendingApprovalsForSession lookup
+    // Attach metadata for getPendingApprovals lookup
     if (metadata) {
       Object.assign(resolver, metadata);
     }
@@ -100,11 +100,19 @@ function waitForToolApproval(requestId, options = {}) {
   });
 }
 
-function resolveToolApproval(requestId, decision) {
+/**
+ * 只有發起這個 run 的使用者能審批（與 codexApprovals.decide 相同的嚴格比對）：
+ * 呼叫者缺少 userId、或與請求記錄的 userId 不一致時拒絕。回傳是否已處理。
+ */
+function resolveToolApproval(requestId, userId, decision) {
   const resolver = pendingToolApprovals.get(requestId);
-  if (resolver) {
-    resolver(decision);
+  if (!resolver || userId === null || userId === undefined
+    || resolver._userId === null || resolver._userId === undefined
+    || String(resolver._userId) !== String(userId)) {
+    return false;
   }
+  resolver(decision);
+  return true;
 }
 
 // Match stored permission entries against a tool + input combo.
@@ -564,6 +572,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
         timeoutMs: requiresInteraction ? 0 : undefined,
         signal: context?.signal,
         metadata: {
+          _userId: ws?.userId ?? null,
           _sessionId: capturedSessionId || sessionId || null,
           _toolName: toolName,
           _input: input,
@@ -807,20 +816,24 @@ function getActiveClaudeSDKSessions() {
 }
 
 /**
- * Get pending tool approvals for a specific session.
- * @param {string} sessionId - The session ID
+ * 列出某使用者的待審批項目；帶 sessionId 時只列該會話，不帶則跨所有會話。
+ * @param {string|number|null} userId
+ * @param {string} [sessionId]
  * @returns {Array} Array of pending permission request objects
  */
-function getPendingApprovalsForSession(sessionId) {
+function getPendingApprovals(userId, sessionId) {
   const pending = [];
+  if (userId === null || userId === undefined) return pending;
   for (const [requestId, resolver] of pendingToolApprovals.entries()) {
-    if (resolver._sessionId === sessionId) {
+    if (String(resolver._userId) !== String(userId)) continue;
+    if (!sessionId || resolver._sessionId === sessionId) {
       pending.push({
         requestId,
         toolName: resolver._toolName || 'UnknownTool',
         input: resolver._input,
         context: resolver._context,
-        sessionId,
+        sessionId: resolver._sessionId,
+        provider: 'claude',
         receivedAt: resolver._receivedAt || new Date(),
       });
     }
@@ -850,7 +863,8 @@ export {
   isClaudeSDKSessionActive,
   getActiveClaudeSDKSessions,
   resolveToolApproval,
-  getPendingApprovalsForSession,
+  getPendingApprovals,
+  waitForToolApproval,
   reconnectSessionWriter,
   extractTokenBudget
 };

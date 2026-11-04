@@ -3,7 +3,7 @@ import type { IProviderRuntime, PendingApprovalItem, ProviderRuntimeWriter } fro
 import {
   abortClaudeSDKSession,
   getActiveClaudeSDKSessions,
-  getPendingApprovalsForSession,
+  getPendingApprovals,
   isClaudeSDKSessionActive,
   queryClaudeSDK,
   reconnectSessionWriter,
@@ -34,8 +34,7 @@ export class ClaudeRuntimeProvider implements IProviderRuntime {
     return getActiveClaudeSDKSessions();
   }
 
-  getPendingApprovals(_userId: string | number | null, sessionId?: string): PendingApprovalItem[] {
-    if (!sessionId || !this.isActive(sessionId)) return [];
-    return getPendingApprovalsForSession(sessionId) as PendingApprovalItem[];
+  getPendingApprovals(userId: string | number | null, sessionId?: string): PendingApprovalItem[] {
+    return getPendingApprovals(userId, sessionId) as PendingApprovalItem[];
   }
 }

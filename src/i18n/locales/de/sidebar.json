@@ -133,5 +133,10 @@
     "deleteAllData": "Alle Daten dauerhaft löschen",
     "allConversationsDeleted": "Das Projekt wird aus der Seitenleiste entfernt. Deine Dateien, Erinnerungen und Sitzungsdaten bleiben erhalten.",
     "cannotUndo": "Du kannst das Projekt später erneut hinzufügen."
+  },
+  "pendingApprovals": {
+    "badge": "Wartet auf Freigabe",
+    "inbox_one": "{{count}} Freigabe ausstehend",
+    "inbox_other": "{{count}} Freigaben ausstehend"
   }
 }

@@ -306,6 +306,10 @@ export function resolveCodexApproval(requestId: string, userId: string | number 
   return codexApprovals.decide(requestId, userId, threadId, decision);
 }
 
+export function listPendingCodexApprovals(userId: string | number | null, sessionId?: string) {
+  return codexApprovals.listPending(userId, sessionId);
+}
+
 export function reconnectCodexSession(sessionId: string, writer: CodexWriter) {
   const state = activeCodexSessions.get(sessionId);
   if (!state || state.userId === null || String(state.userId) !== String(writer.userId)) return false;

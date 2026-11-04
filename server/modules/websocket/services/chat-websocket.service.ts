@@ -66,13 +66,14 @@ type ChatWebSocketDependencies = {
   resolveCodexApproval: (requestId: string, userId: string | number | null, threadId: string, decision: unknown) => boolean;
   resolveToolApproval: (
     requestId: string,
+    userId: string | number | null,
     payload: {
       allow: boolean;
       updatedInput?: unknown;
       message?: string;
       rememberEntry?: unknown;
     }
-  ) => void;
+  ) => boolean;
 };
 
 /** Resolves the payload's provider; an unknown or missing provider is a client error. */
@@ -192,12 +193,15 @@ export function handleChatConnection(
 
       if (messageType === 'claude-permission-response') {
         if (typeof data.requestId === 'string' && data.requestId.length > 0) {
-          dependencies.resolveToolApproval(data.requestId, {
+          const ok = dependencies.resolveToolApproval(data.requestId, writer.userId, {
             allow: Boolean(data.allow),
             updatedInput: data.updatedInput,
             message: typeof data.message === 'string' ? data.message : undefined,
             rememberEntry: data.rememberEntry,
           });
+          if (!ok) writer.send(createNormalizedMessage({ kind: 'task_notification', provider: 'claude',
+            sessionId: typeof data.sessionId === 'string' ? data.sessionId : null, status: 'warning',
+            summary: 'Approval is no longer valid or does not belong to this session.' }));
         }
         return;
       }
@@ -215,17 +219,14 @@ export function handleChatConnection(
       }
 
       if (messageType === 'get-pending-permissions') {
-        const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
-        if (!sessionId) return;
-        const sources = registry.listProviders()
-          .filter(({ runtime }) => runtime.getPendingApprovals && runtime.isActive(sessionId));
-        // Only answer when a provider owns this live session; an empty reply would
-        // wipe approvals other providers replay through their realtime stream.
-        if (sources.length === 0) return;
+        // 帶 sessionId：只回該會話；不帶：跨所有活躍會話匯總（全域待審批池，design D16）。
+        // 各 runtime 只回傳呼叫者自己的項目。
+        const sessionId = typeof data.sessionId === 'string' && data.sessionId ? data.sessionId : undefined;
         writer.send({
           type: 'pending-permissions-response',
-          sessionId,
-          data: sources.flatMap(({ runtime }) => runtime.getPendingApprovals?.(writer.userId, sessionId) ?? []),
+          ...(sessionId ? { sessionId } : {}),
+          data: registry.listProviders().flatMap(({ id, runtime }) =>
+            (runtime.getPendingApprovals?.(writer.userId, sessionId) ?? []).map((item) => ({ provider: id, ...item }))),
         });
         return;
       }

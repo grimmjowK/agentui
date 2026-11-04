@@ -1,9 +1,10 @@
-import type { IProviderRuntime, ProviderRuntimeWriter } from '@/shared/interfaces.js';
+import type { IProviderRuntime, PendingApprovalItem, ProviderRuntimeWriter } from '@/shared/interfaces.js';
 
 import {
   abortCodexSession,
   getActiveCodexSessions,
   isCodexSessionActive,
+  listPendingCodexApprovals,
   queryCodex,
   reconnectCodexSession,
   steerCodexSession,
@@ -36,5 +37,9 @@ export class CodexRuntimeProvider implements IProviderRuntime {
 
   listActive(): unknown {
     return getActiveCodexSessions();
+  }
+
+  getPendingApprovals(userId: string | number | null, sessionId?: string): PendingApprovalItem[] {
+    return listPendingCodexApprovals(userId, sessionId);
   }
 }

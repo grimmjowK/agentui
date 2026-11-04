@@ -49,6 +49,7 @@ export type PendingApprovalItem = {
   input?: unknown;
   context?: unknown;
   sessionId: string;
+  provider?: LLMProvider;
   receivedAt: Date | string;
 };
 

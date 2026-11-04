@@ -133,5 +133,10 @@
     "deleteAllData": "Tüm veriyi kalıcı olarak sil",
     "allConversationsDeleted": "Proje kenar çubuğundan kaldırılacak. Dosyaların, bellek verilerin ve oturum verilerin korunacak.",
     "cannotUndo": "Projeyi sonra tekrar ekleyebilirsin."
+  },
+  "pendingApprovals": {
+    "badge": "Onay bekliyor",
+    "inbox_one": "{{count}} onay bekliyor",
+    "inbox_other": "{{count}} onay bekliyor"
   }
 }

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useDeviceSettings } from '../../../hooks/useDeviceSettings';
@@ -8,12 +8,14 @@ import { useSidebarController } from '../hooks/useSidebarController';
 import { useTaskMaster } from '../../../contexts/TaskMasterContext';
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
+import { usePendingApprovals } from '../../../contexts/PendingApprovalsContext';
 import type { Project, LLMProvider } from '../../../types/app';
 import type { MCPServerStatus, SidebarProps } from '../types/types';
 
 import SidebarCollapsed from './subcomponents/SidebarCollapsed';
 import SidebarContent from './subcomponents/SidebarContent';
 import SidebarModals from './subcomponents/SidebarModals';
+import PendingApprovalsInbox, { type PendingInboxItem } from './subcomponents/PendingApprovalsInbox';
 import type { SidebarProjectListProps } from './subcomponents/SidebarProjectList';
 
 type TaskMasterSidebarContext = {
@@ -187,6 +189,63 @@ function Sidebar({
     t,
   };
 
+  const openSessionFromResult = (projectId: string | null, sessionId: string, provider: string, messageTimestamp?: string | null, messageSnippet?: string | null) => {
+    // `projectId` (DB key) is the canonical identifier post-migration.
+    // The server emits null when it can't resolve a project row for
+    // the search hit; treat that as "no project" and still navigate
+    // to the session so the user can open it from the URL.
+    const resolvedProvider = (provider || 'claude') as LLMProvider;
+    const project = projectId ? projects.find(p => p.projectId === projectId) : null;
+    const searchTarget = { __searchTargetTimestamp: messageTimestamp || null, __searchTargetSnippet: messageSnippet || null };
+    const sessionObj = {
+      id: sessionId,
+      __provider: resolvedProvider,
+      __projectId: projectId ?? undefined,
+      ...searchTarget,
+    };
+    if (project) {
+      handleProjectSelect(project);
+      const sessions = getProjectSessions(project);
+      const existing = sessions.find(s => s.id === sessionId);
+      if (existing) {
+        handleSessionClick({ ...existing, ...searchTarget }, project.projectId);
+      } else {
+        handleSessionClick(sessionObj, project.projectId);
+      }
+    } else {
+      handleSessionClick(sessionObj, projectId ?? '');
+    }
+  };
+
+  // 待審批收件匣（design D16）：依會話彙總全域池，順便找出所屬專案與會話名稱
+  const { pendingApprovals } = usePendingApprovals();
+  const inboxItems = useMemo(() => {
+    const bySession = new Map<string, PendingInboxItem>();
+    for (const request of pendingApprovals) {
+      if (!request.sessionId) continue;
+      const existing = bySession.get(request.sessionId);
+      if (existing) {
+        existing.count += 1;
+        continue;
+      }
+      let projectId: string | null = null;
+      let label = request.sessionId.slice(0, 8);
+      for (const project of projects) {
+        const session = getProjectSessions(project).find((candidate) => candidate.id === request.sessionId);
+        if (session) {
+          projectId = project.projectId;
+          label = String(session.summary || session.name || label);
+          break;
+        }
+      }
+      bySession.set(request.sessionId, {
+        sessionId: request.sessionId, provider: request.provider || 'claude', projectId, label, count: 1,
+      });
+    }
+    return [...bySession.values()];
+  }, [getProjectSessions, pendingApprovals, projects]);
+
+
   return (
     <>
         <SidebarModals
@@ -246,33 +305,14 @@ function Sidebar({
                 { isArchived: true },
               );
             }}
-            onConversationResultClick={(projectId: string | null, sessionId: string, provider: string, messageTimestamp?: string | null, messageSnippet?: string | null) => {
-              // `projectId` (DB key) is the canonical identifier post-migration.
-              // The server emits null when it can't resolve a project row for
-              // the search hit; treat that as "no project" and still navigate
-              // to the session so the user can open it from the URL.
-              const resolvedProvider = (provider || 'claude') as LLMProvider;
-              const project = projectId ? projects.find(p => p.projectId === projectId) : null;
-              const searchTarget = { __searchTargetTimestamp: messageTimestamp || null, __searchTargetSnippet: messageSnippet || null };
-              const sessionObj = {
-                id: sessionId,
-                __provider: resolvedProvider,
-                __projectId: projectId ?? undefined,
-                ...searchTarget,
-              };
-              if (project) {
-                handleProjectSelect(project);
-                const sessions = getProjectSessions(project);
-                const existing = sessions.find(s => s.id === sessionId);
-                if (existing) {
-                  handleSessionClick({ ...existing, ...searchTarget }, project.projectId);
-                } else {
-                  handleSessionClick(sessionObj, project.projectId);
-                }
-              } else {
-                handleSessionClick(sessionObj, projectId ?? '');
-              }
-            }}
+            onConversationResultClick={openSessionFromResult}
+            pendingApprovalsInbox={(
+              <PendingApprovalsInbox
+                items={inboxItems}
+                onOpen={(item) => openSessionFromResult(item.projectId, item.sessionId, item.provider)}
+                t={t}
+              />
+            )}
             onRefresh={() => {
               void refreshProjects();
             }}

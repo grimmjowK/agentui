@@ -132,6 +132,8 @@ type SidebarContentProps = {
   // Conversation result clicks pass back the DB projectId (or null when the
   // server couldn't resolve it). Consumers must handle the null case.
   onConversationResultClick: (projectId: string | null, sessionId: string, provider: string, messageTimestamp?: string | null, messageSnippet?: string | null) => void;
+  /** 待審批收件匣，有項目時顯示在搜尋框下方。 */
+  pendingApprovalsInbox?: ReactNode;
   onRefresh: () => void;
   isRefreshing: boolean;
   onCreateProject: () => void;
@@ -163,6 +165,7 @@ export default function SidebarContent({
   onRestoreArchivedSession,
   onDeleteArchivedSession,
   onConversationResultClick,
+  pendingApprovalsInbox,
   onRefresh,
   isRefreshing,
   onCreateProject,
@@ -206,6 +209,8 @@ export default function SidebarContent({
         onCollapseSidebar={onCollapseSidebar}
         t={t}
       />
+
+      {pendingApprovalsInbox}
 
       <ScrollArea className="flex-1 overflow-y-auto overscroll-contain md:px-1.5 md:py-2">
         {showConversationSearch ? (
