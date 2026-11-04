@@ -1,55 +1,93 @@
 /** Codex chat runtime: app-server JSON-RPC, with explicit approval replies. */
-import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { CodexAppServer } from './modules/codex-runtime/index.js';
-import { codexOwnership } from './modules/codex-runtime/index.js';
-import { codexApprovals } from './modules/codex-runtime/index.js';
-import { terminateShellSessionsBySessionId } from './modules/websocket/services/shell-websocket.service.js';
+import fs from 'node:fs';
+
+import { CodexAppServer, codexApprovals, codexOwnership } from './modules/codex-runtime/index.js';
+import type { ThreadItem, ThreadStartParams, TurnCompletedNotification } from './modules/codex-runtime/index.js';
+import { mapPlanUpdate, mapThreadItem } from './modules/providers/index.js';
+import { terminateShellSessionsBySessionId } from './modules/websocket/index.js';
 import { getCodexRuntimeInfo } from './shared/codex-cli-path.js';
 import { createNormalizedMessage } from './shared/utils.js';
-import { mapPlanUpdate, mapThreadItem } from './modules/providers/list/codex/codex-item-mapper.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
+import type { ProviderRuntimeWriter } from './shared/interfaces.js';
+import type { NormalizedMessage } from './shared/types.js';
 
 const CODEX_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh']);
 
-const activeCodexSessions = new Map();
-const pendingRuns = new Set();
-function notifySafely(notify, payload) {
-  try { notify(payload); } catch (error) { console.warn('Codex notification delivery failed:', error.message); }
+type CodexWriter = ProviderRuntimeWriter & {
+  isWebSocketWriter?: boolean;
+  isSSEStreamWriter?: boolean;
+  readyState?: number;
+};
+
+type CodexRunOptions = {
+  sessionId?: string;
+  cwd?: string;
+  projectPath?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  sessionSummary?: string;
+};
+
+type RunState = {
+  instanceId: string;
+  writer: CodexWriter;
+  userId: string | number | null;
+  rpc: CodexAppServer | null;
+  turnId: string | null;
+  status: 'running';
+  startedAt: string;
+  interrupted: boolean;
+  finished: boolean;
+  released?: Promise<void>;
+  runtime?: ReturnType<typeof getCodexRuntimeInfo>;
+  onInterrupt?: () => void;
+};
+
+type Turn = TurnCompletedNotification['turn'];
+/** 送給前端的訊息；provider 由 send() 補上。 */
+type Emitted = { kind: NormalizedMessage['kind'] } & Record<string, unknown>;
+
+const activeCodexSessions = new Map<string, RunState>();
+const pendingRuns = new Set<RunState>();
+// notification-orchestrator 是 JS，推導出的參數型別過窄，這裡以寬鬆型別呼叫
+function notifySafely(notify: (payload: any) => unknown, payload: Record<string, unknown>) {
+  try { notify(payload); } catch (error) { console.warn('Codex notification delivery failed:', (error as Error).message); }
 }
 
-export function mapPermissionModeToCodexOptions(mode) {
+export function mapPermissionModeToCodexOptions(mode: unknown): Pick<ThreadStartParams, 'sandbox' | 'approvalPolicy'> {
   if (mode === 'bypassPermissions') return { sandbox: 'danger-full-access', approvalPolicy: 'never' };
   if (mode === 'acceptEdits') return { sandbox: 'workspace-write', approvalPolicy: 'never' };
   return { sandbox: 'workspace-write', approvalPolicy: 'on-request' };
 }
 
-function send(writer, message) {
+function send(writer: CodexWriter, message: Emitted) {
   const normalized = createNormalizedMessage({ provider: 'codex', ...message });
   if (writer.isWebSocketWriter || writer.isSSEStreamWriter) writer.send(normalized);
   else if (writer.readyState === undefined || writer.readyState === 1) writer.send(JSON.stringify(normalized));
 }
 
-export async function queryCodex(command, options = {}, writer) {
-  let threadId = options.sessionId || null;
-  const state = {
+export async function queryCodex(command: string, options: CodexRunOptions = {}, writer: CodexWriter) {
+  let threadId: string | null = options.sessionId || null;
+  const state: RunState = {
     instanceId: randomUUID(), writer, userId: writer.userId ?? null,
     rpc: null, turnId: null, status: 'running', startedAt: new Date().toISOString(),
     interrupted: false, finished: false,
   };
-  const emit = (message) => send(state.writer, { sessionId: threadId, ...message });
-  let finish;
-  let fail;
-  const completion = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+  const emit = (message: Emitted) => send(state.writer, { sessionId: threadId, ...message });
+  let finish!: (turn: Turn) => void;
+  let fail!: (error: Error) => void;
+  const completion = new Promise<Turn>((resolve, reject) => { finish = resolve; fail = reject; });
   // Failure can arrive during initialization, before completion is awaited.
   void completion.catch(() => {});
-  let resolveReleased;
+  let resolveReleased: (() => void) | undefined;
   state.released = new Promise((resolve) => { resolveReleased = resolve; });
-  let startupTimer;
-  let interruptTimer;
-  let lease;
-  let terminalMessage;
-  const items = new Map();
+  let startupTimer: ReturnType<typeof setTimeout> | undefined;
+  let interruptTimer: ReturnType<typeof setTimeout> | undefined;
+  let lease: ReturnType<typeof codexOwnership.acquire> | undefined;
+  let terminalMessage: Emitted | undefined;
+  const items = new Map<string, ThreadItem>();
   // delta 的 itemId 與 item/completed 的 item.id 格式不一致（0.163），不能按 id 配對；只記錄是否有未收尾的串流
   let streaming = false;
   try {
@@ -78,9 +116,9 @@ export async function queryCodex(command, options = {}, writer) {
     state.rpc = rpc;
     rpc.on('failure', (error) => { if (!state.finished) fail(error); });
     rpc.on('request', (request) => {
-      const params = request.params || {};
+      const { params } = request;
       const supported = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'];
-      if (!supported.includes(request.method) || state.userId === null || params.threadId !== threadId
+      if (!supported.includes(request.method) || state.userId === null || !threadId || params?.threadId !== threadId
         || (state.turnId && params.turnId !== state.turnId) || state.interrupted || state.finished) {
         rpc.send({ id: request.id, error: { code: -32601, message: 'Unsupported or invalid Codex approval request' } });
         fail(new Error(`Unsupported or invalid Codex request: ${request.method}`));
@@ -88,63 +126,77 @@ export async function queryCodex(command, options = {}, writer) {
       }
       codexApprovals.add({
         userId: state.userId, threadId, turnId: params.turnId, instanceId: state.instanceId,
-        request, item: items.get(params.itemId), notify: emit,
+        request, item: 'itemId' in params ? items.get(params.itemId) : undefined, notify: emit,
         reply: (result) => rpc.send({ id: request.id, result }),
       });
     });
-    rpc.on('notification', ({ method, params = {} }) => {
-      if (params.threadId && params.threadId !== threadId) return;
+    rpc.on('notification', (notification) => {
+      // 型別只列出介接層處理的方法；其他通知會落到 default 被忽略
+      const params = notification.params as { threadId?: string } | undefined;
+      if (params?.threadId && params.threadId !== threadId) return;
       if (state.finished) return;
-      if (method === 'turn/started') state.turnId = params.turn.id;
-      if (method === 'item/agentMessage/delta') {
-        streaming = true;
-        emit({ kind: 'stream_delta', content: params.delta });
-      }
-      if (method === 'item/started' || method === 'item/completed') {
-        const item = params.item;
-        if (!item) return;
-        items.set(item.id, item);
-        const isCompleted = method === 'item/completed';
-        if (item.type === 'agentMessage' && isCompleted) {
-          if (streaming) { streaming = false; emit({ kind: 'stream_end' }); }
-          emit({ id: item.id, kind: 'text', role: 'assistant', content: item.text || '' });
-        } else {
-          for (const message of mapThreadItem(item, isCompleted ? 'completed' : 'started')) emit(message);
+      switch (notification.method) {
+        case 'turn/started':
+          state.turnId = notification.params.turn.id;
+          break;
+        case 'item/agentMessage/delta':
+          streaming = true;
+          emit({ kind: 'stream_delta', content: notification.params.delta });
+          break;
+        case 'item/started':
+        case 'item/completed': {
+          const { item } = notification.params;
+          if (!item) return;
+          items.set(item.id, item);
+          const isCompleted = notification.method === 'item/completed';
+          if (item.type === 'agentMessage' && isCompleted) {
+            if (streaming) { streaming = false; emit({ kind: 'stream_end' }); }
+            emit({ id: item.id, kind: 'text', role: 'assistant', content: item.text || '' });
+          } else {
+            for (const message of mapThreadItem(item, isCompleted ? 'completed' : 'started')) emit(message);
+          }
+          break;
         }
+        case 'turn/plan/updated':
+          for (const message of mapPlanUpdate(notification.params)) emit(message);
+          break;
+        case 'thread/tokenUsage/updated': {
+          // last 是最近一轮实际送进模型的量，即上下文占用；total 是整个线程的累计值，会虚高
+          const { last, modelContextWindow } = notification.params.tokenUsage ?? {};
+          if (last && modelContextWindow) emit({ kind: 'status', text: 'token_budget', tokenBudget: {
+            used: last.totalTokens, total: modelContextWindow,
+          } });
+          break;
+        }
+        case 'turn/completed':
+          state.turnId = notification.params.turn.id;
+          finish(notification.params.turn);
+          break;
+        case 'error':
+          if (!notification.params.willRetry) fail(new Error(notification.params.error?.message || 'Codex run failed'));
+          break;
+        default:
+          break;
       }
-      if (method === 'turn/plan/updated') {
-        for (const message of mapPlanUpdate(params)) emit(message);
-      }
-      if (method === 'thread/tokenUsage/updated') {
-        // last 是最近一轮实际送进模型的量，即上下文占用；total 是整个线程的累计值，会虚高
-        const last = params.tokenUsage?.last;
-        if (last && params.tokenUsage.modelContextWindow) emit({ kind: 'status', text: 'token_budget', tokenBudget: {
-          used: last.totalTokens, total: params.tokenUsage.modelContextWindow,
-        } });
-      }
-      if (method === 'turn/completed') {
-        state.turnId = params.turn.id;
-        finish(params.turn);
-      }
-      if (method === 'error' && !params.willRetry) fail(new Error(params.error?.message || 'Codex run failed'));
     });
     startupTimer = setTimeout(() => { fail(new Error('Codex startup timed out')); void rpc.close(); }, 60000);
     state.onInterrupt = () => { interruptTimer = setTimeout(() => { void rpc.close(); }, 7000); };
     await rpc.initialize();
     let model = options.model;
     if (!threadId && !model) {
-      const models = await rpc.request('model/list');
+      const models = await rpc.request('model/list', {});
       model = models.data?.find((entry) => entry.isDefault)?.model;
     }
-    const threadOptions = {
+    const threadOptions: ThreadStartParams = {
       cwd, ...mapPermissionModeToCodexOptions(options.permissionMode), approvalsReviewer: 'user',
       ...(model ? { model } : {}),
     };
     // paginated thread 的全量 hydration 已 deprecated（0.163.0），resume 时带 excludeTurns:true
     // 只取元数据与 live-resume 状态，避免触发 "paginated_threads is not supported yet"。
     // 历史记录 agentui 另行从 ~/.codex rollout 文件读取，不依赖这里的 turns。
-    const result = await rpc.request(threadId ? 'thread/resume' : 'thread/start',
-      threadId ? { ...threadOptions, threadId, excludeTurns: true } : threadOptions);
+    const result = threadId
+      ? await rpc.request('thread/resume', { ...threadOptions, threadId, excludeTurns: true })
+      : await rpc.request('thread/start', threadOptions);
     if (threadId && result.thread.cwd && fs.realpathSync(result.thread.cwd) !== fs.realpathSync(cwd)) throw new Error('Codex thread belongs to a different project');
     if (threadId && result.thread.id !== threadId) throw new Error('Codex resumed a different thread');
     threadId = result.thread.id;
@@ -161,7 +213,7 @@ export async function queryCodex(command, options = {}, writer) {
     const turn = await rpc.request('turn/start', {
       threadId, input: [{ type: 'text', text: command, text_elements: [] }],
       // 推理强度对本轮及之后的轮次生效；未指定则沿用线程 / config.toml 的设置
-      ...(CODEX_EFFORT_LEVELS.has(options.effort) ? { effort: options.effort } : {}),
+      ...(options.effort && CODEX_EFFORT_LEVELS.has(options.effort) ? { effort: options.effort } : {}),
     });
     state.turnId = turn.turn.id;
     clearTimeout(startupTimer);
@@ -180,7 +232,8 @@ export async function queryCodex(command, options = {}, writer) {
     terminalMessage = { kind: 'complete', actualSessionId: threadId, aborted: state.interrupted };
     notifySafely(notifyRunStopped, { userId: state.userId, provider: 'codex', sessionId: threadId,
       sessionName: options.sessionSummary, stopReason: state.interrupted ? 'aborted' : 'completed' });
-  } catch (error) {
+  } catch (caught) {
+    const error = caught as Error;
     state.finished = true;
     if (state.interrupted) {
       emit({
@@ -205,7 +258,7 @@ export async function queryCodex(command, options = {}, writer) {
     state.finished = true;
     codexApprovals.clear(state.instanceId);
     await state.rpc?.close();
-    if (activeCodexSessions.get(threadId) === state) activeCodexSessions.delete(threadId);
+    if (threadId && activeCodexSessions.get(threadId) === state) activeCodexSessions.delete(threadId);
     pendingRuns.delete(state);
     if (lease) codexOwnership.release(lease);
     resolveReleased?.();
@@ -213,32 +266,33 @@ export async function queryCodex(command, options = {}, writer) {
   }
 }
 
-export function resolveCodexApproval(requestId, userId, threadId, decision) {
+export function resolveCodexApproval(requestId: string, userId: string | number | null, threadId: string, decision: unknown) {
   return codexApprovals.decide(requestId, userId, threadId, decision);
 }
 
-export function reconnectCodexSession(sessionId, writer) {
+export function reconnectCodexSession(sessionId: string, writer: CodexWriter) {
   const state = activeCodexSessions.get(sessionId);
   if (!state || state.userId === null || String(state.userId) !== String(writer.userId)) return false;
   state.writer = writer;
-  codexApprovals.replay(writer.userId, sessionId, (message) => send(writer, message));
+  codexApprovals.replay(writer.userId ?? null, sessionId, (message) => send(writer, message));
   return true;
 }
 
-export function abortCodexSession(sessionId, userId) {
+export function abortCodexSession(sessionId: string, userId?: string | number) {
   const state = activeCodexSessions.get(sessionId);
   if (!state || state.finished || (userId !== undefined && String(state.userId) !== String(userId))) return false;
   state.interrupted = true;
   state.onInterrupt?.();
   codexApprovals.clear(state.instanceId);
-  if (state.turnId) {
-    void state.rpc.request('turn/interrupt', { threadId: sessionId, turnId: state.turnId }, 5000)
-      .catch(() => state.rpc.close());
+  if (state.turnId && state.rpc) {
+    const { rpc } = state;
+    void rpc.request('turn/interrupt', { threadId: sessionId, turnId: state.turnId }, 5000)
+      .catch(() => rpc.close());
   } else void state.rpc?.close();
   return true;
 }
 
-export async function stopCodexSessionAndWait(sessionId, userId) {
+export async function stopCodexSessionAndWait(sessionId: string, userId?: string | number | null) {
   const state = activeCodexSessions.get(sessionId);
   if (!state) return false;
   if (userId !== undefined && userId !== null && String(state.userId) !== String(userId)) return false;
@@ -251,7 +305,7 @@ export async function stopCodexSessionAndWait(sessionId, userId) {
   return true;
 }
 
-export function isCodexSessionActive(sessionId) { return activeCodexSessions.has(sessionId); }
+export function isCodexSessionActive(sessionId: string) { return activeCodexSessions.has(sessionId); }
 export function getActiveCodexSessions() {
   return [...activeCodexSessions].map(([id, state]) => ({ id, status: state.status, startedAt: state.startedAt }));
 }

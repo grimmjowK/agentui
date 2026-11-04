@@ -329,6 +329,11 @@ interface IProviderRuntime {
   - 基準比對：以真實資料庫的 Claude 540 筆、Codex 114 筆會話跑 10 組關鍵字，搬移前後的命中會話與片段相同；唯一差異是另一個視窗在兩次執行之間寫入的會話。
   - Antigravity 只搜尋 `USER_INPUT`（取 `<USER_REQUEST>` 內文）與 `PLANNER_RESPONSE` 的 `content`，不含工具輸出（`GENERIC`）與 `SYSTEM_MESSAGE`。
   - **cursor（6.4）**：開發機的 `~/.cursor/projects` 與 `~/.cursor/chats` 皆為空，也沒有安裝 cursor-agent，無法以真實資料確認，所以先不實作。現有 synchronizer 會從這些 JSONL 的 `role: 'user'` 行讀 `message.content[0].text` 當會話名稱，可見至少有使用者文字；取得真實檔案後確認助手訊息的形狀，再補 `extractSearchableMessages`。在那之前搜尋回應的 `unsearchableProviders` 為 `['cursor']`，側邊欄會顯示提示。
+- **階段三 · Codex 協議型別（7.1–7.3）**：
+  - `scripts/codex-gen-types.mjs` 以「用到的方法清單」為入口：從生成的 `ClientRequest` / `ServerNotification` / `ServerRequest` 讀出各方法的參數型別（回應型別依 `XxxParams` → `XxxResponse` 慣例），沿 import 收集相依檔，共 136 個檔案（完整生成 747 個）。完整的 union 會拉進 426 個檔案，所以 `protocol/index.ts` 改生成只含用到方法的 `ClientRequestMap`、`ServerNotification`、`ServerRequestMap`，而不是提交完整 union。相對 import 補上 `.js`，以符合後端的 NodeNext 解析。
+  - 型別立即抓到的差異：`initialize` 的 `clientInfo.title` 與 `capabilities.requestAttestation` 在 0.163 為必填（補上 `null` / `false`）；審批參數已沒有 `availableDecisions`（只有 0.155 會送），程式本來就會退回預設集合，改為明確當成舊欄位讀取；`webSearch.action` 是依種類帶 `query` 或 `url` 的 union。
+  - `openai-codex.ts` 原本直接 import 其他模組內部檔案，轉成 `.ts` 後被 boundaries 規則檢查到，改從 `providers`、`websocket` 的入口引入；`notification-orchestrator.js` 歸入 `backend-legacy-runtime`。
+  - 以真實 codex 0.163.0 跑一輪（建立會話 → Bash 工具 → 回覆）確認：`session_created`、`tool_use`、`status`、串流、`text`、`complete` 皆正常。
 
 ## Open Questions
 

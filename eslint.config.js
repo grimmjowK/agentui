@@ -188,7 +188,8 @@ export default tseslint.config(
             // provider runtime adapters (providers/list/*/*-runtime.provider.ts) wrap these root runtimes
             "server/claude-sdk.js",
             "server/cursor-cli.js",
-            "server/openai-codex.js",
+            "server/openai-codex.ts",
+            "server/services/notification-orchestrator.js",
             "server/antigravity-cli.js",
           ], // provider history loading still resolves session data through these legacy runtime files
           mode: "file",

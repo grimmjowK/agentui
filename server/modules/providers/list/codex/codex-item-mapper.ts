@@ -5,9 +5,10 @@
  * 輸出相同的 `MappedMessage`，呼叫端再補上 provider/sessionId/timestamp。
  * 映射目標沿用前端既有的 Claude 工具形狀（Bash/Edit/Write/TodoWrite…）。
  */
-import type { AnyRecord } from '@/shared/types.js';
+import type { ThreadItem, TurnPlanUpdatedNotification } from '@/modules/codex-runtime/index.js';
+import type { AnyRecord, MessageKind } from '@/shared/types.js';
 
-export type MappedMessage = { kind: string } & AnyRecord;
+export type MappedMessage = { kind: MessageKind } & AnyRecord;
 
 /** 檔案變更的中間形狀：即時 `FileUpdateChange` 與歷史 `apply_patch` 都先收斂到這裡。 */
 export type CodexFileChange = {
@@ -197,11 +198,18 @@ function splitFileChanges(baseId: string, changes: CodexFileChange[]): MappedMes
 // 即時路徑：app-server ThreadItem
 // ---------------------------------------------------------------------------
 
+/** webSearch 的 action 依種類帶 query 或 url。 */
+function webSearchTarget(action: Extract<ThreadItem, { type: 'webSearch' }>['action']): string {
+  if (action && 'query' in action && action.query) return action.query;
+  if (action && 'url' in action && action.url) return action.url;
+  return '';
+}
+
 /**
  * 映射 `item/started` / `item/completed` 的 ThreadItem。
  * `agentMessage`、`userMessage` 由呼叫端自行處理（串流相關），這裡回傳空陣列。
  */
-export function mapThreadItem(item: AnyRecord, phase: 'started' | 'completed'): MappedMessage[] {
+export function mapThreadItem(item: ThreadItem, phase: 'started' | 'completed'): MappedMessage[] {
   const isCompleted = phase === 'completed';
   const id = String(item.id ?? '');
 
@@ -256,7 +264,7 @@ export function mapThreadItem(item: AnyRecord, phase: 'started' | 'completed'): 
     case 'webSearch':
       return [{
         kind: 'tool_use', id, toolId: id, toolName: 'WebSearch',
-        toolInput: { query: item.query || item.action?.query || item.action?.url || '' },
+        toolInput: { query: item.query || webSearchTarget(item.action) },
         ...(isCompleted ? { toolResult: { content: '', isError: false } } : {}),
       }];
 
@@ -289,7 +297,7 @@ export function mapThreadItem(item: AnyRecord, phase: 'started' | 'completed'): 
 }
 
 /** `turn/plan/updated` 通知 → TodoWrite；同一輪重複更新共用同一個 id，前端按 id 覆蓋。 */
-export function mapPlanUpdate(params: AnyRecord): MappedMessage[] {
+export function mapPlanUpdate(params: Pick<TurnPlanUpdatedNotification, 'turnId' | 'plan'>): MappedMessage[] {
   const id = `plan:${params.turnId ?? 'unknown'}`;
   return [{
     kind: 'tool_use', id, toolId: id, toolName: 'TodoWrite',

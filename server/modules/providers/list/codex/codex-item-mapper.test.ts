@@ -11,6 +11,10 @@ import {
   unwrapShellCommand,
   type MappedMessage,
 } from '@/modules/providers/list/codex/codex-item-mapper.js';
+import type { ThreadItem } from '@/modules/codex-runtime/index.js';
+
+/** 測試只給出與映射相關的欄位，其餘協議欄位省略。 */
+const item = (fields: Record<string, unknown>) => fields as unknown as ThreadItem;
 
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -27,7 +31,7 @@ const resultsById = (messages: MappedMessage[]) =>
   new Map(messages.filter((m) => m.kind === 'tool_result').map((m) => [m.toolId, m]));
 
 test('即時 fileChange 與歷史 apply_patch 映射同構（新增/改名/刪除）', () => {
-  const live = mapThreadItem({
+  const live = mapThreadItem(item({
     type: 'fileChange',
     id: 'item1',
     status: 'completed',
@@ -36,7 +40,7 @@ test('即時 fileChange 與歷史 apply_patch 映射同構（新增/改名/刪�
       { path: 'src/old.ts', kind: { type: 'update', move_path: 'src/renamed.ts' }, diff: '@@\n-const x = 1;\n+const x = 2;\n' },
       { path: 'src/gone.ts', kind: { type: 'delete' }, diff: '' },
     ],
-  }, 'completed');
+  }), 'completed');
   const history = toolUses(mapFixture('rollout-0.163.jsonl')).filter((m) => ['Write', 'Edit'].includes(m.toolName));
 
   const shape = (m: MappedMessage) => [m.toolName, m.toolInput.file_path, m.toolInput.changeKind ?? null, m.toolInput.move_path ?? null];
@@ -52,10 +56,10 @@ test('即時 fileChange 與歷史 apply_patch 映射同構（新增/改名/刪�
 });
 
 test('即時多檔案拆分：id 與 toolId 皆為 ${itemId}:${index}，不互相覆蓋', () => {
-  const started = mapThreadItem({
+  const started = mapThreadItem(item({
     type: 'fileChange', id: 'it', status: 'inProgress',
     changes: [{ path: 'a', kind: { type: 'add' }, diff: '+a' }, { path: 'b', kind: { type: 'add' }, diff: '+b' }],
-  }, 'started');
+  }), 'started');
   assert.deepEqual(started.map((m) => [m.id, m.toolId]), [['it:0', 'it:0'], ['it:1', 'it:1']]);
   assert.equal(started[0].toolResult, undefined);
 });
@@ -106,15 +110,15 @@ test('0.143 舊版：exec 為 code mode、reasoning、壓縮邊界、未登記�
 });
 
 test('即時 commandExecution / reasoning / plan / 壓縮 / 未知項目', () => {
-  const [cmd] = mapThreadItem({ type: 'commandExecution', id: 'c', command: 'ls', cwd: '/r', status: 'failed', exitCode: 2, aggregatedOutput: '' }, 'completed');
+  const [cmd] = mapThreadItem(item({ type: 'commandExecution', id: 'c', command: 'ls', cwd: '/r', status: 'failed', exitCode: 2, aggregatedOutput: '' }), 'completed');
   assert.equal(cmd.toolName, 'Bash');
   assert.deepEqual(cmd.toolResult, { content: 'Exit code 2', isError: true });
 
-  assert.deepEqual(mapThreadItem({ type: 'reasoning', id: 'r', summary: [], content: [] }, 'started'), []);
-  assert.equal(mapThreadItem({ type: 'reasoning', id: 'r', summary: ['想'], content: [] }, 'completed')[0].kind, 'thinking');
-  assert.equal(mapThreadItem({ type: 'contextCompaction', id: 'cc' }, 'completed')[0].isCompactBoundary, true);
-  assert.equal(mapThreadItem({ type: 'webSearch', id: 'w', query: 'q', action: null }, 'completed')[0].toolName, 'WebSearch');
-  assert.equal(mapThreadItem({ type: 'imageView', id: 'i', path: '/a.png' }, 'completed')[0].toolName, 'imageView');
+  assert.deepEqual(mapThreadItem(item({ type: 'reasoning', id: 'r', summary: [], content: [] }), 'started'), []);
+  assert.equal(mapThreadItem(item({ type: 'reasoning', id: 'r', summary: ['想'], content: [] }), 'completed')[0].kind, 'thinking');
+  assert.equal(mapThreadItem(item({ type: 'contextCompaction', id: 'cc' }), 'completed')[0].isCompactBoundary, true);
+  assert.equal(mapThreadItem(item({ type: 'webSearch', id: 'w', query: 'q', action: null }), 'completed')[0].toolName, 'WebSearch');
+  assert.equal(mapThreadItem(item({ type: 'imageView', id: 'i', path: '/a.png' }), 'completed')[0].toolName, 'imageView');
 
   const [plan] = mapPlanUpdate({ turnId: 't1', plan: [{ step: 's', status: 'inProgress' }] });
   assert.equal(plan.id, 'plan:t1');
@@ -126,6 +130,6 @@ test('拆掉 app-server 指令的 shell 包裝，與歷史 exec_command 一致',
   assert.equal(unwrapShellCommand("/bin/zsh -lc 'ls src'"), 'ls src');
   assert.equal(unwrapShellCommand("bash -lc 'echo '\\''hi'\\'''"), "echo 'hi'");
   assert.equal(unwrapShellCommand('ls -la'), 'ls -la');
-  const [cmd] = mapThreadItem({ type: 'commandExecution', id: 'c', command: "/bin/zsh -lc 'ls src'", cwd: '/r', status: 'completed', exitCode: 0, aggregatedOutput: '' }, 'completed');
+  const [cmd] = mapThreadItem(item({ type: 'commandExecution', id: 'c', command: "/bin/zsh -lc 'ls src'", cwd: '/r', status: 'completed', exitCode: 0, aggregatedOutput: '' }), 'completed');
   assert.equal(cmd.toolInput.command, 'ls src');
 });

@@ -1,7 +1,12 @@
 import fs from 'node:fs';
 
 type Thread = { id: string; cwd?: string; parentThreadId?: string | null; source?: unknown };
-type Rpc = { request(method: string, params: Record<string, unknown>): Promise<{ thread: Thread }> };
+import type { ThreadReadParams, ThreadStartParams } from './protocol/index.js';
+
+/** CodexAppServer 的子集，測試可用假物件代替。 */
+type Rpc = {
+  request(method: 'thread/read' | 'thread/start', params: ThreadReadParams | ThreadStartParams): Promise<{ thread: Thread }>;
+};
 
 /** Inspect an existing thread without loading it in a throwaway runtime.
  * Only the target TUI should resume it and become its writer.

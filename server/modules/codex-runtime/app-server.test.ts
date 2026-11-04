@@ -60,9 +60,9 @@ test('DeepSeek uses the configured Codex catalog path', async (t) => {
 
 test('request timeout and abrupt process exit reject callers', async (t) => {
   const rpc = fake(t, `process.stdin.resume();`);
-  await assert.rejects(rpc.request('never/replies', {}, 30), /timed out/);
+  await assert.rejects(rpc.request('never/replies' as 'model/list', {}, 30), /timed out/);
   const failure = once(rpc, 'failure');
-  const request = rpc.request('pending');
+  const request = rpc.request('pending' as 'model/list', {});
   rpc.child.kill('SIGKILL');
   await assert.rejects(request, /exited/);
   await failure;

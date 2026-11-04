@@ -8,7 +8,7 @@ import {
   reconnectCodexSession,
 } from '../../../../openai-codex.js';
 
-/** Wraps server/openai-codex.js. The runtime emits its own terminal event after an abort. */
+/** Wraps server/openai-codex.ts. The runtime emits its own terminal event after an abort. */
 export class CodexRuntimeProvider implements IProviderRuntime {
   async start(command: string, options: Record<string, unknown>, writer: ProviderRuntimeWriter): Promise<void> {
     await queryCodex(command, options, writer);

@@ -18,7 +18,7 @@
 - 通过 `AbstractProvider` 基类和 `IProvider` 接口规范统一行为。
 - `list/` 下每个目录代表一个提供商实现（含 `auth`/`mcp`/`sessions`/`skills` 等能力）。
 - `shared/` 存放基类及 MCP / Skills 共享实现。
-- 与根目录 `claude-sdk.js`、`gemini-cli.js`、`cursor-cli.js`、`openai-codex.js` 等
+- 与根目录 `claude-sdk.js`、`gemini-cli.js`、`cursor-cli.js`、`openai-codex.ts` 等
   CLI/SDK 集成层协作。
 
 ### `websocket/` — 实时通信网关（含 `services/`）

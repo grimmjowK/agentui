@@ -365,7 +365,7 @@ export class CodexSessionsProvider implements IProviderSessions {
   }
 
   /**
-   * Normalizes a Codex history entry. Live events are mapped in openai-codex.js
+   * Normalizes a Codex history entry. Live events are mapped in openai-codex.ts
    * via codex-item-mapper and never reach this method.
    */
   normalizeMessage(rawMessage: unknown, sessionId: string | null): NormalizedMessage[] {

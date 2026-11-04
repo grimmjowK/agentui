@@ -15,7 +15,7 @@ Express + WebSocket 后端。根目录散落的 `.js` 文件是各 AI provider �
 | `cursor-cli.js` | 子进程生成 Cursor CLI，处理工作空间信任验证与流式消息转发 |
 | `gemini-cli.js` | 通过 PTY 启动 Gemini CLI，管理进程生命周期与 JSON 流解析 |
 | `gemini-response-handler.js` | 解析 Gemini 流式 JSON 响应，处理 ANSI 转义与消息碎片 |
-| `openai-codex.js` | OpenAI Codex SDK 集成，提供非交互式聊天会话与事件转换 |
+| `openai-codex.ts` | Codex app-server 聊天执行层（JSON-RPC，使用 `codex-runtime/protocol` 生成型别） |
 | `sessionManager.js` | 管理 Gemini 会话状态与对话历史，支持本地文件持久化 |
 
 ## 子目录

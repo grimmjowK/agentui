@@ -63,9 +63,9 @@
 
 ## 7. 階段三：Codex 協議型別
 
-- [ ] 7.1 新增 `npm run codex:gen-types`，生成到 `server/modules/codex-runtime/protocol/`，只保留介接層實際用到的型別及其相依型別，檔頭寫入 codex 版本，提交生成結果
-- [ ] 7.2 `codex-runtime/app-server.ts` 的 `request()` 與通知事件改用生成的 `ClientRequest` / `ServerNotification` 型別
-- [ ] 7.3 `server/openai-codex.js` 轉為 `.ts` 並使用生成的型別，`codex-item-mapper.ts` 的輸入改用生成的 `ThreadItem`；`npm run typecheck` 與 Codex 相關測試通過
+- [x] 7.1 新增 `npm run codex:gen-types`，生成到 `server/modules/codex-runtime/protocol/`，只保留介接層實際用到的型別及其相依型別，檔頭寫入 codex 版本，提交生成結果
+- [x] 7.2 `codex-runtime/app-server.ts` 的 `request()` 與通知事件改用生成的 `ClientRequest` / `ServerNotification` 型別
+- [x] 7.3 `server/openai-codex.js` 轉為 `.ts` 並使用生成的型別，`codex-item-mapper.ts` 的輸入改用生成的 `ThreadItem`；`npm run typecheck` 與 Codex 相關測試通過
 
 ## 8. 階段三：執行中插話
 

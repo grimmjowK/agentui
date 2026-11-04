@@ -46,7 +46,8 @@
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/fix-node-pty.js",
     "prepare": "husky",
-    "update:platform": "./update-platform.sh"
+    "update:platform": "./update-platform.sh",
+    "codex:gen-types": "node scripts/codex-gen-types.mjs"
   },
   "keywords": [
     "claude code",

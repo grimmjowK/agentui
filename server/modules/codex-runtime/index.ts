@@ -4,3 +4,4 @@ export { codexOwnership } from './ownership.js';
 export { prepareCodexTerminalThread } from './terminal-thread.js';
 export { codexTerminalFailure } from './terminal-failure.js';
 export { buildCodexChildEnv } from './child-env.js';
+export type * from './protocol/index.js';

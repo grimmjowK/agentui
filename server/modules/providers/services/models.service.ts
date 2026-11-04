@@ -115,7 +115,7 @@ const listCodexModels = async (): Promise<ProviderModel[]> => {
   const timer = setTimeout(() => { void rpc.close(); }, LOOKUP_TIMEOUT_MS);
   try {
     await rpc.initialize();
-    const result = await rpc.request('model/list');
+    const result = await rpc.request('model/list', {});
     const models = (result.data as CodexModelRow[]).filter((row) => !row.hidden).map((row) => {
       const value = row.model || row.id || '';
       return { value, label: row.displayName || value, description: row.description || undefined };
