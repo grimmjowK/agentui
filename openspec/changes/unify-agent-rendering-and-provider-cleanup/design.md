@@ -340,6 +340,10 @@ interface IProviderRuntime {
   - WebSocket 回覆 `steer-accepted` / `steer-rejected`，帶回前端送出的 `clientId`。前端收到 accepted 才加入使用者訊息並清空輸入；rejected 時保留輸入並顯示錯誤訊息。等待回覆期間不能再送第二則。
   - 瀏覽器實測：Codex 執行 `sleep 20` 期間插話，這一輪沒有中斷，最終回覆遵循插話內容；重新整理後插話仍在原位置。Claude 的送出按鈕在執行中仍為停用（`midTurnSteer: false`）。
   - 已知、與插話無關：Codex 執行中，即時畫面會把第一則助手文字與工具卡片各顯示兩次，重新整理後正常。沒有插話時也會發生，另行處理。
+- **階段三 · Session Artifacts（9.1–9.3）**：
+  - 只讀 `brain/<sessionId>/` 頂層的 `.md`；`task.md.metadata.json` 與子目錄不讀。標題取第一個 `#` 標題，沒有就用檔名。
+  - 路由回 404（會話不在索引）、400（`parseSessionId` 不通過）、`[]`（provider 未實作）。`realpath` 檢查同時涵蓋「會話目錄本身是指向外部的符號連結」與「目錄內的 `.md` 是指向外部的符號連結」兩種情況，都有單元測試。
+  - 前端：按鈕放在標題列（`MainContentHeader` 新增 `extraActions` 插槽），面板放在聊天欄與編輯器側欄之間，只在 Chat 分頁顯示。瀏覽器確認：Antigravity 會話顯示「Artifacts 1」並能渲染 task.md；Codex 會話不顯示按鈕。`complete` 時自動刷新只以程式邏輯確認（依事件的 `sessionId` / `actualSessionId` 比對目前會話），沒有再跑一次 Antigravity 實測。
 
 ## Open Questions
 

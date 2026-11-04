@@ -263,5 +263,11 @@
       "updateAvailable": "Aggiornamento disponibile",
       "closeSidebar": "Chiudi barra laterale"
     }
+  },
+  "artifacts": {
+    "title": "Artefatti",
+    "toggle": "Mostra o nascondi gli artefatti della sessione",
+    "close": "Chiudi artefatti",
+    "empty": "Questa sessione non ha ancora artefatti."
   }
 }

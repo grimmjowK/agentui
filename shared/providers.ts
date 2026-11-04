@@ -66,7 +66,7 @@ export const PROVIDER_INFO: Record<LLMProvider, ProviderInfo> = {
     settingsStorageKey: 'codex-settings',
   },
   antigravity: {
-    capabilities: { midTurnSteer: false, images: false, effort: false, artifacts: false },
+    capabilities: { midTurnSteer: false, images: false, effort: false, artifacts: true },
     permissionModes: ['default', 'bypassPermissions'],
     defaultPermissionMode: antigravityDefaultPermissionMode,
     settingsStorageKey: 'antigravity-settings',

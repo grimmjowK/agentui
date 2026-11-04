@@ -4,6 +4,7 @@ import multer from 'multer';
 
 import { codexOwnership } from '@/modules/codex-runtime/index.js';
 import { sessionsDb } from '@/modules/database/index.js';
+import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { getCodexRuntimeInfo } from '@/shared/codex-cli-path.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
@@ -430,6 +431,21 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
     res.json(createApiSuccessResponse(sessionsService.getSessionModel(sessionId)));
+  }),
+);
+
+// 會話產物（design D15）：provider 由索引決定，未實作 listArtifacts 的 provider 回傳 []
+router.get(
+  '/sessions/:sessionId/artifacts',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const indexed = sessionsDb.getSessionById(sessionId);
+    if (!indexed) {
+      throw new AppError('Session not found.', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+    }
+    const { sessions } = providerRegistry.resolveProvider(indexed.provider);
+    const artifacts = sessions.listArtifacts ? await sessions.listArtifacts(sessionId) : [];
+    res.json(createApiSuccessResponse({ artifacts }));
   }),
 );
 

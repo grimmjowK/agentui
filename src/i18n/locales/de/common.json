@@ -233,5 +233,11 @@
       "updateAvailable": "Update verfügbar",
       "closeSidebar": "Seitenleiste schließen"
     }
+  },
+  "artifacts": {
+    "title": "Artefakte",
+    "toggle": "Sitzungsartefakte ein-/ausblenden",
+    "close": "Artefakte schließen",
+    "empty": "Diese Sitzung hat noch keine Artefakte."
   }
 }

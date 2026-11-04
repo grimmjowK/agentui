@@ -142,7 +142,18 @@ export interface IProviderSessions {
    * 搜尋回應會以 `unsearchableProviders` 告知。
    */
   extractSearchableMessages?(filePath: string): AsyncIterable<SearchableMessage>;
+  /** 會話產物（design D15）。sessionId 由呼叫端先驗證格式；實作仍須確認不越出產物根目錄。 */
+  listArtifacts?(sessionId: string): Promise<SessionArtifact[]>;
 }
+
+/** 會話目錄中由 agent 寫出的 Markdown 產物。 */
+export type SessionArtifact = {
+  id: string;
+  title: string;
+  fileName: string;
+  updatedAt: string;
+  content: string;
+};
 
 /** 全文檢索用的一則訊息。 */
 export type SearchableMessage = {

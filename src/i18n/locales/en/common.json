@@ -270,5 +270,11 @@
       "updateAvailable": "Update available",
       "closeSidebar": "Close sidebar"
     }
+  },
+  "artifacts": {
+    "title": "Artifacts",
+    "toggle": "Show or hide session artifacts",
+    "close": "Close artifacts",
+    "empty": "This session has no artifacts yet."
   }
 }

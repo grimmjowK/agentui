@@ -270,5 +270,11 @@
       "updateAvailable": "有可用更新",
       "closeSidebar": "关闭侧边栏"
     }
+  },
+  "artifacts": {
+    "title": "产物",
+    "toggle": "显示或隐藏会话产物",
+    "close": "关闭产物面板",
+    "empty": "这个会话还没有产物。"
   }
 }

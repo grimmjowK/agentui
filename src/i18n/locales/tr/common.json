@@ -263,5 +263,11 @@
       "updateAvailable": "Güncelleme mevcut",
       "closeSidebar": "Kenar çubuğunu kapat"
     }
+  },
+  "artifacts": {
+    "title": "Çıktılar",
+    "toggle": "Oturum çıktılarını göster/gizle",
+    "close": "Çıktıları kapat",
+    "empty": "Bu oturumda henüz çıktı yok."
   }
 }

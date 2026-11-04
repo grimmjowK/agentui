@@ -78,9 +78,9 @@
 
 ## 9. 階段三：Session Artifacts 側邊欄（對話流外能力 #13，僅在任務 1.5 確認有產物時實作）
 
-- [ ] 9.1 `IProviderSessions` 新增可選的 `listArtifacts(sessionId)`；Antigravity 的 sessions facet 只讀取 `brain/<sessionId>/` 頂層、實測確認的 `.md` 產物（排除 `.system_generated`），以 `parseSessionId` 驗證 `sessionId`、以 `realpath` 確認不越出 brain 根目錄；新增單元測試，包含路徑穿越與符號連結指向外部兩個情境
-- [ ] 9.2 在 `provider.routes.ts` 新增 `GET /api/providers/sessions/:sessionId/artifacts`，provider 從會話索引查得，呼叫 `sessions.listArtifacts(sessionId)`，未實作的 provider 回傳 `[]`
-- [ ] 9.3 `PROVIDER_INFO.antigravity.capabilities.artifacts` 設為 `true`；前端在聊天頁工具列依 `capabilities.artifacts` 顯示「產物（Artifacts）」切換按鈕與數量徽章，右側新增可收合 Artifacts 預覽面板（支援切換各 `.md` 產物分頁，並於目前會話 `complete` 時自動刷新），補 i18n
+- [x] 9.1 `IProviderSessions` 新增可選的 `listArtifacts(sessionId)`；Antigravity 的 sessions facet 只讀取 `brain/<sessionId>/` 頂層、實測確認的 `.md` 產物（排除 `.system_generated`），以 `parseSessionId` 驗證 `sessionId`、以 `realpath` 確認不越出 brain 根目錄；新增單元測試，包含路徑穿越與符號連結指向外部兩個情境
+- [x] 9.2 在 `provider.routes.ts` 新增 `GET /api/providers/sessions/:sessionId/artifacts`，provider 從會話索引查得，呼叫 `sessions.listArtifacts(sessionId)`，未實作的 provider 回傳 `[]`
+- [x] 9.3 `PROVIDER_INFO.antigravity.capabilities.artifacts` 設為 `true`；前端在聊天頁工具列依 `capabilities.artifacts` 顯示「產物（Artifacts）」切換按鈕與數量徽章，右側新增可收合 Artifacts 預覽面板（支援切換各 `.md` 產物分頁，並於目前會話 `complete` 時自動刷新），補 i18n
 
 ## 10. 階段三：統一權限審批收件匣（#2）
 

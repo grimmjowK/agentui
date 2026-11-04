@@ -43,3 +43,30 @@ test('fetchHistory handles limit: 0 gracefully', async () => {
   assert.equal(emptyResult.hasMore, false);
   assert.equal(emptyResult.limit, 0);
 });
+
+test('listBrainArtifacts 只回傳會話目錄頂層的 .md，且不越出 brain 根目錄', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { listBrainArtifacts } = await import('@/modules/providers/list/antigravity/antigravity-sessions.provider.js');
+
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-'));
+  const root = path.join(base, 'brain');
+  const session = path.join(root, 's1');
+  fs.mkdirSync(path.join(session, '.system_generated', 'logs'), { recursive: true });
+  fs.writeFileSync(path.join(session, 'task.md'), '# 任務清單\n- [x] a\n');
+  fs.writeFileSync(path.join(session, 'task.md.metadata.json'), '{}');
+  fs.writeFileSync(path.join(session, '.system_generated', 'logs', 'notes.md'), 'internal');
+  fs.writeFileSync(path.join(base, 'secret.md'), 'outside');
+  fs.symlinkSync(path.join(base, 'secret.md'), path.join(session, 'leak.md'));
+  fs.symlinkSync(base, path.join(root, 'escape'));
+
+  const artifacts = await listBrainArtifacts('s1', [root]);
+  assert.deepEqual(artifacts.map((a) => [a.fileName, a.title]), [['task.md', '任務清單']]);
+  assert.match(artifacts[0].content, /- \[x\] a/);
+
+  // 路徑穿越與指向外部的會話目錄都不讀取
+  assert.deepEqual(await listBrainArtifacts('../../etc', [root]), []);
+  assert.deepEqual(await listBrainArtifacts('escape', [root]), []);
+  assert.deepEqual(await listBrainArtifacts('missing', [root]), []);
+});
