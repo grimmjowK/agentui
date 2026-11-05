@@ -195,13 +195,11 @@ function showVersion() {
 const SANDBOX_TEMPLATES = {
     claude: 'docker.io/cloudcliai/sandbox:claude-code',
     codex: 'docker.io/cloudcliai/sandbox:codex',
-    gemini: 'docker.io/cloudcliai/sandbox:gemini',
 };
 
 const SANDBOX_SECRETS = {
     claude: 'anthropic',
     codex: 'openai',
-    gemini: 'google',
 };
 
 function parseSandboxArgs(args) {
@@ -253,7 +251,7 @@ function parseSandboxArgs(args) {
 
     // Default template from agent
     if (!result.template) {
-        result.template = SANDBOX_TEMPLATES[result.agent] || SANDBOX_TEMPLATES.claude;
+        result.template = SANDBOX_TEMPLATES[result.agent] ?? null;
     }
 
     return result;
@@ -277,7 +275,7 @@ Subcommands:
   ${c.bright('help')}         Show this help
 
 Options:
-  -a, --agent <agent>       Agent to use: claude, codex, gemini (default: claude)
+  -a, --agent <agent>       Agent to use: claude, codex (default: claude)
   -n, --name <name>         Sandbox name (default: derived from workspace folder)
   -t, --template <image>    Custom template image
   -e, --env <KEY=VALUE>     Set environment variable (repeatable)
@@ -298,7 +296,6 @@ Prerequisites:
        sbx login
        sbx secret set -g anthropic   # for Claude
        sbx secret set -g openai      # for Codex
-       sbx secret set -g google      # for Gemini
 
 Advanced usage:
   For branch mode, multiple workspaces, memory limits, network policies,
@@ -328,6 +325,13 @@ async function sandboxCommand(args) {
     if (opts.subcommand === 'help') {
         showSandboxHelp();
         return;
+    }
+
+    // 不認得的 agent 直接報錯，不要悄悄改用 Claude 範本（例如已下線的 gemini）
+    if (!opts.template && !SANDBOX_TEMPLATES[opts.agent]) {
+        console.error(`\n${c.error('❌')} Unknown agent: ${opts.agent}`);
+        console.log(`   Supported agents: ${Object.keys(SANDBOX_TEMPLATES).join(', ')}\n`);
+        process.exit(1);
     }
 
     // Validate name (alphanumeric, hyphens, underscores only)
