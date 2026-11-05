@@ -198,6 +198,11 @@ export class AntigravitySessionsProvider implements IProviderSessions {
           const tsStr = entry.created_at ? new Date(String(entry.created_at)).toISOString() : new Date().toISOString();
 
           // 1. Antigravity transcript format
+          // CLI 寫給模型的系統通知（例如續接時「伺服器重啟、子 agent 已停止」），不是對話內容
+          if (entry.type === 'SYSTEM_MESSAGE' || entry.source === 'SYSTEM') {
+            continue;
+          }
+
           // USER_INPUT step
           if (entry.type === 'USER_INPUT' || entry.source === 'USER_EXPLICIT') {
             const content = readUserRequest(entry.content);
