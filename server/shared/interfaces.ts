@@ -143,6 +143,11 @@ export interface IProviderSessions {
    * 搜尋回應會以 `unsearchableProviders` 告知。
    */
   extractSearchableMessages?(filePath: string): AsyncIterable<SearchableMessage>;
+  /**
+   * 索引中的會話檔案若不是內容最完整的那份（如 Antigravity 的 compact transcript），
+   * 回傳實際要搜尋的檔案；搜尋的 ripgrep 預過濾與 extractor 都使用這個路徑。
+   */
+  resolveSearchablePath?(filePath: string): string;
   /** 會話產物（design D15）。sessionId 由呼叫端先驗證格式；實作仍須確認不越出產物根目錄。 */
   listArtifacts?(sessionId: string): Promise<SessionArtifact[]>;
 }

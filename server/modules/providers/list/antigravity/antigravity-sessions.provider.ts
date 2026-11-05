@@ -140,8 +140,12 @@ export class AntigravitySessionsProvider implements IProviderSessions {
    * 搜尋只看使用者輸入（USER_INPUT）與模型回覆（PLANNER_RESPONSE 的 content），
    * 不含工具輸出（GENERIC）與系統訊息。
    */
+  resolveSearchablePath(filePath: string): string {
+    return preferFullTranscript(filePath);
+  }
+
   async *extractSearchableMessages(filePath: string): AsyncGenerator<SearchableMessage> {
-    for await (const entry of readJsonlEntries(preferFullTranscript(filePath))) {
+    for await (const entry of readJsonlEntries(filePath)) {
       const timestamp = entry.created_at ? String(entry.created_at) : null;
       if (entry.type === 'USER_INPUT') {
         const text = readUserRequest(entry.content);

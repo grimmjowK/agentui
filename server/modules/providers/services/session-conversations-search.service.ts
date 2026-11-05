@@ -261,23 +261,32 @@ function createWordMatcher(
 /**
  * 搜尋範圍由「有實作 extractSearchableMessages 的 provider」決定（design D5）。
  */
-function collectExtractors(): { extractors: Map<LLMProvider, MessageExtractor>; unsearchableProviders: LLMProvider[] } {
+function collectExtractors(): {
+  extractors: Map<LLMProvider, MessageExtractor>;
+  pathResolvers: Map<LLMProvider, (filePath: string) => string>;
+  unsearchableProviders: LLMProvider[];
+} {
   const extractors = new Map<LLMProvider, MessageExtractor>();
+  const pathResolvers = new Map<LLMProvider, (filePath: string) => string>();
   const unsearchableProviders: LLMProvider[] = [];
   for (const provider of providerRegistry.listProviders()) {
     const { sessions } = provider;
     if (sessions.extractSearchableMessages) {
       extractors.set(provider.id, (filePath) => sessions.extractSearchableMessages!(filePath));
+      if (sessions.resolveSearchablePath) {
+        pathResolvers.set(provider.id, (filePath) => sessions.resolveSearchablePath!(filePath));
+      }
     } else {
       unsearchableProviders.push(provider.id);
     }
   }
-  return { extractors, unsearchableProviders };
+  return { extractors, pathResolvers, unsearchableProviders };
 }
 
 function normalizeSearchableSessions(
   rows: SessionRepositoryRow[],
   extractors: Map<LLMProvider, MessageExtractor>,
+  pathResolvers: Map<LLMProvider, (filePath: string) => string> = new Map(),
 ): SearchableSessionRow[] {
   const normalizedRows: SearchableSessionRow[] = [];
   const projectArchiveStateByPath = new Map<string, boolean>();
@@ -319,10 +328,12 @@ function normalizeSearchableSessions(
       }
     }
 
+    // 預過濾與提取都讀 provider 指定的檔案，否則只在完整版出現的內容會在預過濾被篩掉
+    const resolvePath = pathResolvers.get(provider);
     normalizedRows.push({
       ...row,
       provider,
-      jsonl_path: absoluteJsonlPath,
+      jsonl_path: resolvePath ? resolvePath(absoluteJsonlPath) : absoluteJsonlPath,
     });
   }
 
@@ -712,7 +723,7 @@ export async function searchConversations(
   const safeLimit = Math.max(1, Math.min(Number.isFinite(limit) ? limit : 50, 200));
   const words = safeQuery.toLowerCase().split(/\s+/).filter((word) => word.length > 0);
 
-  const { extractors, unsearchableProviders } = collectExtractors();
+  const { extractors, pathResolvers, unsearchableProviders } = collectExtractors();
   const empty: SearchConversationsResult = { results: [], totalMatches: 0, query: safeQuery, unsearchableProviders };
 
   if (words.length === 0) {
@@ -724,7 +735,7 @@ export async function searchConversations(
     return empty;
   }
 
-  const searchableSessions = normalizeSearchableSessions(sessionsDb.getAllSessions(), extractors);
+  const searchableSessions = normalizeSearchableSessions(sessionsDb.getAllSessions(), extractors, pathResolvers);
   if (searchableSessions.length === 0) {
     return empty;
   }

@@ -43,3 +43,23 @@ test('搜尋結果包含 Antigravity 會話並附高亮片段；未實作提取�
   const { snippet, highlights } = session.matches[0];
   assert.equal(snippet.slice(highlights[0].start, highlights[0].end), '任務清單');
 });
+
+test('Antigravity 只存在於 transcript_full.jsonl 的內容也能被搜尋到（預過濾與提取讀同一個檔案）', async () => {
+  const fs = await import('node:fs');
+  await initializeDatabase();
+  const logs = path.join(mkdtempSync(path.join(tmpdir(), 'agy-full-')), 'logs');
+  fs.mkdirSync(logs);
+  const write = (name: string, reply: string) => fs.writeFileSync(path.join(logs, name), [
+    { step_index: 0, type: 'USER_INPUT', created_at: '2026-11-05T09:00:00Z', content: '<USER_REQUEST>\nhello\n</USER_REQUEST>' },
+    { step_index: 1, type: 'PLANNER_RESPONSE', created_at: '2026-11-05T09:00:01Z', content: reply },
+  ].map((entry) => JSON.stringify(entry)).join('\n'));
+  write('transcript.jsonl', 'head\n<truncated 5112 bytes>\ntail');
+  write('transcript_full.jsonl', 'head zebraneedle tail');
+  sessionsDb.createSession('agy-full', 'antigravity', '/tmp/agy-full', undefined, undefined, undefined, path.join(logs, 'transcript.jsonl'));
+
+  const result = await searchConversations('zebraneedle');
+
+  const sessions = result.results.flatMap((project) => project.sessions);
+  assert.deepEqual(sessions.map((s) => s.sessionId), ['agy-full']);
+  assert.equal(sessions[0].matches[0].role, 'assistant');
+});

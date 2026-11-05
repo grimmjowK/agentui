@@ -115,7 +115,7 @@ test('fetchHistory 與搜尋優先讀未截斷的 transcript_full.jsonl', async 
     const { messages } = await provider.fetchHistory('full-1');
     assert.equal(messages.at(-1)?.content, 'head middle tail');
     const searchable = [];
-    for await (const m of provider.extractSearchableMessages(path.join(logs, 'transcript.jsonl'))) searchable.push(m.text);
+    for await (const m of provider.extractSearchableMessages(provider.resolveSearchablePath(path.join(logs, 'transcript.jsonl')))) searchable.push(m.text);
     assert.deepEqual(searchable, ['hi', 'head middle tail']);
   } finally {
     if (previous === undefined) delete process.env.ANTIGRAVITY_HOME;
