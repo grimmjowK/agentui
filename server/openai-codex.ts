@@ -117,11 +117,20 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
     rpc.on('failure', (error) => { if (!state.finished) fail(error); });
     rpc.on('request', (request) => {
       const { params } = request;
-      const supported = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'];
+      const supported = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval'];
       if (!supported.includes(request.method) || state.userId === null || !threadId || params?.threadId !== threadId
         || (state.turnId && params.turnId !== state.turnId) || state.interrupted || state.finished) {
         rpc.send({ id: request.id, error: { code: -32601, message: 'Unsupported or invalid Codex approval request' } });
         fail(new Error(`Unsupported or invalid Codex request: ${request.method}`));
+        return;
+      }
+      // 額外權限的互動授權尚未在真實 Codex 上驗證（runtime capabilities.additionalPermissions=false），
+      // 先自動拒絕（空權限）並提示，讓這一輪照常在原本的沙箱權限下繼續，而不是整輪失敗。
+      if (request.method === 'item/permissions/requestApproval') {
+        rpc.send({ id: request.id, result: { permissions: {}, scope: 'turn' } });
+        const reason = 'reason' in params && params.reason ? `：${params.reason}` : '';
+        emit({ kind: 'task_notification', status: 'warning',
+          summary: `Codex 請求額外權限${reason}。目前不支援互動授權，已自動拒絕，這一輪繼續在原本的沙箱權限下執行。` });
         return;
       }
       codexApprovals.add({
