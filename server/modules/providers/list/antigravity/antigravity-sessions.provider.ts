@@ -29,6 +29,17 @@ function brainRoots(): string[] {
   return roots;
 }
 
+/**
+ * transcript.jsonl 是給模型注入上下文的 compact 版，過長欄位會被截成 `<truncated N bytes>`；
+ * 同目錄的 transcript_full.jsonl 行序相同、內容完整。索引與監聽仍以 transcript.jsonl 為準，
+ * 讀內容時改讀 full 版。
+ */
+function preferFullTranscript(transcriptPath: string): string {
+  if (path.basename(transcriptPath) !== 'transcript.jsonl') return transcriptPath;
+  const fullPath = path.join(path.dirname(transcriptPath), 'transcript_full.jsonl');
+  return fsSync.existsSync(fullPath) ? fullPath : transcriptPath;
+}
+
 const isInside = (root: string, target: string) => {
   const relative = path.relative(root, target);
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
@@ -129,7 +140,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
    * 不含工具輸出（GENERIC）與系統訊息。
    */
   async *extractSearchableMessages(filePath: string): AsyncGenerator<SearchableMessage> {
-    for await (const entry of readJsonlEntries(filePath)) {
+    for await (const entry of readJsonlEntries(preferFullTranscript(filePath))) {
       const timestamp = entry.created_at ? String(entry.created_at) : null;
       if (entry.type === 'USER_INPUT') {
         const text = readUserRequest(entry.content);
@@ -180,7 +191,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     const toolResults = new Map<string, { content: string; isError: boolean }>();
 
     try {
-      const fileStream = fsSync.createReadStream(sessionFilePath);
+      const fileStream = fsSync.createReadStream(preferFullTranscript(sessionFilePath));
       const rl = readline.createInterface({
         input: fileStream,
         crlfDelay: Infinity,

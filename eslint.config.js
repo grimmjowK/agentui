@@ -21,7 +21,7 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         {
-          selector: "BinaryExpression[operator=/^[!=]==?$/][left.name='provider'], BinaryExpression[operator=/^[!=]==?$/][left.property.name='provider']",
+          selector: "BinaryExpression[operator=/^[!=]==?$/]:matches([left.name='provider'], [left.property.name='provider'], [right.name='provider'], [right.property.name='provider'])",
           message: "對話流內不得依 provider 分支：差異應在後端映射處理（見 src/components/chat/tools/README.md）。",
         },
       ],

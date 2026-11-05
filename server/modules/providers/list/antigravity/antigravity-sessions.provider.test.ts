@@ -94,3 +94,31 @@ test('fetchHistory 略過 CLI 寫給模型的 SYSTEM_MESSAGE 步驟', async () =
     else process.env.ANTIGRAVITY_HOME = previous;
   }
 });
+
+test('fetchHistory 與搜尋優先讀未截斷的 transcript_full.jsonl', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-home-'));
+  const logs = path.join(home, 'brain', 'full-1', '.system_generated', 'logs');
+  fs.mkdirSync(logs, { recursive: true });
+  const write = (name: string, reply: string) => fs.writeFileSync(path.join(logs, name), [
+    { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', created_at: '2026-11-04T09:18:18Z', content: '<USER_REQUEST>\nhi\n</USER_REQUEST>' },
+    { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: '2026-11-04T09:18:20Z', content: reply },
+  ].map((entry) => JSON.stringify(entry)).join('\n'));
+  write('transcript.jsonl', 'head\n<truncated 5112 bytes>\ntail');
+  write('transcript_full.jsonl', 'head middle tail');
+
+  const previous = process.env.ANTIGRAVITY_HOME;
+  process.env.ANTIGRAVITY_HOME = home;
+  try {
+    const { messages } = await provider.fetchHistory('full-1');
+    assert.equal(messages.at(-1)?.content, 'head middle tail');
+    const searchable = [];
+    for await (const m of provider.extractSearchableMessages(path.join(logs, 'transcript.jsonl'))) searchable.push(m.text);
+    assert.deepEqual(searchable, ['hi', 'head middle tail']);
+  } finally {
+    if (previous === undefined) delete process.env.ANTIGRAVITY_HOME;
+    else process.env.ANTIGRAVITY_HOME = previous;
+  }
+});
