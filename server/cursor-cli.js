@@ -131,6 +131,10 @@ async function spawnCursor(command, options = {}, ws) {
       });
 
       activeCursorProcesses.set(processKey, cursorProcess);
+      // 只刪自己的登記：中斷後使用者可能已在同一會話開了新一輪，舊行程收尾不能刪掉它
+      const releaseProcess = (key) => {
+        if (activeCursorProcesses.get(key) === cursorProcess) activeCursorProcesses.delete(key);
+      };
       // result 已送出 complete 時，close 不再重送（每次執行只有一個終止事件）
       let completeSent = false;
 
@@ -166,7 +170,7 @@ async function spawnCursor(command, options = {}, ws) {
 
                   // Update process key with captured session ID
                   if (processKey !== capturedSessionId) {
-                    activeCursorProcesses.delete(processKey);
+                    releaseProcess(processKey);
                     activeCursorProcesses.set(capturedSessionId, cursorProcess);
                   }
 
@@ -255,7 +259,7 @@ async function spawnCursor(command, options = {}, ws) {
       // Handle process completion
       cursorProcess.on('close', async (code) => {
         const finalSessionId = capturedSessionId || sessionId || processKey;
-        activeCursorProcesses.delete(finalSessionId);
+        releaseProcess(finalSessionId);
         // 必須在 trust 重試之前：被中斷的行程不能被重新啟動
         if (abortedCursorProcesses.has(cursorProcess)) {
           settleOnce(() => resolve());
@@ -298,7 +302,7 @@ async function spawnCursor(command, options = {}, ws) {
 
         // Clean up process reference on error
         const finalSessionId = capturedSessionId || sessionId || processKey;
-        activeCursorProcesses.delete(finalSessionId);
+        releaseProcess(finalSessionId);
         if (abortedCursorProcesses.has(cursorProcess)) {
           settleOnce(() => resolve());
           return;

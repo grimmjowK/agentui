@@ -81,7 +81,8 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
     ((prevMessage.type === 'assistant') ||
       (prevMessage.type === 'user') ||
       (prevMessage.type === 'tool') ||
-      (prevMessage.type === 'error'));
+      (prevMessage.type === 'error') ||
+      (prevMessage.type === 'warning'));
   const messageRef = useRef<HTMLDivElement | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const permissionSuggestion = getClaudePermissionSuggestion(message, provider);
@@ -218,6 +219,10 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-600 text-sm text-white">
                   !
                 </div>
+              ) : message.type === 'warning' ? (
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-amber-500 text-sm text-white">
+                  !
+                </div>
               ) : message.type === 'tool' ? (
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-600 text-sm text-white dark:bg-gray-700">
                   🔧
@@ -228,7 +233,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                 </div>
               )}
               <div className="text-sm font-medium text-gray-900 dark:text-white">
-                {message.type === 'error' ? t('messageTypes.error') : message.type === 'tool' ? t('messageTypes.tool') : t(`messageTypes.${provider}`, { defaultValue: provider })}
+                {message.type === 'error' ? t('messageTypes.error') : message.type === 'warning' ? t('messageTypes.warning') : message.type === 'tool' ? t('messageTypes.tool') : t(`messageTypes.${provider}`, { defaultValue: provider })}
               </div>
             </div>
           )}

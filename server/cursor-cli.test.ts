@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { abortCursorSession, spawnCursor } from './cursor-cli.js';
+import { abortCursorSession, isCursorSessionActive, spawnCursor } from './cursor-cli.js';
 
 // 假的 cursor-agent：normal 正常結束；abort 一直跑，收到 SIGTERM 時仍吐出 result 與 stderr 再退出
 const bin = mkdtempSync(path.join(tmpdir(), 'cursor-fake-'));
@@ -19,18 +19,19 @@ if (mode === 'normal') {
 process.on('SIGTERM', () => {
   emit({ type: 'result', subtype: 'error', result: 'interrupted' });
   process.stderr.write('terminated by signal');
-  setTimeout(() => process.exit(143), 20);
+  setTimeout(() => process.exit(143), 300);
 });
-setInterval(() => {}, 1000);
+// 測試失敗時不要讓行程一直掛著
+setTimeout(() => process.exit(0), 5000);
 `);
 chmodSync(path.join(bin, 'cursor-agent'), 0o755);
 process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
 
-const run = (mode: string) => {
+const run = (mode: string, sessionId?: string) => {
   process.env.FAKE_CURSOR_MODE = mode;
   const messages: any[] = [];
   const writer = { isWebSocketWriter: true, send: (m: any) => messages.push(m), setSessionId: () => {} };
-  const done = spawnCursor('hi', { cwd: bin }, writer).catch(() => {});
+  const done = spawnCursor('hi', { cwd: bin, sessionId }, writer).catch(() => {});
   return { messages, done };
 };
 const terminals = (messages: any[]) => messages.filter((m) => m.kind === 'complete' || m.kind === 'error');
@@ -47,4 +48,15 @@ test('中斷後底層不再送出 complete/error（終止事件由 dispatcher �
   assert.equal(abortCursorSession('cursor-abort'), true);
   await done;
   assert.deepEqual(terminals(messages), []);
+});
+
+test('中斷後立刻在同一會話開新一輪：舊行程收尾不會刪掉新一輪的登記', async () => {
+  const first = run('abort');
+  while (!first.messages.some((m) => m.kind === 'session_created')) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(abortCursorSession('cursor-abort'), true);
+  const second = run('abort', 'cursor-abort');  // 舊行程 300ms 後才退出
+  await first.done;
+  assert.equal(isCursorSessionActive('cursor-abort'), true);
+  assert.equal(abortCursorSession('cursor-abort'), true);
+  await second.done;
 });

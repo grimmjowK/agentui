@@ -14,6 +14,7 @@
   "messageTypes": {
     "user": "U",
     "error": "Error",
+    "warning": "Warning",
     "tool": "Tool",
     "claude": "Claude",
     "cursor": "Cursor",

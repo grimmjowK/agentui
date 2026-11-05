@@ -16,6 +16,12 @@ import { sessionsDb } from '@/modules/database/index.js';
  */
 const PINNED_ROOT = path.join(os.homedir(), '.cloudcli', 'pinned');
 
+/**
+ * Antigravity 在主转录旁另存未截断的完整版；备份时一并复制，读取端（preferFullTranscript）
+ * 会在同目录找到它。它不是主转录，findPinnedFile 不能返回它。
+ */
+const COMPANION_FILES = ['transcript_full.jsonl'];
+
 /** sessionId 会拼进路径，挡掉 `..` / 分隔符等越权写入 */
 const SAFE_SESSION_ID = /^[A-Za-z0-9._-]+$/;
 
@@ -35,7 +41,7 @@ async function findPinnedFile(sessionId: string): Promise<string | null> {
   }
 
   try {
-    const [fileName] = await fsp.readdir(pinnedDir);
+    const fileName = (await fsp.readdir(pinnedDir)).find((name) => !COMPANION_FILES.includes(name));
     return fileName ? path.join(pinnedDir, fileName) : null;
   } catch {
     return null;
@@ -60,6 +66,10 @@ export const sessionPinService = {
     try {
       await fsp.mkdir(pinnedDir, { recursive: true });
       await fsp.copyFile(session.jsonl_path, path.join(pinnedDir, path.basename(session.jsonl_path)));
+      for (const name of COMPANION_FILES) {
+        const companion = path.join(path.dirname(session.jsonl_path), name);
+        await fsp.copyFile(companion, path.join(pinnedDir, name)).catch(() => {});
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`Failed to refresh pinned transcript for session ${sessionId}`, { error: message });

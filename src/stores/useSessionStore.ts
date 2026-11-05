@@ -228,14 +228,17 @@ export function interleaveByTimestamp(base: NormalizedMessage[], extra: Normaliz
   return out.concat(undated);
 }
 
-/** 只疊加即時訊息中有值的欄位；id、時間戳、sessionId 以歷史為準。 */
+/**
+ * 歷史為準，即時訊息只補歷史還沒有的欄位（例如執行中尚未寫入的 toolResult）。
+ * 不能反過來覆蓋：Antigravity 即時的 toolInput 只有摘要（content/old_string 為空字串），
+ * 會蓋掉歷史裡的完整 diff。
+ */
 function overlayDefinedFields(server: NormalizedMessage, live: NormalizedMessage): NormalizedMessage {
-  const out: NormalizedMessage = { ...server };
+  const out = { ...server } as unknown as Record<string, unknown>;
   for (const [key, value] of Object.entries(live)) {
-    if (value === undefined || value === null || key === 'id' || key === 'timestamp' || key === 'sessionId') continue;
-    (out as unknown as Record<string, unknown>)[key] = value;
+    if (value !== undefined && value !== null && (out[key] === undefined || out[key] === null)) out[key] = value;
   }
-  return out;
+  return out as unknown as NormalizedMessage;
 }
 
 export function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[]): NormalizedMessage[] {
@@ -249,7 +252,7 @@ export function computeMerged(server: NormalizedMessage[], realtime: NormalizedM
   // 按文本指纹记下来，回填到对应的服务端消息上，否则气泡里的缩略图会消失。
   const droppedImages = new Map<string, NormalizedMessage['images']>();
   // id 契約：同 id 代表同一則訊息。執行中拉到的歷史可能還沒寫入工具輸出，
-  // 所以不是直接丟掉即時版本，而是把它已有的欄位疊到歷史訊息上（位置與時間沿用歷史）。
+  // 所以不是直接丟掉即時版本，而是用它補上歷史缺的欄位（其餘一律以歷史為準）。
   const realtimeOverlays = new Map<string, NormalizedMessage>();
   const extra = realtime.filter((m) => {
     if (serverIds.has(m.id)) {
@@ -600,6 +603,8 @@ export function useSessionStore() {
       );
       slot.realtimeMessages = slot.realtimeMessages.filter((m) => {
         if (m.kind === 'error' || m.isInterrupted) return true;
+        // 給使用者的警告不會寫進 provider 的歷史檔，刷新後也要保留
+        if (m.kind === 'task_notification' && (m.status === 'warning' || m.status === 'error')) return true;
         if (m.id.startsWith('local_')) {
           const fp = userTextFingerprint(m);
           return fp ? !serverUserTexts.has(fp) : true;

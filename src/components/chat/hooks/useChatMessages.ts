@@ -160,7 +160,16 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         break;
 
       case 'task_notification':
-        // 同上：后台任务通知不是用户对话，丢弃。
+        // 給使用者的警告（審批被自動拒絕、版本未驗證、會話衝突等）要顯示；
+        // info 類的執行資訊與背景任務通知不是對話內容，丟棄。
+        if ((msg.status === 'warning' || msg.status === 'error') && msg.summary) {
+          converted.push({
+            type: 'warning',
+            content: msg.summary,
+            timestamp: msg.timestamp,
+            ...sharedMetadata,
+          });
+        }
         break;
 
       case 'stream_delta':

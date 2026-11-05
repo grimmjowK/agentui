@@ -696,7 +696,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
     }
 
     // Clean up session on completion
-    if (capturedSessionId) {
+    // 只刪自己的登記：中斷後使用者可能已在同一會話開了新一輪
+    if (capturedSessionId && getSession(capturedSessionId)?.instance === queryInstance) {
       removeSession(capturedSessionId);
     }
 
@@ -720,7 +721,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
     console.error('SDK query error:', error);
 
     // Clean up session on error
-    if (capturedSessionId) {
+    // 只刪自己的登記：中斷後使用者可能已在同一會話開了新一輪
+    if (capturedSessionId && getSession(capturedSessionId)?.instance === queryInstance) {
       removeSession(capturedSessionId);
     }
 

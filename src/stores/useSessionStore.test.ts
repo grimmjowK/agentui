@@ -72,3 +72,16 @@ test('id 契約：執行中拉到部分歷史時，同 id 的即時訊息不重�
   assert.equal(merged[2].toolResult?.content, 'a.txt');
   assert.equal(merged[2].timestamp, server[2].timestamp);
 });
+
+test('id 契約：即時的精簡 toolInput 不能覆蓋歷史的完整內容，只補歷史缺的 toolResult', () => {
+  const server = [msg('agy_tool_2', '10', {
+    kind: 'tool_use', toolId: 'agy_tool_2', toolName: 'Write', toolInput: { file_path: '/a.py', content: 'print(1)\n' },
+  })];
+  const realtime = [msg('agy_tool_2', '11', {
+    kind: 'tool_use', toolId: 'agy_tool_2', toolName: 'Write', toolInput: { file_path: '/a.py', content: '' },
+    toolResult: { content: 'Created file.', isError: false },
+  })];
+  const [merged] = computeMerged(server, realtime);
+  assert.deepEqual(merged.toolInput, { file_path: '/a.py', content: 'print(1)\n' });
+  assert.equal(merged.toolResult?.content, 'Created file.');
+});
