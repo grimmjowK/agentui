@@ -22,7 +22,7 @@ export default function AboutTab() {
         <img src="/logo-mark.svg" alt="" className="h-10 w-10 flex-shrink-0" />
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-base font-semibold text-foreground">CloudCLI</span>
+            <span className="text-base font-semibold text-foreground">EAO</span>
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
               v{currentVersion}
             </span>

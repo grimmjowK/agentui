@@ -137,9 +137,9 @@ function setStartupState(phase, message, detail = '') {
  * 这个文档内联在 main 进程里，不依赖 preload、不依赖磁盘文件。
  */
 function inlineFailureDocument(message) {
-  const html = `<!doctype html><meta charset="utf-8"><title>CloudCLI</title>
+  const html = `<!doctype html><meta charset="utf-8"><title>EAO</title>
 <body style="font:14px/1.6 -apple-system,system-ui,sans-serif;padding:48px;color:#e5e7eb;background:#111827">
-<h1 style="font-size:18px;margin:0 0 12px">CloudCLI 无法启动</h1>
+<h1 style="font-size:18px;margin:0 0 12px">EAO 无法启动</h1>
 <pre style="white-space:pre-wrap;color:#fca5a5">${String(message).replace(/[<&]/g, (ch) => (ch === '<' ? '&lt;' : '&amp;'))}</pre>
 <p style="color:#9ca3af">请退出应用后重新启动。若问题持续，请从终端运行 <code>npx cloudcli</code> 查看完整日志。</p>
 </body>`;
@@ -597,7 +597,7 @@ ipcMain.on('cloudcli:attention', (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || win.isFocused()) return;
   const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
-  const title = text(payload?.title, 80) || 'CloudCLI';
+  const title = text(payload?.title, 80) || 'EAO';
   const body = text(payload?.body, 200);
   const sessionId = text(payload?.sessionId, 200) || null;
   const provider = text(payload?.provider, 40) || null;
