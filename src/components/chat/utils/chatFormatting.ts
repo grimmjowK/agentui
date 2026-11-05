@@ -1,17 +1,60 @@
+function withProtectedCode(text: string, transform: (segment: string) => string): string {
+  if (!text || typeof text !== 'string') return text;
+
+  const codeBlocks: string[] = [];
+  const placeholderPrefix = '__CODE_SEGMENT_';
+  const placeholderSuffix = '__';
+
+  const masked = text.replace(/(`{3,})[\s\S]*?\1|(`+)([^`\r\n]+?)\2/g, (match) => {
+    const index = codeBlocks.length;
+    codeBlocks.push(match);
+    return `${placeholderPrefix}${index}${placeholderSuffix}`;
+  });
+
+  const transformed = transform(masked);
+
+  return transformed.replace(
+    new RegExp(`${placeholderPrefix}(\\d+)${placeholderSuffix}`, 'g'),
+    (_match, index) => codeBlocks[parseInt(index, 10)],
+  );
+}
+
 export function decodeHtmlEntities(text: string) {
   if (!text) return text;
-  return text
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&');
+  return withProtectedCode(text, (segment) =>
+    segment
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&'),
+  );
 }
 
 export function normalizeInlineCodeFences(text: string) {
   if (!text || typeof text !== 'string') return text;
   try {
-    return text.replace(/```\s*([^\n\r]+?)\s*```/g, '`$1`');
+    const fencedBlocks: string[] = [];
+    const placeholderPrefix = '__FENCED_CODE_BLOCK_';
+    const placeholderSuffix = '__';
+
+    // Protect multi-line fenced code blocks so closing ``` + newline + text + newline + opening ```
+    // can never be matched across two adjacent code blocks.
+    const masked = text.replace(
+      /(^|\r?\n)([ \t]*(`{3,})[^\r\n]*\r?\n[\s\S]*?\r?\n[ \t]*\3[ \t]*)(?=\r?\n|$)/g,
+      (_match, leadingNewline, block) => {
+        const index = fencedBlocks.length;
+        fencedBlocks.push(block);
+        return `${leadingNewline}${placeholderPrefix}${index}${placeholderSuffix}`;
+      },
+    );
+
+    const normalized = masked.replace(/(?<!`)```[ \t]*([^\n\r`]+?)[ \t]*```(?!`)/g, '`$1`');
+
+    return normalized.replace(
+      new RegExp(`${placeholderPrefix}(\\d+)${placeholderSuffix}`, 'g'),
+      (_match, index) => fencedBlocks[parseInt(index, 10)],
+    );
   } catch {
     return text;
   }
@@ -20,26 +63,28 @@ export function normalizeInlineCodeFences(text: string) {
 export function unescapeWithMathProtection(text: string) {
   if (!text || typeof text !== 'string') return text;
 
-  const mathBlocks: string[] = [];
-  const placeholderPrefix = '__MATH_BLOCK_';
-  const placeholderSuffix = '__';
+  return withProtectedCode(text, (segment) => {
+    const mathBlocks: string[] = [];
+    const placeholderPrefix = '__MATH_BLOCK_';
+    const placeholderSuffix = '__';
 
-  let processedText = text.replace(/\$\$([\s\S]*?)\$\$|\$([^\$\n]+?)\$/g, (match) => {
-    const index = mathBlocks.length;
-    mathBlocks.push(match);
-    return `${placeholderPrefix}${index}${placeholderSuffix}`;
+    let processedText = segment.replace(/\$\$([\s\S]*?)\$\$|\$([^\$\n]+?)\$/g, (match) => {
+      const index = mathBlocks.length;
+      mathBlocks.push(match);
+      return `${placeholderPrefix}${index}${placeholderSuffix}`;
+    });
+
+    processedText = processedText.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r');
+
+    processedText = processedText.replace(
+      new RegExp(`${placeholderPrefix}(\\d+)${placeholderSuffix}`, 'g'),
+      (_match, index) => {
+        return mathBlocks[parseInt(index, 10)];
+      },
+    );
+
+    return processedText;
   });
-
-  processedText = processedText.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r');
-
-  processedText = processedText.replace(
-    new RegExp(`${placeholderPrefix}(\\d+)${placeholderSuffix}`, 'g'),
-    (match, index) => {
-      return mathBlocks[parseInt(index, 10)];
-    },
-  );
-
-  return processedText;
 }
 
 export function escapeRegExp(value: string) {

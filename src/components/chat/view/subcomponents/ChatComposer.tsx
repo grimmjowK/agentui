@@ -459,7 +459,7 @@ export default function ChatComposer({
               onOpenChange={onModelMenuOpenChange}
             />
             <PromptInputSubmit
-              disabled={(!input.trim() && !pendingCommand) || (isLoading && !canSteer) || isSteerPending}
+              disabled={(!input.trim() && !pendingCommand && attachedImages.length === 0) || (isLoading && !canSteer) || isSteerPending}
               status={canSteer ? 'ready' : undefined}
               title={canSteer ? t('steer.hint') : undefined}
               className="h-10 w-10 sm:h-10 sm:w-10"

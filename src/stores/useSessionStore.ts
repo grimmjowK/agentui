@@ -146,6 +146,36 @@ function userTextFingerprint(m: NormalizedMessage): string | null {
   return t.length > 0 ? t : null;
 }
 
+const TRANSIENT_RETRY_ERROR_RE = /^API error \(attempt \d+\):/i;
+
+function isTransientRetryRecovered(
+  errorIndex: number,
+  merged: NormalizedMessage[],
+  before: NormalizedMessage[],
+): boolean {
+  const text = (merged[errorIndex]?.content || '').trim();
+  if (!TRANSIENT_RETRY_ERROR_RE.test(text)) return false;
+
+  const isAssistantProgress = (m: NormalizedMessage) =>
+    (m.kind === 'text' && m.role === 'assistant' && Boolean(m.content?.trim()))
+    || m.kind === 'tool_use'
+    || m.kind === 'stream_delta';
+
+  for (let i = before.length - 1; i >= 0; i--) {
+    const m = before[i];
+    if (m.kind === 'text' && m.role === 'user') break;
+    if (isAssistantProgress(m)) return true;
+  }
+
+  for (let i = errorIndex + 1; i < merged.length; i++) {
+    const m = merged[i];
+    if (m.kind === 'text' && m.role === 'user') break;
+    if (isAssistantProgress(m)) return true;
+  }
+
+  return false;
+}
+
 /**
  * After `finalizeStreaming`, the client holds a synthetic assistant `text` row
  * while the sessions API soon returns the same reply with a different id.
@@ -155,11 +185,12 @@ function userTextFingerprint(m: NormalizedMessage): string | null {
  */
 function dedupeAdjacentAssistantEchoes(merged: NormalizedMessage[]): NormalizedMessage[] {
   const out: NormalizedMessage[] = [];
-  for (const m of merged) {
+  for (let idx = 0; idx < merged.length; idx++) {
+    const m = merged[idx];
     // 错误往往已经以正文形式出现过一次（如 Claude 先流出 "API Error: ..." 助手消息，
     // SDK 再抛出 "Claude Code returned an error result: API Error: ..."），
     // 实时错误行只是它的包装，再渲染一遍就是冗余。
-    if (m.kind === 'error' && isErrorAlreadyShown(m, out)) continue;
+    if (m.kind === 'error' && (isErrorAlreadyShown(m, out) || isTransientRetryRecovered(idx, merged, out))) continue;
     const prev = out[out.length - 1];
     if (prev) {
       if (prev.kind === 'stream_delta' && m.kind === 'text' && m.role === 'assistant') {
@@ -601,8 +632,19 @@ export function useSessionStore() {
       const serverUserTexts = new Set(
         slot.serverMessages.map(userTextFingerprint).filter((t): t is string => t !== null),
       );
+      const lastServerMsg = slot.serverMessages[slot.serverMessages.length - 1];
+      const serverEndedWithAssistant = Boolean(
+        lastServerMsg
+        && ((lastServerMsg.kind === 'text' && lastServerMsg.role === 'assistant') || lastServerMsg.kind === 'tool_use'),
+      );
       slot.realtimeMessages = slot.realtimeMessages.filter((m) => {
-        if (m.kind === 'error' || m.isInterrupted) return true;
+        if (m.kind === 'error') {
+          if (serverEndedWithAssistant && TRANSIENT_RETRY_ERROR_RE.test((m.content || '').trim())) {
+            return false;
+          }
+          return true;
+        }
+        if (m.isInterrupted) return true;
         // 給使用者的警告不會寫進 provider 的歷史檔，刷新後也要保留
         if (m.kind === 'task_notification' && (m.status === 'warning' || m.status === 'error')) return true;
         if (m.id.startsWith('local_')) {

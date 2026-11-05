@@ -329,11 +329,19 @@ export function useChatRealtimeHandlers({
             sessionStorage.removeItem('pendingSessionId');
           }
 
+          if (completedSuccessfully) {
+            void sessionStore.refreshFromServer(actualSessionId, { provider });
+          }
+
           if (isVisibleSession) {
             onNavigateToSession?.(actualSessionId, { replace: true });
             setTimeout(() => { void paletteOps.refreshProjects(); }, 500);
           }
           break;
+        }
+
+        if (completedSuccessfully && (actualSessionId || sid)) {
+          void sessionStore.refreshFromServer((actualSessionId || sid)!, { provider });
         }
 
         // Clear pending session

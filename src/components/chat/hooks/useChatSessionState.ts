@@ -426,8 +426,8 @@ export function useChatSessionState({
     const provider = (selectedSession.__provider || localStorage.getItem('selected-provider') as Provider) || 'claude';
     const sessionKey = `${selectedSession.id}:${selectedProject.projectId}:${provider}`;
 
-    // Skip if already loaded and fresh
-    if (lastLoadedSessionKeyRef.current === sessionKey && sessionStore.has(selectedSession.id) && !sessionStore.isStale(selectedSession.id)) {
+    // Skip if already loaded for the current session key (background refreshes use refreshFromServer)
+    if (lastLoadedSessionKeyRef.current === sessionKey && sessionStore.has(selectedSession.id)) {
       return;
     }
 

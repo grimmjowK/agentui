@@ -53,20 +53,20 @@ export const PROVIDER_INFO: Record<LLMProvider, ProviderInfo> = {
     settingsStorageKey: 'claude-settings',
   },
   cursor: {
-    capabilities: { midTurnSteer: false, images: false, effort: false, artifacts: false },
+    capabilities: { midTurnSteer: false, images: true, effort: false, artifacts: false },
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
     defaultPermissionMode: 'default',
     settingsStorageKey: 'cursor-tools-settings',
   },
   codex: {
-    capabilities: { midTurnSteer: true, images: false, effort: true, artifacts: false },
+    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false },
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions'],
     defaultPermissionMode: 'default',
     mapPermissionMode: (mode) => (mode === 'plan' ? 'default' : mode),
     settingsStorageKey: 'codex-settings',
   },
   antigravity: {
-    capabilities: { midTurnSteer: false, images: false, effort: false, artifacts: true },
+    capabilities: { midTurnSteer: false, images: true, effort: false, artifacts: true },
     permissionModes: ['default', 'bypassPermissions'],
     defaultPermissionMode: antigravityDefaultPermissionMode,
     settingsStorageKey: 'antigravity-settings',

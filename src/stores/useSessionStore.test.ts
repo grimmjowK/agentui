@@ -85,3 +85,18 @@ test('id 契約：即時的精簡 toolInput 不能覆蓋歷史的完整內容，
   assert.deepEqual(merged.toolInput, { file_path: '/a.py', content: 'print(1)\n' });
   assert.equal(merged.toolResult?.content, 'Created file.');
 });
+
+test('同輪重試成功後，時間戳晚於 PLANNER_RESPONSE 起點的暫時性 API error (attempt N) 不掛在結尾', () => {
+  const server = [
+    msg('u1', '10', { role: 'user', content: '你好' }),
+    // PLANNER_RESPONSE 的 created_at 是步驟開始時間（早於 attempt 2 失敗時間）
+    msg('agy_s_step_1', '12', { role: 'assistant', content: '這是重試成功後的完整回答' }),
+  ];
+  const realtime = [
+    msg('err_retry', '15', {
+      kind: 'error',
+      content: 'API error (attempt 2): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": read: connection reset by peer',
+    }),
+  ];
+  assert.deepEqual(computeMerged(server, realtime).map((m) => m.id), ['u1', 'agy_s_step_1']);
+});

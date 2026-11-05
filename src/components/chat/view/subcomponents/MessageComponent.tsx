@@ -434,7 +434,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
               <Reasoning defaultOpen={false}>
                 <ReasoningTrigger />
                 <ReasoningContent>
-                  <Markdown className="prose prose-sm prose-gray max-w-none dark:prose-invert">
+                  <Markdown className="prose prose-sm prose-gray max-w-none dark:prose-invert" onFileOpen={onFileOpen}>
                     {message.content}
                   </Markdown>
                   <div className="mt-3 flex items-center text-[11px]">
@@ -491,7 +491,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
 
                   // Normal rendering for non-JSON content
                   return message.type === 'assistant' ? (
-                    <Markdown className="prose prose-sm prose-gray max-w-none dark:prose-invert">
+                    <Markdown className="prose prose-sm prose-gray max-w-none dark:prose-invert" onFileOpen={onFileOpen}>
                       {content}
                     </Markdown>
                   ) : (

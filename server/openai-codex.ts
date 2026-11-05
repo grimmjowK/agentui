@@ -7,6 +7,7 @@ import type { ThreadItem, ThreadStartParams, TurnCompletedNotification } from '.
 import { mapPlanUpdate, mapThreadItem } from './modules/providers/index.js';
 import { terminateShellSessionsBySessionId } from './modules/websocket/index.js';
 import { getCodexRuntimeInfo } from './shared/codex-cli-path.js';
+import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
 import { createNormalizedMessage } from './shared/utils.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import type { ProviderRuntimeWriter } from './shared/interfaces.js';
@@ -28,6 +29,7 @@ type CodexRunOptions = {
   effort?: string;
   permissionMode?: string;
   sessionSummary?: string;
+  images?: unknown[];
 };
 
 type RunState = {
@@ -90,6 +92,8 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
   const items = new Map<string, ThreadItem>();
   // delta 的 itemId 與 item/completed 的 item.id 格式不一致（0.163），不能按 id 配對；只記錄是否有未收尾的串流
   let streaming = false;
+  let tempImagePaths: string[] = [];
+  let tempDir: string | null = null;
   try {
     if (threadId && activeCodexSessions.has(threadId)) throw new Error('Codex session is already running');
     if (threadId) activeCodexSessions.set(threadId, state);
@@ -101,6 +105,10 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
       throw new Error(`Codex ${runtime.version} at ${runtime.executablePath} 的版本号无法解析，无法确认 app-server 协议兼容性。见 docs/codex-runtime-protocol.md；不使用 exec 回退。`);
     }
     const cwd = options.cwd || options.projectPath || process.cwd();
+    const imageResult = await handleImages(command, options.images, cwd);
+    const finalCommand = imageResult.modifiedCommand;
+    tempImagePaths = imageResult.tempImagePaths;
+    tempDir = imageResult.tempDir;
     if (threadId) {
       await terminateShellSessionsBySessionId(threadId);
     }
@@ -220,8 +228,12 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
         summary: `Codex ${runtime.version} 未通过 app-server 协议基线验证（见 docs/codex-runtime-protocol.md），功能可能不稳定。` });
     }
     if (state.interrupted) throw new Error('Codex run cancelled');
+    const turnInput = [
+      ...(finalCommand.trim() ? [{ type: 'text' as const, text: finalCommand, text_elements: [] }] : []),
+      ...tempImagePaths.map((imagePath) => ({ type: 'localImage' as const, path: imagePath })),
+    ];
     const turn = await rpc.request('turn/start', {
-      threadId, input: [{ type: 'text', text: command, text_elements: [] }],
+      threadId, input: turnInput.length > 0 ? turnInput : [{ type: 'text', text: finalCommand, text_elements: [] }],
       // 推理强度对本轮及之后的轮次生效；未指定则沿用线程 / config.toml 的设置
       ...(options.effort && CODEX_EFFORT_LEVELS.has(options.effort) ? { effort: options.effort } : {}),
     });
@@ -268,6 +280,7 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
     state.finished = true;
     codexApprovals.clear(state.instanceId);
     await state.rpc?.close();
+    await cleanupTempFiles(tempImagePaths, tempDir);
     if (threadId && activeCodexSessions.get(threadId) === state) activeCodexSessions.delete(threadId);
     pendingRuns.delete(state);
     if (lease) codexOwnership.release(lease);

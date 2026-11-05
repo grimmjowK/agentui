@@ -573,7 +573,7 @@ export function useChatComposerState({
         return;
       }
 
-      if (!currentInput.trim() || isLoading || !selectedProject) {
+      if ((!currentInput.trim() && attachedImages.length === 0) || isLoading || !selectedProject) {
         return;
       }
 

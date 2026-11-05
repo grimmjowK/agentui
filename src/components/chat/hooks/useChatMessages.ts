@@ -47,7 +47,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
     switch (msg.kind) {
       case 'text': {
         const content = msg.content || '';
-        if (!content.trim()) continue;
+        if (!content.trim() && (!msg.images || msg.images.length === 0)) continue;
 
         if (msg.role === 'user') {
           // 后台任务通知：模型自发触发，不是用户发起的对话，直接丢弃，不展示也不进索引。

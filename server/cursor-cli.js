@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import crossSpawn from 'cross-spawn';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import { providerAuthService, sessionsService } from './modules/providers/index.js';
+import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
 import { createNormalizedMessage } from './shared/utils.js';
 
 // Use cross-spawn on Windows for better command execution
@@ -40,6 +41,12 @@ async function spawnCursor(command, options = {}, ws) {
       skipPermissions: false
     };
 
+    // Use cwd (actual project directory) instead of projectPath
+    const workingDir = cwd || projectPath || process.cwd();
+
+    // Handle attached images by saving to temp files and appending paths to prompt
+    const { modifiedCommand, tempImagePaths, tempDir } = await handleImages(command, options.images, workingDir);
+
     // Build Cursor CLI command
     const baseArgs = [];
 
@@ -49,9 +56,9 @@ async function spawnCursor(command, options = {}, ws) {
       baseArgs.push('--resume=' + sessionId);
     }
 
-    if (command && command.trim()) {
+    if (modifiedCommand && modifiedCommand.trim()) {
       // Provide a prompt (works for both new and resumed sessions)
-      baseArgs.push('-p', command);
+      baseArgs.push('-p', modifiedCommand);
 
       // Add model flag if specified (only meaningful for new sessions; harmless on resume)
       if (!sessionId && model) {
@@ -68,9 +75,6 @@ async function spawnCursor(command, options = {}, ws) {
       console.log('Using -f flag (skip permissions)');
     }
 
-    // Use cwd (actual project directory) instead of projectPath
-    const workingDir = cwd || projectPath || process.cwd();
-
     // Store process reference for potential abort
     const processKey = capturedSessionId || Date.now().toString();
 
@@ -79,6 +83,7 @@ async function spawnCursor(command, options = {}, ws) {
         return;
       }
       settled = true;
+      void cleanupTempFiles(tempImagePaths, tempDir);
       callback();
     };
 

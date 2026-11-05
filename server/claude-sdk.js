@@ -27,6 +27,7 @@ import {
 } from './services/notification-orchestrator.js';
 import { providerAuthService, sessionsService } from './modules/providers/index.js';
 import { createNormalizedMessage } from './shared/utils.js';
+import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
 
 const activeSessions = new Map();
 // 被使用者中斷的 query：中斷的終止事件由 dispatcher 立即送出，這裡的 complete/error 必須略過，
@@ -325,93 +326,6 @@ function extractTokenBudget(resultMessage, lastUsage, lastModel) {
     || parseInt(process.env.CONTEXT_WINDOW, 10) || 200000;
 
   return { used, total: contextWindow };
-}
-
-/**
- * Handles image processing for SDK queries
- * Saves base64 images to temporary files and returns modified prompt with file paths
- * @param {string} command - Original user prompt
- * @param {Array} images - Array of image objects with base64 data
- * @param {string} cwd - Working directory for temp file creation
- * @returns {Promise<Object>} {modifiedCommand, tempImagePaths, tempDir}
- */
-async function handleImages(command, images, cwd) {
-  const tempImagePaths = [];
-  let tempDir = null;
-
-  if (!images || images.length === 0) {
-    return { modifiedCommand: command, tempImagePaths, tempDir };
-  }
-
-  try {
-    // Create temp directory in the project directory
-    const workingDir = cwd || process.cwd();
-    tempDir = path.join(workingDir, '.tmp', 'images', Date.now().toString());
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Save each image to a temp file
-    for (const [index, image] of images.entries()) {
-      // Extract base64 data and mime type
-      const matches = image.data.match(/^data:([^;]+);base64,(.+)$/);
-      if (!matches) {
-        console.error('Invalid image data format');
-        continue;
-      }
-
-      const [, mimeType, base64Data] = matches;
-      const extension = mimeType.split('/')[1] || 'png';
-      const filename = `image_${index}.${extension}`;
-      const filepath = path.join(tempDir, filename);
-
-      // Write base64 data to file
-      await fs.writeFile(filepath, Buffer.from(base64Data, 'base64'));
-      tempImagePaths.push(filepath);
-    }
-
-    // Include the full image paths in the prompt
-    let modifiedCommand = command;
-    if (tempImagePaths.length > 0 && command && command.trim()) {
-      const imageNote = `\n\n[Images provided at the following paths:]\n${tempImagePaths.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
-      modifiedCommand = command + imageNote;
-    }
-
-    // Images processed
-    return { modifiedCommand, tempImagePaths, tempDir };
-  } catch (error) {
-    console.error('Error processing images for SDK:', error);
-    return { modifiedCommand: command, tempImagePaths, tempDir };
-  }
-}
-
-/**
- * Cleans up temporary image files
- * @param {Array<string>} tempImagePaths - Array of temp file paths to delete
- * @param {string} tempDir - Temp directory to remove
- */
-async function cleanupTempFiles(tempImagePaths, tempDir) {
-  if (!tempImagePaths || tempImagePaths.length === 0) {
-    return;
-  }
-
-  try {
-    // Delete individual temp files
-    for (const imagePath of tempImagePaths) {
-      await fs.unlink(imagePath).catch(err =>
-        console.error(`Failed to delete temp image ${imagePath}:`, err)
-      );
-    }
-
-    // Delete temp directory
-    if (tempDir) {
-      await fs.rm(tempDir, { recursive: true, force: true }).catch(err =>
-        console.error(`Failed to delete temp directory ${tempDir}:`, err)
-      );
-    }
-
-    // Temp files cleaned
-  } catch (error) {
-    console.error('Error during temp file cleanup:', error);
-  }
 }
 
 /**

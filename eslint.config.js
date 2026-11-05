@@ -177,6 +177,7 @@ export default tseslint.config(
             "server/shared/codex-cli-path.ts",
             "server/shared/antigravity-cli-path.ts",
             "server/shared/antigravity-session-store.ts",
+            "server/shared/image-temp-files.ts",
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
         },
