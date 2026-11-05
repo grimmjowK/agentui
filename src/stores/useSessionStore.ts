@@ -73,6 +73,8 @@ export interface NormalizedMessage {
   input?: unknown;
   context?: unknown;
   newSessionId?: string;
+  /** stream_end 專用：收尾後的助手文字要沿用的 id，與歷史中同一則訊息的 id 相同（id 契約）。 */
+  messageId?: string;
   status?: string;
   summary?: string;
   exitCode?: number;
@@ -226,6 +228,16 @@ export function interleaveByTimestamp(base: NormalizedMessage[], extra: Normaliz
   return out.concat(undated);
 }
 
+/** 只疊加即時訊息中有值的欄位；id、時間戳、sessionId 以歷史為準。 */
+function overlayDefinedFields(server: NormalizedMessage, live: NormalizedMessage): NormalizedMessage {
+  const out: NormalizedMessage = { ...server };
+  for (const [key, value] of Object.entries(live)) {
+    if (value === undefined || value === null || key === 'id' || key === 'timestamp' || key === 'sessionId') continue;
+    (out as unknown as Record<string, unknown>)[key] = value;
+  }
+  return out;
+}
+
 export function computeMerged(server: NormalizedMessage[], realtime: NormalizedMessage[]): NormalizedMessage[] {
   if (realtime.length === 0) return server;
   if (server.length === 0) return dedupeAdjacentAssistantEchoes(realtime);
@@ -236,8 +248,14 @@ export function computeMerged(server: NormalizedMessage[], realtime: NormalizedM
   // 被丢弃的乐观消息上挂着本地图片缩略图（服务端历史里没有图片数据），
   // 按文本指纹记下来，回填到对应的服务端消息上，否则气泡里的缩略图会消失。
   const droppedImages = new Map<string, NormalizedMessage['images']>();
+  // id 契約：同 id 代表同一則訊息。執行中拉到的歷史可能還沒寫入工具輸出，
+  // 所以不是直接丟掉即時版本，而是把它已有的欄位疊到歷史訊息上（位置與時間沿用歷史）。
+  const realtimeOverlays = new Map<string, NormalizedMessage>();
   const extra = realtime.filter((m) => {
-    if (serverIds.has(m.id)) return false;
+    if (serverIds.has(m.id)) {
+      realtimeOverlays.set(m.id, m);
+      return false;
+    }
     // Optimistic user rows use `local_*` ids; once the same text exists on the
     // server-backed copy, drop the realtime echo to avoid duplicate bubbles.
     if (m.id.startsWith('local_')) {
@@ -249,13 +267,15 @@ export function computeMerged(server: NormalizedMessage[], realtime: NormalizedM
     }
     return true;
   });
-  const base = droppedImages.size === 0
+  const base = droppedImages.size === 0 && realtimeOverlays.size === 0
     ? server
     : server.map((m) => {
-        if (m.images?.length) return m;
-        const fp = userTextFingerprint(m);
+        const overlay = realtimeOverlays.get(m.id);
+        const merged = overlay ? overlayDefinedFields(m, overlay) : m;
+        if (merged.images?.length) return merged;
+        const fp = userTextFingerprint(merged);
         const images = fp ? droppedImages.get(fp) : undefined;
-        return images ? { ...m, images } : m;
+        return images ? { ...merged, images } : merged;
       });
   if (extra.length === 0) return base;
   return dedupeAdjacentAssistantEchoes(interleaveByTimestamp(base, extra));
@@ -642,9 +662,10 @@ export function useSessionStore() {
 
   /**
    * Finalize streaming: convert the streaming message to a regular text message.
-   * The well-known streaming ID is replaced with a unique text message ID.
+   * 有 messageId（後端 stream_end 帶來、與歷史同一則訊息的 id）就沿用，
+   * 隨後同 id 的 text 會覆蓋它，歷史拉取時也能按 id 去重；沒有才產生本地 id。
    */
-  const finalizeStreaming = useCallback((sessionId: string) => {
+  const finalizeStreaming = useCallback((sessionId: string, messageId?: string) => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const slot = storeRef.current.get(resolvedSessionId);
     if (!slot) return;
@@ -655,7 +676,7 @@ export function useSessionStore() {
       slot.realtimeMessages = [...slot.realtimeMessages];
       slot.realtimeMessages[idx] = {
         ...stream,
-        id: `text_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        id: messageId || `text_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         kind: 'text',
         role: 'assistant',
       };

@@ -378,6 +378,6 @@ function mapPatch(callId: string, patch: string, callIdToSplitIdsMap: Map<string
   }
   const messages = splitFileChanges(callId, changes);
   callIdToSplitIdsMap.set(callId, messages.map((message) => String(message.toolId)));
-  // 歷史訊息的 id 由呼叫端產生，避免與即時訊息 id 衝突時誤合併。
+  // 歷史 tool_use 的 id 由呼叫端以 toolId 填入（`${callId}:${index}`，與即時拆分訊息同 id）
   return messages.map(({ id: _id, ...rest }) => rest);
 }

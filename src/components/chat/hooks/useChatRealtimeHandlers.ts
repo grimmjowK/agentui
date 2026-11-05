@@ -209,7 +209,7 @@ export function useChatRealtimeHandlers({
         if (accumulatedStreamRef.current) {
           sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
         }
-        sessionStore.finalizeStreaming(sid);
+        sessionStore.finalizeStreaming(sid, msg.messageId);
       }
       accumulatedStreamRef.current = '';
       return;

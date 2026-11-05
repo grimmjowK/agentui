@@ -22,6 +22,14 @@ export function agyToolId(stepIndex: unknown): string {
   return `agy_tool_${stepIndex}`;
 }
 
+/**
+ * id 契約：同一則訊息在即時與歷史中的 id 必須相同，歷史拉取時才能按 id 去重。
+ * 文字以 step_index 為準（transcript 與 step_update 共用同一套編號）；tool_use 直接用 toolId。
+ */
+export function agyTextId(sessionId: string, stepIndex: unknown): string {
+  return `agy_${sessionId}_step_${stepIndex}`;
+}
+
 /** transcript.jsonl 的 args 值被二次 JSON 編碼；能解就解，解不了保留原值。 */
 export function decodeTranscriptArgs(args: unknown): AnyRecord {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return {};
@@ -80,14 +88,14 @@ export function mapAgyStepUpdate(step: AnyRecord): AnyRecord | null {
   const toolId = agyToolId(step.step_index);
 
   if (step.state === 'ACTIVE') {
-    return { kind: 'tool_use', toolId, ...mapAgyTool(String(step.tool_name || toolInfo.name || ''), toolInfo.parameters || {}) };
+    return { kind: 'tool_use', id: toolId, toolId, ...mapAgyTool(String(step.tool_name || toolInfo.name || ''), toolInfo.parameters || {}) };
   }
   if (step.state === 'DONE' || step.state === 'ERROR') {
     const error = toolInfo.error as AnyRecord | undefined;
     const output = error?.message
       ? str(error.message)
       : toolInfo.output == null ? '' : typeof toolInfo.output === 'string' ? toolInfo.output : JSON.stringify(toolInfo.output);
-    return { kind: 'tool_result', toolId, content: output, isError: isAgyToolError(step.state, output, error) };
+    return { kind: 'tool_result', id: `${toolId}:result`, toolId, content: output, isError: isAgyToolError(step.state, output, error) };
   }
   return null;
 }

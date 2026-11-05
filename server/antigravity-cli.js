@@ -11,7 +11,7 @@ import { notifyRunFailed, notifyRunStopped } from './services/notification-orche
 import { createNormalizedMessage, generateMessageId } from './shared/utils.js';
 import { resolveAntigravityExecutablePath } from './shared/antigravity-cli-path.js';
 import { ensureAntigravitySessionInCliStore } from './shared/antigravity-session-store.js';
-import { mapAgyStepUpdate, providerRegistry } from './modules/providers/index.js';
+import { agyTextId, mapAgyStepUpdate, providerRegistry } from './modules/providers/index.js';
 import { sessionsDb } from './modules/database/index.js';
 
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
@@ -74,8 +74,11 @@ export class AntigravityResponseHandler {
     this.aborted = false;
     this.decoder = new StringDecoder('utf8');
     this.buffer = '';
-    this.accumulatedText = '';
     this.hasStreamed = false;
+    // 目前串流段落：每個 agent_response 步驟各自一段，遇到換步驟、工具或結束就收尾
+    this.streamStep = null;
+    this.segmentText = '';
+    this.hasStreamedAny = false;
     this.sessionCreatedEmitted = false;
   }
 
@@ -102,19 +105,38 @@ export class AntigravityResponseHandler {
     }
   }
 
+  appendStream(text, stepIndex = null) {
+    if (this.hasStreamed && stepIndex !== this.streamStep) this.endStream();
+    this.hasStreamed = true;
+    this.streamStep = stepIndex;
+    this.segmentText += text;
+    send(this.writer, { sessionId: this.sessionId, kind: 'stream_delta', content: text });
+  }
+
+  /**
+   * 收尾目前段落：stream_end 帶上與歷史相同的 id（transcript 的 step_index），再送完整文字。
+   * 前端把串流氣泡改成這個 id，隨後的 text 以同 id 覆蓋；歷史拉取時也能按 id 去重。
+   */
+  endStream() {
+    if (!this.hasStreamed) return;
+    const messageId = this.streamStep !== null && this.sessionId
+      ? agyTextId(this.sessionId, this.streamStep)
+      : generateMessageId('agy_msg');
+    send(this.writer, { sessionId: this.sessionId, kind: 'stream_end', messageId });
+    send(this.writer, { sessionId: this.sessionId, id: messageId, kind: 'text', role: 'assistant', content: this.segmentText });
+    this.hasStreamedAny = true;
+    this.hasStreamed = false;
+    this.streamStep = null;
+    this.segmentText = '';
+  }
+
   handleLine(line) {
     let event;
     try {
       event = JSON.parse(line);
     } catch {
       // Plain text streaming fallback
-      this.hasStreamed = true;
-      this.accumulatedText += (this.accumulatedText ? '\n' : '') + line;
-      send(this.writer, {
-        sessionId: this.sessionId,
-        kind: 'stream_delta',
-        content: line + '\n',
-      });
+      this.appendStream(line + '\n');
       return;
     }
     this.handleJsonEvent(event);
@@ -134,21 +156,24 @@ export class AntigravityResponseHandler {
       const step = event.step_update;
       this.adoptSessionId(step.conversation_id);
 
+      const stepIndex = typeof step.step_index === 'number' ? step.step_index : null;
+      // 換到別的步驟（含 system_message 這類不帶文字也不是工具的步驟）就收尾上一段，
+      // 否則上一段會停在串流佔位裡，期間拉到的歷史無法按 id 認領它
+      if (this.hasStreamed && stepIndex !== this.streamStep) this.endStream();
+
       // Text delta
       if (typeof step.text_delta === 'string' && step.text_delta) {
-        this.hasStreamed = true;
-        this.accumulatedText += step.text_delta;
-        send(this.writer, {
-          sessionId: this.sessionId,
-          kind: 'stream_delta',
-          content: step.text_delta,
-        });
+        this.appendStream(step.text_delta, stepIndex);
+      }
+      if (step.step_type === 'agent_response') {
+        if (step.state === 'DONE') this.endStream();
         return;
       }
 
       // Tool use / result：與歷史解析共用 antigravity-tool-mapper
       const mapped = mapAgyStepUpdate(step);
       if (mapped) {
+        this.endStream();
         send(this.writer, { sessionId: this.sessionId, ...mapped });
         return;
       }
@@ -172,18 +197,13 @@ export class AntigravityResponseHandler {
         return;
       }
 
-      const responseText = res.response || this.accumulatedText || '';
-      if (this.hasStreamed) {
-        send(this.writer, { sessionId: this.sessionId, kind: 'stream_end' });
+      this.endStream();
+      // response 是最後一段回覆，串流時已逐字送出過；只有完全沒有串流（result-only）才用它補上
+      // ponytail: 假設最後一段回覆一定有 text_delta（agy 1.5.0 實測如此），否則該段會缺
+      const responseText = res.response || '';
+      if (responseText.trim() && !this.hasStreamedAny) {
+        send(this.writer, { sessionId: this.sessionId, kind: 'text', role: 'assistant', content: responseText });
       }
-      send(this.writer, {
-        sessionId: this.sessionId,
-        kind: 'text',
-        role: 'assistant',
-        content: responseText,
-      });
-      this.accumulatedText = responseText;
-      this.hasStreamed = false;
       return;
     }
 
@@ -191,20 +211,13 @@ export class AntigravityResponseHandler {
     // 1. Text delta
     if (event.delta || event.type === 'delta') {
       const delta = typeof event.delta === 'string' ? event.delta : (event.text || '');
-      if (delta) {
-        this.hasStreamed = true;
-        this.accumulatedText += delta;
-        send(this.writer, {
-          sessionId: this.sessionId,
-          kind: 'stream_delta',
-          content: delta,
-        });
-      }
+      if (delta) this.appendStream(delta);
       return;
     }
 
     // 2. Tool use
     if (event.type === 'tool_use' || event.tool_use) {
+      this.endStream();
       const tool = event.tool_use || event;
       const toolId = tool.id || generateMessageId('agy_tool');
       send(this.writer, {
@@ -235,16 +248,12 @@ export class AntigravityResponseHandler {
       const content = event.content || event.text || '';
       if (content && typeof content === 'string') {
         if (this.hasStreamed) {
-          send(this.writer, { sessionId: this.sessionId, kind: 'stream_end' });
+          // 完整訊息以它為準，取代串流累積的內容
+          this.segmentText = content;
+          this.endStream();
+        } else {
+          send(this.writer, { sessionId: this.sessionId, kind: 'text', role: 'assistant', content });
         }
-        send(this.writer, {
-          sessionId: this.sessionId,
-          kind: 'text',
-          role: 'assistant',
-          content,
-        });
-        this.accumulatedText = content;
-        this.hasStreamed = false;
       }
       return;
     }
@@ -269,16 +278,7 @@ export class AntigravityResponseHandler {
       this.buffer = '';
     }
 
-    if (this.hasStreamed) {
-      send(this.writer, { sessionId: this.sessionId, kind: 'stream_end' });
-      send(this.writer, {
-        sessionId: this.sessionId,
-        kind: 'text',
-        role: 'assistant',
-        content: this.accumulatedText,
-      });
-      this.hasStreamed = false;
-    }
+    this.endStream();
   }
 }
 

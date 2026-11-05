@@ -158,6 +158,8 @@ export type NormalizedMessage = {
   context?: unknown;
   reason?: string;
   newSessionId?: string;
+  /** stream_end 專用：收尾後的助手文字要沿用的 id，與歷史中同一則訊息的 id 相同（id 契約）。 */
+  messageId?: string;
   status?: string;
   summary?: string;
   tokenBudget?: unknown;

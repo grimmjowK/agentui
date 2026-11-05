@@ -150,7 +150,8 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
           items.set(item.id, item);
           const isCompleted = notification.method === 'item/completed';
           if (item.type === 'agentMessage' && isCompleted) {
-            if (streaming) { streaming = false; emit({ kind: 'stream_end' }); }
+            // item.id 與 rollout 中該訊息的 payload.id 相同，收尾的文字沿用它，歷史拉取時才能按 id 去重
+            if (streaming) { streaming = false; emit({ kind: 'stream_end', messageId: item.id }); }
             emit({ id: item.id, kind: 'text', role: 'assistant', content: item.text || '' });
           } else {
             for (const message of mapThreadItem(item, isCompleted ? 'completed' : 'started')) emit(message);

@@ -199,6 +199,8 @@ async function getCodexSessionMessages(
             if (textContent.trim()) {
               messages.push({
                 type: 'assistant',
+                // payload.id 即 app-server 即時事件的 item.id（id 契約）
+                uuid: typeof entry.payload.id === 'string' ? entry.payload.id : undefined,
                 timestamp: entry.timestamp,
                 message: {
                   role: 'assistant',
@@ -263,7 +265,8 @@ export class CodexSessionsProvider implements IProviderSessions {
       return [createNormalizedMessage({
         ...mapped,
         kind: mapped.kind as NormalizedMessage['kind'],
-        id: mapped.id || baseId,
+        // tool_use 以 toolId（rollout call_id，等於即時 item.id）為 id，與即時訊息對齊
+        id: mapped.id || (mapped.kind === 'tool_use' && typeof mapped.toolId === 'string' && mapped.toolId) || baseId,
         sessionId,
         timestamp: ts,
         provider: PROVIDER,

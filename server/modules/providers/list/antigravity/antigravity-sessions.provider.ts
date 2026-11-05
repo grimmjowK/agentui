@@ -8,6 +8,7 @@ import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMess
 import { createNormalizedMessage, generateMessageId, readJsonlEntries } from '@/shared/utils.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 import {
+  agyTextId,
   agyToolId,
   decodeTranscriptArgs,
   isAgyToolError,
@@ -249,7 +250,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
             if (content.trim()) {
               normalized.push(
                 createNormalizedMessage({
-                  id: `${baseId}_model`,
+                  id: typeof entry.step_index === 'number' ? agyTextId(sessionId, entry.step_index) : `${baseId}_model`,
                   sessionId,
                   timestamp: tsStr,
                   provider: PROVIDER,
@@ -276,7 +277,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
 
                 normalized.push(
                   createNormalizedMessage({
-                    id: `${baseId}_call_${i}`,
+                    id: typeof entry.step_index === 'number' ? toolId : `${baseId}_call_${i}`,
                     sessionId,
                     timestamp: tsStr,
                     provider: PROVIDER,

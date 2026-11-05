@@ -50,3 +50,25 @@ test('无效时间戳只影响自身，后续有效消息仍按时间插入', ()
   ];
   assert.deepEqual(computeMerged(server, realtime).map((m) => m.id), ['a1', 'local_u', 'a2', 'e1']);
 });
+
+test('id 契約：執行中拉到部分歷史時，同 id 的即時訊息不重複，且即時的工具結果疊加上去', () => {
+  // 歷史只寫到第一則回覆與尚無輸出的工具呼叫；即時流中間夾著狀態通知，相鄰去重無法生效
+  const server = [
+    msg('local_q', '10', { role: 'user', content: 'run it' }),
+    msg('msg_1', '11', { role: 'assistant', content: 'I will run it.' }),
+    msg('call_1', '12', { kind: 'tool_use', toolId: 'call_1', toolName: 'Bash', toolInput: { command: 'ls' } }),
+  ];
+  const realtime = [
+    msg('msg_1', '13', { role: 'assistant', content: 'I will run it.' }),
+    msg('note', '14', { kind: 'error', content: 'rate limited, retrying in a moment' }),
+    msg('call_1', '15', {
+      kind: 'tool_use', toolId: 'call_1', toolName: 'Bash', toolInput: { command: 'ls' },
+      toolResult: { content: 'a.txt', isError: false },
+    }),
+    msg('msg_2', '16', { role: 'assistant', content: 'Done.' }),
+  ];
+  const merged = computeMerged(server, realtime);
+  assert.deepEqual(merged.map((m) => m.id), ['local_q', 'msg_1', 'call_1', 'note', 'msg_2']);
+  assert.equal(merged[2].toolResult?.content, 'a.txt');
+  assert.equal(merged[2].timestamp, server[2].timestamp);
+});

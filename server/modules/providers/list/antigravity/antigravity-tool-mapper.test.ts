@@ -88,5 +88,5 @@ test('未登記的工具保留原名與原參數', () => {
   const mapped = mapAgyStepUpdate({
     step_type: 'tool', state: 'ACTIVE', step_index: 9, tool_name: 'grep_search', tool_info: { parameters: { Query: 'x' } },
   });
-  assert.deepEqual(mapped, { kind: 'tool_use', toolId: 'agy_tool_9', toolName: 'grep_search', toolInput: { Query: 'x' } });
+  assert.deepEqual(mapped, { kind: 'tool_use', id: 'agy_tool_9', toolId: 'agy_tool_9', toolName: 'grep_search', toolInput: { Query: 'x' } });
 });
