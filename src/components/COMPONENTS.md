@@ -15,7 +15,7 @@ AI 调整某模块时，可只加载对应模块目录，无需通读全部。
 | `command-palette/` | 快速命令搜索和执行的命令面板（含 `sources/` 命令来源） |
 | `file-tree/` | 项目文件树展示和文件操作管理 |
 | `git-panel/` | Git 仓库状态、分支、历史和改动的可视化面板 |
-| `llm-logo-provider/` | LLM 提供商（Claude、Gemini 等）的 logo 组件库 |
+| `llm-logo-provider/` | LLM 提供商（Claude、Codex、Cursor、Antigravity）的 logo 组件库 |
 | `main-content/` | 主内容区域，聚合聊天、编辑器、终端等子模块 |
 | `mcp/` | 管理和配置 MCP 服务器 |
 | `onboarding/` | 新用户引导流程，含 Git 与代理连接配置 |

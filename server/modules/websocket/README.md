@@ -118,17 +118,14 @@ flowchart TD
   B -->|invalid| C[send {type:error}]
   B -->|ok| D{data.type}
 
-  D -->|claude-command| E[queryClaudeSDK]
-  D -->|cursor-command| F[spawnCursor]
-  D -->|codex-command| G[queryCodex]
-  D -->|gemini-command| H[spawnGemini]
-  D -->|cursor-resume| I[spawnCursor resume]
-  D -->|abort-session| J[abort by provider]
-  D -->|claude-permission-response| K[resolveToolApproval]
-  D -->|cursor-abort| L[abortCursorSession]
-  D -->|check-session-status| M[is*SessionActive + optional reconnectSessionWriter]
-  D -->|get-pending-permissions| N[runtime.getPendingApprovals]
-  D -->|get-active-sessions| O[getActive*Sessions]
+  D -->|chat-command| E[providerRegistry → runtime.start]
+  D -->|chat-steer| F[runtime.steer → steer-accepted / steer-rejected]
+  D -->|abort-session| J[runtime.abort（emitsTerminal 決定是否補送 complete）]
+  D -->|claude-permission-response| K[resolveToolApproval（綁定 userId）]
+  D -->|codex-permission-response| L[resolveCodexApproval]
+  D -->|check-session-status| M[runtime.reconnect]
+  D -->|get-pending-permissions| N[runtime.getPendingApprovals（不帶 sessionId 時跨會話匯總）]
+  D -->|get-active-sessions| O[runtime.listActive]
 ```
 
 ### Chat Notes
