@@ -1,3 +1,5 @@
+> **狀態：暫緩（2026-11-05）**。決定等 ACP 社群更成熟再實作，文件保留。暫緩理由與三家（Claude / Codex / Antigravity）的實測與調研結果見 [research.md](./research.md)。重啟前請先重新驗證 research.md 中的版本與已知問題，並依其「重啟時的建議方向」調整本提案的範圍（目前內容只涵蓋 Antigravity）。
+
 ## Why
 
 Antigravity 目前每一輪都以 headless 模式（`agy --prompt … --output-format stream-json`）執行，沒有任何管道把審批決定傳回 CLI。預設模式下，需要審批的工具會被 CLI 自動拒絕，模型隨即放棄；CLI 仍回報 `SUCCESS`、結束碼 0，原因只寫在 stderr。使用者只看到一張失敗的工具卡片和空回覆，無法在頁面上允許任何操作，只能改用「跳過所有權限」。
