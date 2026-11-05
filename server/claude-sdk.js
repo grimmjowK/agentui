@@ -29,6 +29,9 @@ import { providerAuthService, sessionsService } from './modules/providers/index.
 import { createNormalizedMessage } from './shared/utils.js';
 
 const activeSessions = new Map();
+// 被使用者中斷的 query：中斷的終止事件由 dispatcher 立即送出，這裡的 complete/error 必須略過，
+// 否則一次中斷會出現兩個終止事件（晚到的那個還可能把同會話新開的一輪誤判為結束）
+const abortedQueries = new WeakSet();
 const pendingToolApprovals = new Map();
 
 // 預設 10 分鐘，與 Codex 審批一致；0 以外的無效值回退預設
@@ -481,6 +484,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
   let sessionCreatedSent = false;
   let tempImagePaths = [];
   let tempDir = null;
+  let queryInstance;
 
   const emitNotification = (event) => {
     notifyUserIfEnabled({
@@ -609,7 +613,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const prevStreamTimeout = process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
     process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '300000';
 
-    let queryInstance;
     try {
       queryInstance = query({
         prompt: finalCommand,
@@ -700,6 +703,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Clean up temporary image files
     await cleanupTempFiles(tempImagePaths, tempDir);
 
+    if (abortedQueries.has(queryInstance)) return;
+
     // Send completion event
     ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude' }));
     notifyRunStopped({
@@ -721,6 +726,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Clean up temporary image files on error
     await cleanupTempFiles(tempImagePaths, tempDir);
+
+    if (queryInstance && abortedQueries.has(queryInstance)) return;
 
     // Check if this is a session resume failure (exit code 1 during resume)
     const isResumeFailure = sessionId && error.message && (
@@ -778,7 +785,8 @@ async function abortClaudeSDKSession(sessionId) {
   try {
     console.log(`Aborting SDK session: ${sessionId}`);
 
-    // Call interrupt() on the query instance
+    // 先標記再 interrupt：interrupt 期間迴圈就可能結束並走到收尾
+    abortedQueries.add(session.instance);
     await session.instance.interrupt();
 
     // Update session status
@@ -793,6 +801,8 @@ async function abortClaudeSDKSession(sessionId) {
     return true;
   } catch (error) {
     console.error(`Error aborting session ${sessionId}:`, error);
+    // 中斷失敗代表這一輪仍在跑，讓它照常送出自己的終止事件
+    abortedQueries.delete(session.instance);
     return false;
   }
 }

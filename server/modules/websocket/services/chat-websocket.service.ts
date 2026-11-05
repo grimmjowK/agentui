@@ -149,7 +149,8 @@ export function handleChatConnection(
         const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
         const { ok, emitsTerminal } = await runtime.abort(sessionId, writer);
-        // Exactly one terminal event per abort: skip ours when the runtime sends its own.
+        // 每次中斷只有一個終止事件：emitsTerminal 的 runtime（Codex、Antigravity）自己送；
+        // 其他 runtime（Claude、Cursor）由這裡立即送出，底層在中斷後會略過自己的 complete/error。
         if (ok && emitsTerminal) return;
         writer.send(
           createNormalizedMessage({

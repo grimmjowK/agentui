@@ -9,7 +9,7 @@ import {
   reconnectSessionWriter,
 } from '../../../../claude-sdk.js';
 
-/** Wraps server/claude-sdk.js. The dispatcher emits the terminal event after abort. */
+/** Wraps server/claude-sdk.js. 中斷的終止事件由 dispatcher 送出；claude-sdk 在中斷後略過自己的 complete/error。 */
 export class ClaudeRuntimeProvider implements IProviderRuntime {
   async start(command: string, options: Record<string, unknown>, writer: ProviderRuntimeWriter): Promise<void> {
     await queryClaudeSDK(command, options, writer);

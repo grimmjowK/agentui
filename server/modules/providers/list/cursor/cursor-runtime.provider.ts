@@ -7,7 +7,10 @@ import {
   spawnCursor,
 } from '../../../../cursor-cli.js';
 
-/** Wraps server/cursor-cli.js. Cursor cannot re-attach a writer; reconnect only reports activity. */
+/**
+ * Wraps server/cursor-cli.js. Cursor cannot re-attach a writer; reconnect only reports activity.
+ * 中斷的終止事件由 dispatcher 送出；cursor-cli 在中斷後略過自己的 complete/error。
+ */
 export class CursorRuntimeProvider implements IProviderRuntime {
   async start(command: string, options: Record<string, unknown>, writer: ProviderRuntimeWriter): Promise<void> {
     await spawnCursor(command, options, writer);
