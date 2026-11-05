@@ -282,6 +282,12 @@ export class AntigravityResponseHandler {
   }
 }
 
+/** 從 stderr 找出 headless 模式自動拒絕審批的說明（agy 1.5.0 實測文字）。 */
+export function findPermissionDeniedNotice(stderr) {
+  const line = String(stderr || '').split('\n').find((text) => /auto-denied|cannot prompt for/i.test(text));
+  return line ? line.trim() : null;
+}
+
 /**
  * Launches an Antigravity CLI process and pipes events to the provided writer.
  */
@@ -428,6 +434,17 @@ export async function spawnAntigravity(message, options = {}, ws) {
         send(liveWriter, { sessionId: handler.sessionId, kind: 'complete', aborted: true, success: true, exitCode: 0 });
         resolve();
       } else if (code === 0 && !handler.error) {
+        // headless 模式無法詢問審批，CLI 會自動拒絕需要權限的工具，結果仍是 SUCCESS、
+        // 說明只寫在 stderr。轉成警告讓頁面看得到，否則使用者只會看到空回覆。
+        const deniedNotice = findPermissionDeniedNotice(stderrOutput);
+        if (deniedNotice) {
+          send(liveWriter, {
+            sessionId: handler.sessionId,
+            kind: 'task_notification',
+            status: 'warning',
+            summary: `Antigravity 目前以非互動模式執行，需要審批的工具已被自動拒絕。可在設定中切換為跳過權限（bypassPermissions），或在 settings.json 的 permissions.allow 加入允許規則。\n${deniedNotice}`,
+          });
+        }
         send(liveWriter, { sessionId: handler.sessionId, kind: 'complete', exitCode: 0, success: true });
         notifyRunStopped({ ...childProcess.notifyContext, sessionId: handler.sessionId, stopReason: 'completed' });
         resolve();

@@ -98,3 +98,11 @@ test('result-only responses establish session identity and preserve errors', () 
   assert.equal(handler.error, 'Permission denied');
   assert.equal(messages.filter((msg) => msg.kind === 'text').length, 0);
 });
+
+test('findPermissionDeniedNotice 認得 headless 自動拒絕審批的 stderr', async () => {
+  const { findPermissionDeniedNotice } = await import('./antigravity-cli.js');
+  const stderr = 'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)).\n';
+  assert.match(findPermissionDeniedNotice(stderr) ?? '', /auto-denied/);
+  assert.equal(findPermissionDeniedNotice('some other warning\n'), null);
+  assert.equal(findPermissionDeniedNotice(''), null);
+});
