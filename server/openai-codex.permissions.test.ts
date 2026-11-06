@@ -52,10 +52,10 @@ rl.on('line', (line) => {
   assert.equal(messages.at(-1)?.kind, 'complete');
 });
 
-// 假的 codex app-server：turn 開始後發出 item/permissions/requestApproval，
+// 假的 codex app-server：turn 開始後發出 turnId 為 null 的 mcpServer/elicitation/request，
 // 把客戶端的回覆寫進檔案，再正常結束這一輪
 test('MCP elicitation with nullable turnId completes through queryCodex', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-perm-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-elicit-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const replyFile = path.join(root, 'reply.json');
   const executable = path.join(root, 'codex');
