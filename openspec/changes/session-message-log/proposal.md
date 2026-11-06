@@ -10,7 +10,7 @@
 - **provider 歷史檔降為匯入與補齊來源**：沒有日誌的既有會話、或在終端機直接進行的回合，由伺服器在讀取時把日誌中尚未有的訊息依 provider 順序匯入日誌；provider 歷史中內容更完整的欄位（如 Antigravity 的完整 diff）由伺服器按 id 補回日誌。合併只發生在伺服器端。
 - **前端移除合併啟發式**：`computeMerged` 的時間戳插入、相鄰同文去重、文字指紋比對、錯誤包裝去重、暫時性錯誤過濾，以及 `refreshFromServer` 的保留白名單，改為「按 id 更新、按 `seq` 排序」。樂觀使用者訊息改以客戶端產生的 id 送出，由伺服器記錄並回送 `seq` 後取代。
 - **新增所見即所得驗收**：以錄製的 provider 事件流在伺服器端重放，斷言「執行中前端累積的訊息序列」與「結束後重新讀取的訊息序列」逐則相同；並保留瀏覽器端取樣比對作為發版前的手動驗收。
-- 歷史分頁改以 `seq` 為游標（**BREAKING**：`/api/providers/sessions/:id/messages` 的 `offset` 參數由 `beforeSeq` 取代；前端同步調整，無外部使用者）。
+- 歷史分頁改以 `seq` 為游標（**BREAKING**：`/api/providers/sessions/:id/messages` 的 `offset` 參數由 `beforeSeq` 取代；過渡期兩者並存，移除旗標時才移除 `offset`；前端同步調整，無外部使用者）。
 
 方案取捨（完整事件日誌 vs. 只持久化應用自產訊息並以錨點定位）見 design.md；已決議採用完整事件日誌。
 

@@ -27,6 +27,28 @@
 - **WHEN** Codex runtime 送出 `status: 'info'` 的 `task_notification`（版本與執行檔路徑）
 - **THEN** 日誌中不新增資料列
 
+### Requirement: 工具結果在日誌中併入對應的工具呼叫
+日誌層收到帶 `toolId` 的 `tool_result` 時，系統 SHALL 把其內容（`content`、`isError`、`toolUseResult`、`subagentTools`）寫入同會話中 `toolId` 相同的 `tool_use` 資料列的 `toolResult`，保留該列的 `seq`，並把更新後的 `tool_use` 送往前端；MUST NOT 為此新增資料列。找不到對應的 `tool_use` 時，MUST 以 `${toolId}:result` 為 id 獨立寫入。對帳時 MUST 忽略 provider 歷史中的獨立 `tool_result` 訊息，結果內容只經由歷史中 `tool_use.toolResult` 補齊。
+
+#### Scenario: 三種即時形態寫入後一致
+- **WHEN** Codex 以同 id 的 `tool_use` 帶 `toolResult` 送出結果、Antigravity 送出 id 為 `agy_tool_2:result` 的獨立 `tool_result`、Claude 送出 id 為 `${uuid}_tr_toolu_1` 的獨立 `tool_result`
+- **THEN** 三者在日誌中都只有一列對應的 `tool_use`，其 `toolResult` 為結果內容，`seq` 為工具呼叫首次寫入時的值
+
+#### Scenario: Codex 歷史中的獨立工具結果
+- **WHEN** Codex rollout 的 `function_call_output` 被解析為一則沒有固定 id 的 `tool_result`，該會話被連續讀取兩次
+- **THEN** 兩次讀取都不新增任何資料列，工具結果只出現在對應 `tool_use` 的 `toolResult`
+
+### Requirement: 中斷標記由伺服器產生
+日誌層收到 `kind: 'complete'` 且 `aborted: true`、而該次執行尚未送出過帶 `isInterrupted` 的訊息時，系統 SHALL 先寫入並送出一則 `role: 'user'`、`content: '<turn_aborted>'`、`isInterrupted: true`、id 為 `${sessionId}:interrupted:${runId}` 的訊息，再送出 `complete`。前端 MUST NOT 自行合成中斷標記。
+
+#### Scenario: Claude 中斷後重新整理
+- **WHEN** Claude 執行中使用者按下中斷，伺服器送出 `complete(aborted: true)`，之後使用者重新整理頁面
+- **THEN** 中斷前後畫面上都有一則中斷標記，位置相同，且來自日誌
+
+#### Scenario: Codex 不重複產生
+- **WHEN** Codex runtime 已在中斷時送出帶 `isInterrupted` 的 `<turn_aborted>`，隨後送出 `complete(aborted: true)`
+- **THEN** 日誌層不再額外產生中斷標記，該回合只有一則
+
 ### Requirement: 伺服器指派會話內唯一且穩定的序號
 系統 SHALL 為每則新寫入的訊息指派該會話內唯一的序號 `seq`，新訊息的 `seq` MUST 大於該會話所有既有訊息的 `seq`。同一會話內以相同 `id` 再次寫入時，系統 MUST 就地更新內容並保留原 `seq`，且只以新值中非 `undefined`／`null` 的欄位覆蓋。送往前端的持久性訊息（新增與更新）MUST 帶上 `seq`。
 
@@ -39,27 +61,35 @@
 - **THEN** `seq(A) < seq(B) < seq(C)`
 
 ### Requirement: 會話 id 確定前的訊息依序暫存
-系統 SHALL 為每次執行保留暫存佇列，存放 `sessionId` 尚未確定時送出的持久性訊息；在該次執行收到 `session_created` 或 writer 被設定會話 id 時，MUST 依原順序寫入日誌、指派序號後再送出。兩個在同一連線上並行的新會話 MUST NOT 互相混入對方的暫存訊息。
+系統 SHALL 為每次執行保留暫存佇列，存放 `sessionId` 尚未確定時送出的持久性訊息；在該次執行收到 `session_created` 或 writer 被設定會話 id 時，MUST 依原順序寫入日誌、指派序號。對前端 MUST 先送出 `session_created`，再送出這些暫存訊息。兩個在同一連線上並行的新會話 MUST NOT 互相混入對方的暫存訊息。新會話（啟動時未帶 `sessionId`）在收到 `session_created` 或被設定會話 id 之前，系統 MUST NOT 採信訊息自帶的 `sessionId`；執行結束時仍未確定會話 id 者，暫存訊息 MUST 照常送往前端，但 MUST NOT 寫入日誌。
 
 #### Scenario: 新會話的第一則使用者訊息
 - **WHEN** 使用者在新會話送出第一則訊息，派發處記錄使用者訊息時尚無會話 id，隨後 runtime 送出 `session_created`
-- **THEN** 使用者訊息以 `seq` 最小的位置寫入該新會話的日誌，並早於任何助手訊息
+- **THEN** 使用者訊息以 `seq` 最小的位置寫入該新會話的日誌，並早於任何助手訊息；前端先收到 `session_created`，再收到帶 `seq` 的使用者訊息
+
+#### Scenario: Antigravity 啟動前失敗
+- **WHEN** 使用者在新會話使用 Antigravity，但 CLI 未安裝，runtime 以臨時 UUID 為 `sessionId` 送出一則錯誤後結束，從未送出 `session_created`
+- **THEN** 前端照常收到該錯誤；日誌中沒有任何以該臨時 UUID 為 `session_id` 的資料列
 
 ### Requirement: 使用者訊息由伺服器以客戶端 id 記錄
-系統 SHALL 在收到 `chat-command` 時，以及 `chat-steer` 插話被 runtime 接受時，以請求中的 `clientMessageId` 為 id 寫入一則使用者 `text` 訊息並送回前端（帶 `seq`）。被拒絕的插話 MUST NOT 寫入。圖片 MUST 只記錄檔名與尺寸等中繼資料，MUST NOT 把 base64 本體寫入日誌。
+系統 SHALL 在收到 `chat-command` 時，以及 `chat-steer` 插話被 runtime 接受時，以請求中的 `clientId` 為 id 寫入一則使用者 `text` 訊息並送回前端（帶 `seq`）。被拒絕的插話 MUST NOT 寫入。圖片 MUST 只記錄檔名與尺寸等中繼資料，MUST NOT 把 base64 本體寫入日誌。處理 `chat-command` 時，系統 MUST 先記錄使用者訊息，再送出其他訊息（包括並行終端警告），最後啟動 runtime。
+
+#### Scenario: 並行終端警告排在使用者訊息之後
+- **WHEN** 使用者在一個已有終端機進行中的會話送出訊息，派發處需送出並行終端警告
+- **THEN** 日誌中使用者訊息的 `seq` 小於該警告的 `seq`
 
 #### Scenario: 執行中插話
-- **WHEN** Codex 執行中使用者送出插話，`clientMessageId` 為 `local_steer1`，runtime 回覆接受
+- **WHEN** Codex 執行中使用者送出插話，`clientId` 為 `local_steer1`，runtime 回覆接受
 - **THEN** 日誌中出現 id 為 `local_steer1` 的使用者訊息，`seq` 位於插話當下已寫入的訊息之後
 
 #### Scenario: 只傳圖片的訊息
-- **WHEN** 使用者送出不含文字、附一張圖片的訊息，`clientMessageId` 為 `local_abc`
+- **WHEN** 使用者送出不含文字、附一張圖片的訊息，`clientId` 為 `local_abc`
 - **THEN** 日誌中出現 id 為 `local_abc` 的使用者訊息，包含圖片中繼資料但不含 base64 內容；前端收到帶 `seq` 的同 id 訊息
 
 ### Requirement: 讀取時在伺服器端匯入與補齊 provider 歷史
 讀取會話訊息時，系統 SHALL 依 provider 歷史的順序與日誌對帳：歷史訊息的 id（或已記錄的 provider id）已在日誌中時，MUST 以歷史中的內容欄位補齊日誌並寫回，且 MUST NOT 改變其 `seq`；歷史訊息不在日誌中且位於所有已對應訊息之後時，MUST 追加到日誌尾端；位於兩則已對應訊息之間時，MUST 以前後兩者 `seq` 之間的值插入。對帳結果寫回日誌後，相同輸入的再次讀取 MUST 產生相同結果。
 
-使用者訊息 MUST 以錨點切段、段內依序對應，而非文字比對，也 MUST NOT 跨整份會話依序號對應：以依契約 id 已對應的助手文字、工具呼叫與結果為錨點，相鄰錨點之間為一段；中斷標記、provider 注入的內部文字、Claude `isMeta`、本地指令輸出與壓縮摘要不參與配對，且即時與歷史兩側 MUST 以同一判定函式排除。設某段歷史有 h 則、日誌有 l 則未對應的使用者訊息：l 為 0 時 MUST 將 h 則全部匯入該段；h 等於 l 時 MUST 依順序一一對應並記入 provider id；h 不等於 l 時 MUST NOT 對應也 MUST NOT 匯入該段的使用者訊息，並記錄警告。中斷標記在同一段兩側皆有時 MUST 視為已對應。
+使用者訊息 MUST 以錨點切段、段內依序對應，而非文字比對，也 MUST NOT 跨整份會話依序號對應：以依契約 id 已對應的助手文字、工具呼叫與結果為錨點，相鄰錨點之間為一段；中斷標記、provider 注入的內部文字、Claude `isMeta`、本地指令輸出與壓縮摘要不參與配對，且即時與歷史兩側 MUST 以同一判定函式排除。設某段歷史有 h 則、日誌有 l 則未對應的使用者訊息：l 為 0 時 MUST 將 h 則全部匯入該段；h 等於 l 時 MUST 依順序一一對應，且只在歷史側 id 為穩定 id 時記入 provider id；h 不等於 l 時 MUST NOT 對應也 MUST NOT 匯入該段的使用者訊息，並記錄警告。中斷標記與壓縮邊界不參與使用者訊息配對，在同一段兩側皆有時 MUST 視為已對應。
 
 #### Scenario: 補齊完整 diff
 - **WHEN** 日誌中 Antigravity 工具 `agy_tool_2` 的 `toolInput.content` 為空字串（即時摘要），歷史中同 id 的 `content` 為完整檔案內容
@@ -93,7 +123,11 @@
 - **THEN** 該訊息不被匯入；之後即時流以契約 id 送出該訊息時，日誌中只有一列
 
 ### Requirement: provider 端刪減或分岔時重建會話日誌
-對帳時若日誌中曾經對應過的訊息（id 為契約 id，或已記錄 provider id）不存在於非空的 provider 歷史中，系統 SHALL 判定該會話已分岔，並在單一交易中刪除該會話的日誌、依「日誌為空」的規則從 provider 歷史完整匯入，同時記錄警告（會話 id 與觸發原因）。系統 MUST 另提供手動觸發單一會話重建的管理端點。重建後應用自產訊息（錯誤、警告、中斷標記）不保留。
+對帳時若日誌中曾經對應過的訊息不存在於非空的 provider 歷史中，系統 SHALL 判定該會話已分岔，並在單一交易中刪除該會話的日誌、依「日誌為空」的規則從 provider 歷史完整匯入，同時記錄警告（會話 id 與觸發原因）。「曾經對應過」MUST 只採計穩定的 id（日誌列的 `id` 為穩定契約 id，或 `provider_ids` 中記錄的穩定 provider id）；每次讀取都會改變的 id MUST NOT 參與分岔判斷。系統 MUST 另提供手動觸發單一會話重建的管理端點。重建後應用自產訊息（錯誤、警告、中斷標記）不保留。
+
+#### Scenario: 反覆讀取不誤判分岔
+- **WHEN** 一個已結束的 Codex 會話在 provider 歷史不變的情況下被連續讀取十次
+- **THEN** 十次都不觸發重建，日誌資料列數與內容不變
 
 #### Scenario: 終端機 rewind
 - **WHEN** 使用者在終端機對 Claude 會話執行 `/rewind`，provider 歷史截短，日誌中已對應的最後三則訊息在歷史中已不存在
@@ -104,7 +138,11 @@
 - **THEN** 該會話日誌被刪除並從 provider 歷史完整匯入，回傳重建後的訊息數量
 
 ### Requirement: 對帳以 provider 的 id 契約一致性為啟用前提
-系統 SHALL 只對通過「即時重放寫入日誌後，以 provider 歷史對帳不產生任何新匯入」一致性測試的 provider 啟用中段與尾端匯入。未通過的 provider MUST 只在日誌為空時做一次完整匯入，日誌非空時 MUST NOT 匯入。
+系統 SHALL 只對通過「即時重放寫入日誌後，以 provider 歷史對帳不產生任何新匯入」一致性測試的 provider 啟用中段與尾端匯入。未通過的 provider MUST 只在日誌為空時做一次完整匯入，日誌非空時 MUST NOT 匯入。一致性 MUST 逐訊息種類（助手文字、工具呼叫、thinking、壓縮邊界、中斷標記、使用者訊息）判定；provider 歷史解析對同一份歷史檔重複讀取時，每則訊息 MUST 產生相同的 id，沒有 provider 原生 id 的訊息 MUST 以決定性規則產生 id（例如依歷史檔行號），MUST NOT 使用隨機 id。
+
+#### Scenario: Codex 歷史 id 決定性
+- **WHEN** 同一份 Codex rollout（含 reasoning、`compacted`、使用者訊息與 `<turn_aborted>`）被解析兩次
+- **THEN** 兩次產生的所有訊息 id 逐則相同；reasoning 的 id 等於即時事件的 `item.id`
 
 #### Scenario: 未具 id 契約的 provider
 - **WHEN** 一個 Cursor 會話已有日誌，provider 歷史中有日誌沒有的訊息
@@ -115,7 +153,11 @@
 - **THEN** provider 歷史全部依順序匯入日誌，讀取結果與匯入後的日誌相同
 
 ### Requirement: 以序號為游標的讀取介面
-`GET /api/providers/sessions/:sessionId/messages` SHALL 回傳依 `seq` 升冪排序的訊息，支援 `limit` 與 `beforeSeq` 參數：提供 `beforeSeq` 時回傳 `seq < beforeSeq` 的最後 `limit` 則。回應 MUST 包含是否還有更早訊息的旗標。`offset` 參數 MUST 不再被接受。
+`GET /api/providers/sessions/:sessionId/messages` SHALL 回傳依 `seq` 升冪排序的訊息，支援 `limit` 與 `beforeSeq` 參數：提供 `beforeSeq` 時回傳 `seq < beforeSeq` 的最後 `limit` 則。回應 MUST 包含是否還有更早訊息的旗標。在新舊讀取路徑以旗標並存的過渡期間，系統 MUST 同時接受 `offset` 參數（同時帶 `beforeSeq` 時以 `beforeSeq` 為準），以支援舊前端與旗標回滾；移除旗標後 `offset` 參數 MUST 不再被接受。
+
+#### Scenario: 過渡期的舊前端分頁
+- **WHEN** 伺服器已開啟讀日誌旗標，前端仍為舊 store，以 `offset=20&limit=20` 請求更早訊息
+- **THEN** 請求成功，回傳對應範圍的訊息
 
 #### Scenario: 載入更早的訊息
 - **WHEN** 前端目前最早一則訊息的 `seq` 為 40，請求 `beforeSeq=40&limit=20`
@@ -148,14 +190,18 @@
 - **THEN** 日誌中儲存截斷後的內容並標記 `truncated: true`；讀取時若歷史中有完整輸出，回傳完整輸出
 
 ### Requirement: 日誌隨會話刪除
-刪除或硬刪會話時，系統 SHALL 一併刪除該會話的日誌資料列；封存與收藏 MUST NOT 影響日誌。
+刪除或硬刪會話時，系統 SHALL 一併刪除該會話的日誌資料列；硬刪除專案時，系統 MUST 在同一交易中刪除該專案所有會話的日誌資料列。封存與收藏 MUST NOT 影響日誌。
 
 #### Scenario: 刪除會話
 - **WHEN** 使用者永久刪除一個會話
 - **THEN** `session_messages` 中該會話的資料列全部刪除
 
+#### Scenario: 硬刪除專案
+- **WHEN** 使用者硬刪除一個含三個會話的專案
+- **THEN** `session_messages` 中這三個會話的資料列全部刪除，不留孤兒資料列
+
 ### Requirement: 日誌依時間與總大小清理
-系統 SHALL 在伺服器啟動時與之後每 24 小時清理一次日誌：先刪除最後更新時間早於保留期限（預設 90 天）的會話日誌；若總大小（以 `payload` 長度總和計）仍超過上限（預設 1 GB），依最後更新時間由舊到新刪除會話日誌，直到低於上限的 90%。清理 MUST 以整個會話為單位，MUST NOT 只刪除會話中的部分訊息。收藏的會話與執行中的會話 MUST NOT 被清理。保留天數與大小上限 MUST 可由設定調整，設為 0 表示停用該項清理。
+系統 SHALL 在伺服器啟動時與之後每 24 小時清理一次日誌：先刪除最後更新時間早於保留期限（預設 90 天）的會話日誌；若總大小（以 `payload` 長度總和計）仍超過上限（預設 1 GB），依最後更新時間由舊到新刪除會話日誌，直到低於上限的 90%。會話的「最後更新時間」MUST 以該會話日誌資料列 `updated_at` 的最大值為準。清理 MUST 以整個會話為單位，MUST NOT 只刪除會話中的部分訊息。收藏的會話與執行中的會話 MUST NOT 被清理。保留天數與大小上限 MUST 可由設定調整，設為 0 表示停用該項清理。
 
 #### Scenario: 超過保留期限
 - **WHEN** 一個未收藏、未執行中的會話最後更新於 120 天前
