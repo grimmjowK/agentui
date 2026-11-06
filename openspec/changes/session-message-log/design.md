@@ -59,6 +59,19 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 
 **為何不在各 runtime 內寫**：runtime 有四個、送出點數十處（含 Antigravity 的 `liveWriter`、Claude 的 `reconnectSessionWriter`），逐一修改容易遺漏；派發處是所有執行的共同入口。Antigravity 重新連線時傳入的新 writer 也經過派發處，同樣被包裝。
 
+**派發處的其他送出路徑也必須經過日誌**：`chat-websocket.service.ts` 每條連線只建一個原始 `WebSocketWriter`，除了 `runtime.start` / `runtime.reconnect`，下列路徑也直接用它送出或把它交給 runtime：
+
+| 路徑 | 現況 | 處理 |
+|---|---|---|
+| `runtime.reconnect` | 每次重新連線傳入新的原始 writer；Codex 直接 `state.writer = writer` 整個替換（`openai-codex.ts:326`） | **不新建** `LoggingWriter`：先以會話 id 查 D10 登記表，查到就對該實例 `updateWebSocket(新 ws)` 後傳給 `runtime.reconnect`；查不到（執行已結束）才包新的。這樣不論 runtime 是換 socket 還是換 writer，拿到的都是同一個實例 |
+| `abort-session` | `runtime.abort(sessionId, writer)` 收到原始 writer；Claude／Cursor 的 `complete` 由派發處直接送 | `runtime.abort` 改傳該會話登記的 `LoggingWriter`（D10 登記表）；查不到時（例如該次執行已結束）才用原始 writer。`complete` 不入日誌，維持直接送出 |
+| 審批失敗的 `task_notification`（Codex、Claude） | 原始 writer 直接送 | 屬 D3 的持久性種類，改經日誌寫入 |
+| `chat-steer` | 只回 `steer-accepted` / `steer-rejected`，插話文字本身不記錄 | 前端附 `clientMessageId`；接受時以該 id 寫入使用者訊息（同 D6），被拒時不寫 |
+
+為了不靠人工清點，派發處所有送出改走同一個函式 `sendToClient(writer, message)`：持久性訊息先寫日誌，再交給 writer。另加不變量測試：以假的 ws 收集一整輪（含中斷、審批失敗、插話）送出的訊息，斷言**每則持久性種類的訊息都帶 `seq`**；任何繞過日誌的新路徑都會讓這個測試失敗。
+
+**`LoggingWriter` 必須完整代理 writer 介面**：runtime 會讀寫 `ws`、`userId`、`sessionId`，並呼叫 `updateWebSocket`、`setSessionId`、`getSessionId`（Claude `claude-sdk.js:865`、Antigravity `antigravity-cli.js:56` 依 `updateWebSocket` 是否存在決定「換底層 socket」或「換整個 writer」）。`LoggingWriter` 須提供同名成員並轉給內層 writer，確保重新連線時走「換底層 socket」分支，同一次執行自始至終是同一個 `LoggingWriter` 實例（D10 依賴此點）。
+
 **外部 REST API 不包裝**：`/api/agent` 每次呼叫都建立全新會話、沒有接續參數，結果（含錯誤）直接回給呼叫端。這類會話之後在 UI 第一次打開時日誌為空，會依 D7 從 provider 歷史完整匯入，所以不寫日誌也不影響在 UI 中檢視；唯一差別是該次 API 執行中的自產錯誤不出現在 UI 歷史中。少包裝一處，也避免 SSE／一次性回應兩種 writer 的額外分支。
 
 **歸屬以訊息自身的 `sessionId` 為準**，不用 `writer.sessionId`：一條 WebSocket 連線共用一個 writer，可能先後承載多個會話。
@@ -87,7 +100,7 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 
 主鍵 `(session_id, id)`，索引 `(session_id, seq)`。
 
-- 新訊息：`seq = floor(max(seq)) + 1`。better-sqlite3 是同步呼叫，在單一行程內與寫入同交易即為原子操作。
+- 新訊息：`seq = floor(max(seq)) + 1`。better-sqlite3 是同步呼叫，在單一行程內與寫入同交易即為原子操作。**前提是同一個資料庫檔只有一個伺服器行程寫入**：k8s 部署若有多個副本共用同一個 SQLite 檔（共享卷），序號會衝突、D10 的記憶體登記表也只存在於其中一個副本。實作前須確認部署為單一副本，並在部署文件中註明；若之後需要多副本，必須先把會話黏著到同一副本，或改用伺服器端集中的序號來源。
 - 同 id 再次送出（工具從 started 到 completed、`text` 覆蓋串流定稿）：就地更新 `payload`、保留 `seq`。欄位合併規則：新值非 `undefined`/`null` 才覆蓋（即時流的後續事件比前一個事件完整，與 D7 的「歷史補齊」方向不同）。
 - 送出給前端的訊息一律帶 `seq`；更新也帶原 `seq`，前端按 id upsert。
 
@@ -114,6 +127,14 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 
 只在伺服器端合併，且寫回日誌，所以同一次結果之後每次讀取都相同。
 
+**代價：錯配會被持久化**。舊做法的合併錯誤只影響當下畫面，重新整理即消失；寫回日誌後，一次錯配就是永久的重複或錯序。因此對帳加上三條限制：
+
+- **執行中的會話只補齊、不匯入**（以 D10 的登記表判斷）。執行中 provider 歷史可能只寫了一半，且即時流尚未送出的訊息之後會以契約 id 到達；此時若把「尾端未對應」的歷史訊息匯入，契約只要有任何缺口就會產生兩份。執行結束後的第一次讀取再做完整對帳。
+- **偵測 provider 端的刪減或分岔**：使用者可能在終端機對同一會話做 Claude `/rewind`、fork，或 Codex 回滾，provider 歷史變短或改寫，而 D7 的步驟只會新增與補齊。對帳時若發現日誌中「曾經對應過」的訊息（`id` 屬契約 id，或 `provider_ids` 非空）在 provider 歷史中已不存在，且 provider 歷史非空，即判定為分岔，對該會話執行**重建**。
+- **重建**＝在單一交易中刪除該會話的日誌，再依「日誌為空」的規則從 provider 歷史完整匯入。代價是應用自產訊息（錯誤、警告、中斷標記）在重建後消失，與 D13 清理後的結果相同。重建以 `logger.warn` 記錄會話 id 與觸發原因，並另提供管理端點手動觸發，作為錯配資料的修復入口。
+
+> ponytail: 分岔時整會話重建會丟失自產訊息；若之後發現 rewind 很常見，再改為「保留錨點仍存在的自產訊息」。
+
 ### D8. id 契約是對帳的前提；使用者訊息以回合內順序對應
 
 對帳依賴「同一則訊息在即時與歷史中 id 相同」。現況：
@@ -125,7 +146,14 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 | Antigravity | `step_index` 生成的 id | 即時無對應事件 |
 | Cursor | **無契約** | 無 |
 
-- 使用者訊息：歷史中第 k 則尚未對應的使用者訊息，對應日誌中同一位置之後第 k 則尚未對應的使用者訊息（`source=live`），把 provider id 記進 `provider_ids`。以順序而非文字比對，避免 `bf2f4eaa` 那類只傳圖片、文字為空的情況配不上。
+- 使用者訊息：**以錨點切段、段內依序對應**。整份會話依序號單純配對（歷史第 k 則 ↔ 日誌第 k 則）的問題是：任一側多一則或少一則，之後全部錯位，而錯位會寫進 `provider_ids` 並被持久化。改為：
+  1. **錨點**：已依契約 id 對應的助手文字、工具呼叫與結果。相鄰兩個錨點之間（以及第一個錨點之前、最後一個錨點之後）為一個「段」。
+  2. **排除項**：中斷標記（`isInterrupted`，例如 Codex 以 `role: 'user'` 送出的 `<turn_aborted>`）、provider 注入的內部文字（Codex 的 AGENTS.md／`<user_instructions>` 等、Claude 的 `isMeta`、本地指令輸出、壓縮摘要）不參與使用者訊息配對。即時與歷史兩側 MUST 共用同一個判定函式（以 `codex-sessions.provider.ts` 現有的 `isInternalCodexUserText`、Claude 的 `isMeta` 判斷為基礎抽出），避免兩側規則漂移。中斷標記另以「同一段內兩側都有即視為已對應」處理。
+  3. **段內配對**：設某段中歷史有 h 則、日誌有 l 則未對應的使用者訊息（`source=live`）：
+     - l = 0：視為終端機回合，h 則全部匯入該段。
+     - h = l：依順序一一對應，把 provider id 記進 `provider_ids`。
+     - h ≠ l：該段**不配對也不匯入**，保留日誌原狀，以 `logger.warn` 記錄會話 id、段位置與兩側數量。寧可少顯示一則終端機輸入，也不寫入錯配。
+  以順序而非文字比對，避免 `bf2f4eaa` 那類只傳圖片、文字為空的情況配不上。插話（D2 的 `chat-steer`）寫入日誌後與一般使用者訊息同樣參與配對。
 - 每個 provider 必須通過「即時重放 → 寫日誌 → 讀歷史 → 對帳後無新增匯入」的一致性測試，才啟用對帳；未通過者（目前 Cursor）在日誌非空時不做匯入，只在日誌為空時做一次完整匯入。已決議接受此限制：Cursor 會話在終端機進行的回合，在補齊 id 契約前不會出現在 UI 的接續對話中；Cursor 的 id 契約另案處理。
 
 ### D9. 前端：按 id upsert、按 seq 排序
@@ -152,7 +180,9 @@ store 的狀態轉移抽成純函式（`applyLogMessage`、`replaceWithFetched`�
 
 **為何用記憶體而非資料庫**：段落文字只在執行期間有意義，伺服器行程重啟時執行本身也會中斷，持久化沒有收益；記憶體成本為每個執行中會話一段文字。
 
-**為何在 `LoggingWriter` 累加**：它本來就經手每個 `stream_delta` 與 `stream_end`，不需修改四個 runtime。各 runtime 自己的重新連線機制（Claude 替換底層 socket、Codex／Antigravity 替換 writer）都經過派發處，因此新連線取得的是同一個 `LoggingWriter` 實例的累加內容；實作時須讓 `LoggingWriter` 以會話 id 可被查得（例如以會話 id 為鍵的登記表，執行結束時移除）。
+**為何在 `LoggingWriter` 累加**：它本來就經手每個 `stream_delta` 與 `stream_end`，不需修改四個 runtime。各 runtime 自己的重新連線機制（Claude 替換底層 socket、Codex／Antigravity 替換 writer）都經過派發處，而派發處在重新連線時傳入的是登記表中原本那個實例（D2），因此新連線取得的是同一個 `LoggingWriter` 實例的累加內容；登記表以會話 id 為鍵，執行結束時移除。
+
+**移除 Antigravity 自己的斷線暫存**：`antigravity-cli.js` 的 `liveWriter.send` 在 `writer.ws.readyState !== OPEN` 時把訊息推進自己的 `pending` 佇列（上限 1000，超過丟最舊），重新連線才補送。這個佇列位於 `LoggingWriter` 之前，造成：斷線期間的持久性訊息不寫入日誌、使用者若不再連回就永遠不會寫入，D10 的補回對 Antigravity 不成立。改為 `liveWriter.send` 一律直接呼叫 `LoggingWriter.send`（先寫日誌，內層 `WebSocketWriter` 在斷線時照常丟棄），並移除 `pending`。斷線期間的非持久性訊息由既有機制取代：持久性訊息由 D10 依 `seq` 補回、串流段落由 D10 補送、待審批項目由 `check-session-status` 的 `getPendingApprovals` 回報、執行是否結束由 `isProcessing` 回報。
 
 ### D11. 所見即所得驗收
 
@@ -182,6 +212,10 @@ store 的狀態轉移抽成純函式（`applyLogMessage`、`replaceWithFetched`�
 ## Risks / Trade-offs
 
 - [對帳錯配：id 契約不完整導致重複或遺漏] → D8 的逐 provider 一致性測試作為啟用閘門；Cursor 暫不對帳；對帳結果寫回後可稽核（`source=import` 與 `provider_ids`）。
+- [錯配被持久化，重新整理也無法恢復] → 執行中只補齊不匯入（D7）；使用者訊息段內數量不符時不配對（D8）；提供整會話重建作為修復入口（D7）。
+- [送出路徑繞過日誌] → 派發處統一經 `sendToClient`、重新連線沿用登記的實例、移除 Antigravity 的斷線暫存（D2、D10）；以「每則持久性訊息都帶 `seq`」的不變量測試防止回歸。
+- [provider 端 rewind／fork／回滾使日誌與 CLI 長期不一致] → 偵測已對應訊息從 provider 歷史消失時整會話重建（D7）；代價是自產訊息遺失。
+- [多副本部署下序號衝突] → 以單一副本為前提（D4），實作前確認。
 - [儲存成本：工具輸出很大] → `payload` 單則上限 512 KB，超出截斷並標記 `truncated`；完整內容在讀取時由 provider 歷史補齊（不寫回超出部分）。總量依 D13 清理。刪除／硬刪會話時一併刪除日誌。
 - [清理後失去自產訊息] → 被清理的會話再次打開時由 provider 歷史重新匯入，對話內容仍在，但當時的錯誤、警告、中斷標記不會回來；收藏的會話與執行中的會話不清理。
 - [記憶體中的段落與實際送出不同步，例如重新連線時恰好收到 `stream_end`] → 補送與後續訊息都經同一個 `LoggingWriter` 依序處理；段落定稿時先清除累加內容再送出定稿訊息，前端以同 id 的定稿 `text` 取代暫存，即使補送與定稿相鄰也不會重複。
@@ -193,6 +227,7 @@ store 的狀態轉移抽成純函式（`applyLogMessage`、`replaceWithFetched`�
 
 ## Migration Plan
 
+0. **前置閘門：Claude id 契約**。Claude 是使用量最大、目前最穩定的 provider；若它的 `tool_result` 等種類無法建立即時／歷史 id 一致，就只能「日誌為空時匯入一次」，終端機接續回合會從 UI 消失，等於讓最穩定的路徑退步。因此 tasks 1.1、1.3 先做：通過（或能在 Claude runtime／歷史解析中修正）才進入第一階段；修不好則回到方案取捨重新評估，不帶著缺口進入實作。同時確認部署為單一副本（D4）。
 1. **第一階段：只寫不讀**。新增資料表與 `LoggingWriter`，所有持久性訊息寫入日誌並帶 `seq` 送出；前端忽略 `seq`。新增診斷端點比對日誌與舊 `fetchHistory` 的差異，在開發機累積資料，驗證寫入正確性。
 2. **第二階段：伺服器讀日誌**。讀取 API 在旗標開啟時改走 D7 的對帳流程；前端仍用舊 store。此時「重新整理後」的結果已包含自產訊息與穩定順序。
 3. **第三階段：前端切換**。store 改為 D9 的 upsert／排序，移除拼接啟發式；啟用 D10 補回。D11 自動驗收納入 `npm test`。
@@ -207,5 +242,12 @@ store 的狀態轉移抽成純函式（`applyLogMessage`、`replaceWithFetched`�
 1. 採用方案 A（完整事件日誌），三個階段依序實作。
 2. 單則 `payload` 上限 512 KB；日誌依時間與總大小清理（D13），預設值如 D13 所列，可透過設定調整。
 3. 接受 Cursor 在補齊 id 契約前，終端機回合不出現在 UI 的接續對話中（D8）；Cursor 的 id 契約另案處理。
+
+review 後補充（2026-11-06）：
+
+4. 派發處所有持久性訊息統一經日誌送出，重新連線沿用同一個 `LoggingWriter` 實例，移除 Antigravity 的斷線暫存（D2、D10）。
+5. 使用者訊息改為錨點切段、段內依序對應，數量不符時不配對（D8）。
+6. 執行中只補齊不匯入；偵測 provider 端刪減時整會話重建，接受自產訊息遺失（D7）。
+7. Claude id 契約驗證作為進入第一階段的閘門；部署須為單一副本（Migration Plan 第 0 步、D4）。
 
 尚無未決問題。D13 的預設值（90 天、1 GB）為起始值，上線後依實際用量調整。

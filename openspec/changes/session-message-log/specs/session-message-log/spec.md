@@ -1,7 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: 持久性訊息在送出前寫入對話日誌
-系統 SHALL 在把下列種類的 `NormalizedMessage` 送往前端之前，先寫入伺服器端的對話日誌（`session_messages`）：`text`（使用者與助手）、`thinking`、`tool_use`、`tool_result`、`error`、`status` 為 `warning` 或 `error` 的 `task_notification`、帶 `isInterrupted` 的訊息、壓縮邊界。`stream_delta`、`stream_end`、`status`、`session_created`、`complete`、`permission_request`、`permission_cancelled` 與 `status` 為 `info` 的 `task_notification` MUST NOT 寫入日誌。寫入 MUST 發生在聊天派發處包裝的 writer（`LoggingWriter`）中，涵蓋 `runtime.start` 與 `runtime.reconnect` 傳入的 writer。外部 REST API（`/api/agent`）的執行 MUST NOT 寫入日誌；這類會話在 UI 第一次讀取時依匯入規則從 provider 歷史取得。
+系統 SHALL 在把下列種類的 `NormalizedMessage` 送往前端之前，先寫入伺服器端的對話日誌（`session_messages`）：`text`（使用者與助手）、`thinking`、`tool_use`、`tool_result`、`error`、`status` 為 `warning` 或 `error` 的 `task_notification`、帶 `isInterrupted` 的訊息、壓縮邊界。`stream_delta`、`stream_end`、`status`、`session_created`、`complete`、`permission_request`、`permission_cancelled` 與 `status` 為 `info` 的 `task_notification` MUST NOT 寫入日誌。寫入 MUST 發生在聊天派發處的日誌層（`LoggingWriter` 與派發處的 `sendToClient`）中，涵蓋聊天 WebSocket 上所有會送出持久性訊息的路徑：`runtime.start`、`runtime.reconnect` 與 `runtime.abort` 收到的 writer，以及派發處自行送出的訊息（例如審批失敗的 `task_notification`）。runtime MUST NOT 在日誌層之前自行暫存或丟棄持久性訊息。外部 REST API（`/api/agent`）的執行 MUST NOT 寫入日誌；這類會話在 UI 第一次讀取時依匯入規則從 provider 歷史取得。
+
+#### Scenario: 每則持久性訊息都帶序號
+- **WHEN** 一輪執行中依序發生工具呼叫、審批失敗、使用者插話、中斷，期間前端重新連線一次
+- **THEN** 前端收到的每一則持久性種類訊息都帶 `seq`，且都已寫入日誌
+
+#### Scenario: Antigravity 斷線期間的訊息
+- **WHEN** Antigravity 執行中 WebSocket 斷線，期間 runtime 送出一則 `tool_result`，之後使用者不再連回
+- **THEN** 該 `tool_result` 已寫入日誌；使用者之後打開該會話時看得到它
 
 #### Scenario: 錯誤訊息被持久化
 - **WHEN** Antigravity 執行失敗，runtime 送出一則 `kind: 'error'` 的訊息
@@ -38,14 +46,20 @@
 - **THEN** 使用者訊息以 `seq` 最小的位置寫入該新會話的日誌，並早於任何助手訊息
 
 ### Requirement: 使用者訊息由伺服器以客戶端 id 記錄
-系統 SHALL 在收到 `chat-command` 時，以請求中的 `clientMessageId` 為 id 寫入一則使用者 `text` 訊息並送回前端（帶 `seq`）。圖片 MUST 只記錄檔名與尺寸等中繼資料，MUST NOT 把 base64 本體寫入日誌。
+系統 SHALL 在收到 `chat-command` 時，以及 `chat-steer` 插話被 runtime 接受時，以請求中的 `clientMessageId` 為 id 寫入一則使用者 `text` 訊息並送回前端（帶 `seq`）。被拒絕的插話 MUST NOT 寫入。圖片 MUST 只記錄檔名與尺寸等中繼資料，MUST NOT 把 base64 本體寫入日誌。
+
+#### Scenario: 執行中插話
+- **WHEN** Codex 執行中使用者送出插話，`clientMessageId` 為 `local_steer1`，runtime 回覆接受
+- **THEN** 日誌中出現 id 為 `local_steer1` 的使用者訊息，`seq` 位於插話當下已寫入的訊息之後
 
 #### Scenario: 只傳圖片的訊息
 - **WHEN** 使用者送出不含文字、附一張圖片的訊息，`clientMessageId` 為 `local_abc`
 - **THEN** 日誌中出現 id 為 `local_abc` 的使用者訊息，包含圖片中繼資料但不含 base64 內容；前端收到帶 `seq` 的同 id 訊息
 
 ### Requirement: 讀取時在伺服器端匯入與補齊 provider 歷史
-讀取會話訊息時，系統 SHALL 依 provider 歷史的順序與日誌對帳：歷史訊息的 id（或已記錄的 provider id）已在日誌中時，MUST 以歷史中的內容欄位補齊日誌並寫回，且 MUST NOT 改變其 `seq`；歷史訊息不在日誌中且位於所有已對應訊息之後時，MUST 追加到日誌尾端；位於兩則已對應訊息之間時，MUST 以前後兩者 `seq` 之間的值插入。歷史中的使用者訊息 MUST 以回合內順序（歷史中第 k 則未對應者 ↔ 日誌中同位置之後第 k 則未對應的使用者訊息）對應，而非文字比對。對帳結果寫回日誌後，相同輸入的再次讀取 MUST 產生相同結果。
+讀取會話訊息時，系統 SHALL 依 provider 歷史的順序與日誌對帳：歷史訊息的 id（或已記錄的 provider id）已在日誌中時，MUST 以歷史中的內容欄位補齊日誌並寫回，且 MUST NOT 改變其 `seq`；歷史訊息不在日誌中且位於所有已對應訊息之後時，MUST 追加到日誌尾端；位於兩則已對應訊息之間時，MUST 以前後兩者 `seq` 之間的值插入。對帳結果寫回日誌後，相同輸入的再次讀取 MUST 產生相同結果。
+
+使用者訊息 MUST 以錨點切段、段內依序對應，而非文字比對，也 MUST NOT 跨整份會話依序號對應：以依契約 id 已對應的助手文字、工具呼叫與結果為錨點，相鄰錨點之間為一段；中斷標記、provider 注入的內部文字、Claude `isMeta`、本地指令輸出與壓縮摘要不參與配對，且即時與歷史兩側 MUST 以同一判定函式排除。設某段歷史有 h 則、日誌有 l 則未對應的使用者訊息：l 為 0 時 MUST 將 h 則全部匯入該段；h 等於 l 時 MUST 依順序一一對應並記入 provider id；h 不等於 l 時 MUST NOT 對應也 MUST NOT 匯入該段的使用者訊息，並記錄警告。中斷標記在同一段兩側皆有時 MUST 視為已對應。
 
 #### Scenario: 補齊完整 diff
 - **WHEN** 日誌中 Antigravity 工具 `agy_tool_2` 的 `toolInput.content` 為空字串（即時摘要），歷史中同 id 的 `content` 為完整檔案內容
@@ -62,6 +76,32 @@
 #### Scenario: 使用者訊息依順序對應
 - **WHEN** 日誌中有一則 id 為 `local_abc` 的使用者訊息，歷史中同一回合的使用者訊息 id 為 `msg_123`
 - **THEN** 兩者對應為同一則，`msg_123` 記入 `local_abc` 的 provider id，讀取結果中只有一則使用者訊息
+
+#### Scenario: 段內數量不符時不配對
+- **WHEN** 某段中日誌有 1 則未對應的使用者訊息，歷史有 2 則
+- **THEN** 該段的使用者訊息不對應、不匯入，日誌維持原狀，並記錄一則包含會話 id 與兩側數量的警告；其他段的對帳不受影響
+
+#### Scenario: 中斷標記不造成錯位
+- **WHEN** Codex 會話中某回合被中斷，日誌與歷史在該段都有一則 `<turn_aborted>` 中斷標記，下一回合各有一則使用者訊息
+- **THEN** 中斷標記視為已對應，下一回合的使用者訊息正確一一對應，讀取結果不出現重複
+
+### Requirement: 執行中的會話只補齊不匯入
+讀取正在執行中的會話時，系統 SHALL 只以 provider 歷史補齊日誌中已對應訊息的內容欄位，MUST NOT 匯入任何日誌中沒有的歷史訊息（含尾端、中段與使用者訊息）。執行結束後的讀取 MUST 進行完整對帳，且結果 MUST 與「執行中從未被讀取」時相同。
+
+#### Scenario: 執行中讀取
+- **WHEN** 一次執行進行中，provider 歷史已寫入一則即時流尚未送出的助手訊息，前端此時讀取會話訊息
+- **THEN** 該訊息不被匯入；之後即時流以契約 id 送出該訊息時，日誌中只有一列
+
+### Requirement: provider 端刪減或分岔時重建會話日誌
+對帳時若日誌中曾經對應過的訊息（id 為契約 id，或已記錄 provider id）不存在於非空的 provider 歷史中，系統 SHALL 判定該會話已分岔，並在單一交易中刪除該會話的日誌、依「日誌為空」的規則從 provider 歷史完整匯入，同時記錄警告（會話 id 與觸發原因）。系統 MUST 另提供手動觸發單一會話重建的管理端點。重建後應用自產訊息（錯誤、警告、中斷標記）不保留。
+
+#### Scenario: 終端機 rewind
+- **WHEN** 使用者在終端機對 Claude 會話執行 `/rewind`，provider 歷史截短，日誌中已對應的最後三則訊息在歷史中已不存在
+- **THEN** 下次讀取時該會話日誌被重建，讀取結果與截短後的 provider 歷史一致，並記錄一則重建警告
+
+#### Scenario: 手動重建
+- **WHEN** 管理者對某會話呼叫重建端點
+- **THEN** 該會話日誌被刪除並從 provider 歷史完整匯入，回傳重建後的訊息數量
 
 ### Requirement: 對帳以 provider 的 id 契約一致性為啟用前提
 系統 SHALL 只對通過「即時重放寫入日誌後，以 provider 歷史對帳不產生任何新匯入」一致性測試的 provider 啟用中段與尾端匯入。未通過的 provider MUST 只在日誌為空時做一次完整匯入，日誌非空時 MUST NOT 匯入。
@@ -82,7 +122,11 @@
 - **THEN** 回傳 `seq < 40` 的最後 20 則，依 `seq` 升冪，並標示是否還有更早訊息
 
 ### Requirement: 重新連線依序號補回遺漏訊息與串流中的段落
-前端重新連線（含整頁重新整理後的首次連線）並查詢會話狀態時 SHALL 附上目前持有的最大 `seq`；系統 MUST 依序：回送該會話日誌中 `seq` 更大的所有訊息；若該會話仍在執行且目前段落尚未定稿，把該段落已送出的完整文字以一則 `stream_delta` 補送；最後接續即時流。段落文字 MUST 只保留在記憶體中，MUST NOT 寫入日誌，並在段落定稿或執行結束時清除。
+前端重新連線（含整頁重新整理後的首次連線）並查詢會話狀態時 SHALL 附上目前持有的最大 `seq`；系統 MUST 依序：回送該會話日誌中 `seq` 更大的所有訊息；若該會話仍在執行且目前段落尚未定稿，把該段落已送出的完整文字以一則 `stream_delta` 補送；最後接續即時流。段落文字 MUST 只保留在記憶體中，MUST NOT 寫入日誌，並在段落定稿或執行結束時清除。重新連線時，若該會話仍在執行，系統 MUST 沿用該次執行原本的 `LoggingWriter` 實例（只更換底層連線），MUST NOT 另建新實例，不論 runtime 在重新連線時是更換底層 socket 還是整個替換 writer。
+
+#### Scenario: Codex 重新連線後的段落補送
+- **WHEN** Codex 執行中助手段落串流到一半，前端重新連線，Codex runtime 在重新連線時整個替換 writer
+- **THEN** 前端收到補送的完整前半段，之後的片段接續其後；日誌暫存與段落累加內容沒有遺失
 
 #### Scenario: 斷線期間的工具結果
 - **WHEN** WebSocket 斷線期間 runtime 送出的 `tool_result` 被 `WebSocketWriter.send` 丟棄，前端重新連線時附上 `seq` 12
