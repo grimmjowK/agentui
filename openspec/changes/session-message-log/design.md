@@ -14,7 +14,7 @@
 3. 時間戳語意不一：即時訊息是伺服器送出時間；串流暫存訊息是瀏覽器時間且持續更新；Antigravity 歷史是步驟開始時間；Cursor 歷史是捏造的 `baseTime + sequence × 100ms`；重試錯誤在 `bf2f4eaa` 後延到結束才送。依時間戳插入，錯誤的位置取決於時鐘相對誤差。
 4. 唯一可靠的順序——伺服器收到事件的先後——沒有被記錄。
 
-SQLite（better-sqlite3）已用於 sessions／projects 索引；資料庫遷移集中在 `server/modules/database/migrations.ts`。UI 發起的聊天執行都經過 `chat-websocket.service.ts` 的 `runtime.start` / `runtime.reconnect`。另有外部 REST API（`/api/agent`，`routes/agent.js`）供 CI、n8n 等以 API key 呼叫，每次都建立全新會話，結果以 SSE 或一次性回應回給呼叫端。
+SQLite（better-sqlite3）已用於 sessions／projects 索引；資料庫遷移集中在 `server/modules/database/migrations.ts`。UI 發起的聊天執行都經過 `chat-websocket.service.ts` 的 `runtime.start` / `runtime.reconnect`。另有外部 REST API（`/api/agent`，`routes/agent.js`）供 CI、n8n 等以 API key 呼叫，可建立新會話或以 `sessionId` 接續既有會話，結果以 SSE 或一次性回應回給呼叫端。
 
 ## Goals / Non-Goals
 
@@ -30,7 +30,6 @@ SQLite（better-sqlite3）已用於 sessions／projects 索引；資料庫遷移
 - 不處理終端機與 UI 同時對同一會話寫入（既有的 Codex handoff 已阻止並發；其他 provider 維持現狀）。
 - 不做跨裝置即時協作或訊息編輯。
 - 串流中的半段文字不寫入資料庫（改以記憶體保留並在重新連線時補送，見 D10）。
-- 外部 REST API（`/api/agent`）的執行不寫入日誌（見 D2）。
 
 ## Decisions
 
@@ -72,7 +71,13 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 
 **`LoggingWriter` 必須完整代理 writer 介面**：runtime 會讀寫 `ws`、`userId`、`sessionId`，並呼叫 `updateWebSocket`、`setSessionId`、`getSessionId`（Claude `claude-sdk.js:865`、Antigravity `antigravity-cli.js:56` 依 `updateWebSocket` 是否存在決定「換底層 socket」或「換整個 writer」）。`LoggingWriter` 須提供同名成員並轉給內層 writer，確保重新連線時走「換底層 socket」分支，同一次執行自始至終是同一個 `LoggingWriter` 實例（D10 依賴此點）。
 
-**外部 REST API 不包裝**：`/api/agent` 每次呼叫都建立全新會話、沒有接續參數，結果（含錯誤）直接回給呼叫端。這類會話之後在 UI 第一次打開時日誌為空，會依 D7 從 provider 歷史完整匯入，所以不寫日誌也不影響在 UI 中檢視；唯一差別是該次 API 執行中的自產錯誤不出現在 UI 歷史中。少包裝一處，也避免 SSE／一次性回應兩種 writer 的額外分支。
+**runtime 依 writer 標記決定送物件或字串**：Codex（`openai-codex.ts:67-68`）與 Antigravity（`antigravity-cli.js:25-28`）的 `send` 只在 `writer.isWebSocketWriter || writer.isSSEStreamWriter` 為真時送 `NormalizedMessage` 物件，否則送 `JSON.stringify` 後的字串。若 `LoggingWriter` 沒有這個標記，它收到的是字串，讀不到 `kind`、`id`、`toolId`，這兩家的持久性訊息會全部漏寫。因此：
+
+- `LoggingWriter` 固定宣告 `isWebSocketWriter = true`，讓 runtime 一律送物件給它；實際的傳輸格式由內層 writer 決定（`WebSocketWriter`、`SSEStreamWriter` 收物件，`ResponseCollector` 物件與字串皆可處理，`routes/agent.js:452-520`）。
+- 防禦性處理：`LoggingWriter.send` 若仍收到字串，先 `JSON.parse` 再走日誌流程，解析失敗則原樣轉給內層 writer 並 `logger.warn`。
+- 驗收測試 MUST 以**真實的** Codex、Antigravity runtime 驅動 `LoggingWriter`（假 app-server／假 agy 執行檔），不能只對 `LoggingWriter` 直接呼叫 `send`，否則測不到這類 transport sniffing。
+
+**外部 REST API 同樣包裝**：`/api/agent` 接受 `sessionId` 並傳給 `runtime.start`（`routes/agent.js:843`、`:948`），可以接續既有會話。若不包裝，接續期間既不寫日誌、也不登記 `LoggingWriter`，UI 同時打開該會話時，D7 會把它當成非執行中，匯入寫到一半的 provider 歷史。因此 `/api/agent` 與聊天 WebSocket 一樣，在呼叫 `runtime.start` 前以 `LoggingWriter` 包裝 `SSEStreamWriter` 或 `ResponseCollector`，新會話與接續都包裝、不分情況。`LoggingWriter` 只依賴內層 writer 的 `send`／`setSessionId` 等成員，不需要為兩種 writer 寫分支。
 
 **歸屬以訊息自身的 `sessionId` 為準**，不用 `writer.sessionId`：一條 WebSocket 連線共用一個 writer，可能先後承載多個會話。
 
@@ -104,7 +109,7 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 
 主鍵 `(session_id, id)`，索引 `(session_id, seq)`。
 
-- 新訊息：`seq = floor(max(seq)) + 1`。better-sqlite3 是同步呼叫，在單一行程內與寫入同交易即為原子操作。**前提是同一個資料庫檔只有一個伺服器行程寫入**：k8s 部署若有多個副本共用同一個 SQLite 檔（共享卷），序號會衝突、D10 的記憶體登記表也只存在於其中一個副本。實作前須確認部署為單一副本，並在部署文件中註明；若之後需要多副本，必須先把會話黏著到同一副本，或改用伺服器端集中的序號來源。
+- **兩種寫入，兩條規則**：即時寫入（經 `LoggingWriter`）的新訊息 `seq = floor(max(seq)) + 1`，永遠大於目前最大值；D7 對帳匯入的訊息可以插入既有兩則之間（中點）。`seq` 只定義**顯示順序**，不代表伺服器收到的先後；即時訊息的到達順序恰好與顯示順序一致，是「即時一律追加」的結果，而不是 `seq` 的定義。better-sqlite3 是同步呼叫，在單一行程內與寫入同交易即為原子操作。**前提是同一個資料庫檔只有一個伺服器行程寫入**：k8s 部署若有多個副本共用同一個 SQLite 檔（共享卷），序號會衝突、D10 的記憶體登記表也只存在於其中一個副本。實作前須確認部署為單一副本，並在部署文件中註明；若之後需要多副本，必須先把會話黏著到同一副本，或改用伺服器端集中的序號來源。
 - 同 id 再次送出（工具從 started 到 completed、`text` 覆蓋串流定稿）：就地更新 `payload`、保留 `seq`。欄位合併規則：新值非 `undefined`/`null` 才覆蓋（即時流的後續事件比前一個事件完整，與 D7 的「歷史補齊」方向不同）。
 - 送出給前端的訊息一律帶 `seq`；更新也帶原 `seq`，前端按 id upsert。
 
@@ -120,7 +125,17 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 
 ### D6. 使用者訊息由伺服器記錄
 
-目前使用者訊息只存在於前端樂觀訊息與 provider 歷史。改為：前端送 `chat-command` 時附 `clientId`（沿用插話既有的欄位名，值為 `local_<uuid>`），派發處以該 id 寫入一則使用者 `text`（含圖片縮圖的中繼資料，不含 base64 本體），送回帶 `seq` 的版本，前端以同 id 取代樂觀訊息。圖片本體不入日誌，只存檔名與尺寸；重新整理後的縮圖延續目前行為（顯示路徑說明）。
+目前使用者訊息只存在於前端樂觀訊息與 provider 歷史。改為：前端送 `chat-command` 時附 `clientId`（沿用插話既有的欄位名，值為 UUID），派發處以它寫入一則使用者 `text`（含圖片的中繼資料，不含 base64 本體），送回帶 `seq` 的版本，前端以同 id 取代樂觀訊息。
+
+**`clientId` 是不可信輸入**：日誌主鍵是 `(session_id, id)`、寫入是 upsert，若直接以客戶端送來的字串當 id，客戶端送 `clientId: "call_1"` 就能覆寫同名的工具訊息、甚至改變其 `kind`。因此：
+
+- 伺服器 MUST 驗證 `clientId` 為 UUID 格式，不符即拒絕該請求（回 `error`，不寫日誌、不啟動 runtime）。
+- 日誌 id 由伺服器加上專用前綴：`user:<clientId>`。provider 的 id 不會以 `user:` 開頭，兩者不可能撞名；前端以同樣規則換算後取代樂觀訊息。
+- 寫入使用者訊息用 **insert-if-absent**，不走一般 upsert：同 id 已存在且是同一使用者、同一會話的使用者訊息時視為冪等重送，直接回傳既有那列；其他情況一律拒絕，MUST NOT 覆寫。
+
+**圖片**：上傳端點把檔案轉成 base64 後刪除暫存檔（`server/index.js:929` 起），`ChatImage` 只有 `data` 與 `name`，目前沒有可持久化的路徑。日誌只存檔名與尺寸。為避免伺服器回送時縮圖消失，前端以同 id 取代樂觀訊息時**保留本地的 `images`**（只在記憶體中，不寫回日誌，也不送回伺服器）；這是 D9「按 id upsert」唯一的欄位保留例外，範圍只限使用者訊息的 `images`。重新整理後沒有縮圖，與現況相同。
+
+> ponytail: 重新整理後縮圖消失；若要保留，需新增持久化的檔案路徑與縮圖端點，另案處理。
 
 **寫入順序**：派發處 MUST 先記錄使用者訊息，再送出其他訊息。現況 `chat-websocket.service.ts:142` 在 `runtime.start` 之前先送並行終端警告（`warnOnConcurrentShellSession`），導入日誌後要調整為「記錄使用者訊息 → 送警告 → `runtime.start`」，使用者訊息才會排在警告之前。
 
@@ -164,9 +179,10 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 
 - **工具結果**：依 D3，日誌層一律併入 `tool_use`，對帳忽略歷史中的獨立 `tool_result`。三家不再需要各自對齊這一格。
 - **Codex 歷史**：`mapRolloutEntry` 的 `reasoning` 取 `payload.id`（與即時 `item.id` 相同）；其餘沒有 provider id 的條目（`compacted`、使用者訊息、中斷標記）改用 rollout 行號產生決定性 id（`codex_${sessionId}_${lineIndex}`，比照 Antigravity），不再落到 `generateMessageId` 的隨機 id。
+- **Codex 使用者訊息的兩種格式**：`fetchHistory` 同時接收 `event_msg/user_message`（`codex-sessions.provider.ts:153`）與 `response_item` 的使用者 `message`（`:167`）。依 `:64` 的註解，新版 rollout 只寫後者；本機 21 個 0.163 rollout 與 repo 的兩份 fixture（0.143、0.163）也確實沒有前者。但較舊的 rollout 若兩種都寫，一則輸入會變成兩則歷史訊息，段內配對會因 h = 2、l = 1 而拒絕配對，日誌為空時則兩則都匯入而重複。防禦性處理：parser 在同一回合內遇到文字相同的 `event_msg` 與 `response_item` 使用者訊息時合併為一則邏輯訊息，id 取 `response_item` 那行的行號 id，另一行的 id 一併記入 `provider_ids`。
 - **壓縮邊界與中斷標記**：即時與歷史 id 不同，依「同一段兩側都有即視為已對應」處理（見下方段內配對）。
 
-上表「穩定」與否由 1.x 的一致性測試判定並回填；D7 的分岔偵測與 `provider_ids` 只使用判定為穩定的 id。
+上表「穩定」與否由 1.x 的一致性測試判定並回填；D7 的分岔偵測與 `provider_ids` 只使用判定為穩定的 id。一致性測試除了「對帳後沒有新增匯入」，還 MUST 斷言「重放後每一則即時使用者訊息都配對到 provider 的訊息」：前者在 h ≠ l 的段落會因「不配對也不匯入」而通過，測不出配對失敗。
 
 - 使用者訊息：**以錨點切段、段內依序對應**。整份會話依序號單純配對（歷史第 k 則 ↔ 日誌第 k 則）的問題是：任一側多一則或少一則，之後全部錯位，而錯位會寫進 `provider_ids` 並被持久化。改為：
   1. **錨點**：已依契約 id 對應的助手文字、工具呼叫與結果。相鄰兩個錨點之間（以及第一個錨點之前、最後一個錨點之後）為一個「段」。
@@ -182,7 +198,7 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 
 `useSessionStore` 每個會話只保留一份 `Map<id, message>` 與依 `seq` 排序的陣列：
 
-- WebSocket 收到帶 `seq` 的訊息 → upsert。
+- WebSocket 收到帶 `seq` 的訊息 → upsert。唯一例外：以伺服器版本取代樂觀使用者訊息時，保留本地的 `images`（D6）。
 - 不帶 `seq` 的訊息只處理串流暫存與控制事件，永遠排在尾端。
 - `stream_end` 帶 `messageId` 時，暫存以該 id 等待同 id 的定稿 `text` 取代；不帶 `messageId` 時保留暫存，收到下一則帶 `seq` 的助手 `text` 或 `complete` 時清除，MUST NOT 以隨機 id 轉成正式訊息（D3）。
 - 收到 `complete(aborted: true)` 時不再在前端合成中斷標記，改由伺服器送出（D3）。
@@ -258,6 +274,9 @@ store 的狀態轉移抽成純函式（`applyLogMessage`、`replaceWithFetched`�
 - [既有會話第一次讀取時大量匯入] → 匯入在讀取時進行、與檔案 mtime 快取搭配；只在第一次付出成本。大型會話的首次讀取可能變慢，需量測。
 - [終端機與 UI 交替寫同一會話時中段插入過多，`seq` 精度耗盡] → REAL 中點插入在同一間隙約可分 50 次；超過時對該會話整體重新編號（離線、單一交易）。
 - [遷移期間兩套讀取路徑並存] → 以設定旗標切換（見 Migration Plan），驗收通過前預設維持舊路徑。
+- [runtime 依 writer 標記決定送字串，繞過日誌] → `LoggingWriter` 固定宣告 `isWebSocketWriter`，收到字串時先解析；驗收以真實 runtime 驅動（D2）。
+- [客戶端以 `clientId` 覆寫既有訊息] → 驗證 UUID、伺服器加 `user:` 前綴、使用者訊息只 insert-if-absent（D6）。
+- [圖片縮圖重新整理後消失] → 前端在記憶體保留本地 `images`，重新整理後與現況相同；持久化另案（D6）。
 
 ## Migration Plan
 
@@ -294,5 +313,14 @@ PR #10 review 後補充（2026-11-06，已對照程式碼核對）：
 13. 使用者訊息沿用 `clientId` 欄位名；先記錄使用者訊息再送並行終端警告（D6）。
 14. 第二、三階段同時接受 `offset` 與 `beforeSeq`，收尾時才移除 `offset`（D12）。
 15. 硬刪除專案同步刪除日誌；`connection.ts` 啟用 WAL（D14）。
+
+PR #10 第二輪 review 後補充（2026-11-06，已對照程式碼核對）：
+
+16. `LoggingWriter` 固定宣告 `isWebSocketWriter = true`，收到字串時先解析；Codex、Antigravity 驗收以真實 runtime 驅動（D2）。
+17. `/api/agent` 可接續既有會話，改為一律包裝 `LoggingWriter`，撤回先前「不包裝」的決議（D2）。
+18. Codex parser 合併同一回合文字相同的 `event_msg`／`response_item` 使用者訊息（防禦性；0.163 未重現）；一致性測試斷言每則即時使用者訊息都配對成功（D8）。
+19. `clientId` 驗證為 UUID、日誌 id 加 `user:` 前綴、使用者訊息只 insert-if-absent（D6）。
+20. `seq` 規則改為「即時寫入大於目前最大值；匯入可插入既有區間」，`seq` 只定義顯示順序（D4）。
+21. 前端以同 id 取代使用者訊息時保留本地 `images`；接受重新整理後縮圖消失，持久化另案（D6）。
 
 尚無未決問題。D13 的預設值（90 天、1 GB）為起始值，上線後依實際用量調整。

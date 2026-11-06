@@ -3,19 +3,20 @@
 > **閘門**：1.0、1.1、1.2、1.3 全部通過，design D8 契約表每一格皆為「穩定」，才進入第 2 節（design Migration Plan 第 0 步）。1.3 若無法修正，停下來重新評估方案，不帶缺口進入實作。
 
 - [ ] 1.0 確認部署為單一副本、SQLite 檔不被多個行程同時寫入（design D4），結論寫入部署文件
-- [ ] 1.1 新增一致性測試工具（design D8）：給定一份錄製的即時事件流與對應的 provider 歷史檔，重放即時流取得訊息 id 集合，解析歷史取得 id 集合，**依訊息種類**（助手文字、工具呼叫、工具結果、thinking、壓縮邊界、中斷標記、使用者訊息）輸出「只在即時」「只在歷史」「兩邊都有」三組清單；另檢查「同一份歷史讀兩次 id 是否相同」，判定各種類的歷史 id 是否穩定
+- [ ] 1.1 新增一致性測試工具（design D8）：給定一份錄製的即時事件流與對應的 provider 歷史檔，重放即時流取得訊息 id 集合，解析歷史取得 id 集合，**依訊息種類**（助手文字、工具呼叫、工具結果、thinking、壓縮邊界、中斷標記、使用者訊息）輸出「只在即時」「只在歷史」「兩邊都有」三組清單；另檢查「同一份歷史讀兩次 id 是否相同」，判定各種類的歷史 id 是否穩定；並斷言「重放後每一則即時使用者訊息都配對到 provider 的訊息」（只驗證「沒有新增匯入」會漏掉 h ≠ l 時的配對失敗）
 - [ ] 1.3 **（先做）** 錄製一份 Claude 多步驟執行（含 `tool_result`、錯誤、中斷），跑一致性測試；若任一種類 id 不一致，在 Claude runtime 或歷史解析修正；修不好則停在此處重新評估
 - [ ] 1.2a Codex 歷史解析改用決定性 id（design D8）：`mapRolloutEntry` 的 `reasoning` 取 `payload.id`；`compacted`、使用者訊息、中斷標記等沒有 provider id 的條目改用 `codex_${sessionId}_${lineIndex}`，不再落到 `generateMessageId`；附測試（同一份 rollout 讀兩次，所有訊息 id 相同）
+- [ ] 1.2b Codex parser 合併同一回合文字相同的 `event_msg/user_message` 與 `response_item` 使用者訊息為一則（design D8，防禦性），id 取 `response_item` 行號 id、另一行 id 記入 `provider_ids`；附測試（手工構造兩種格式並存的 rollout，只產生一則使用者訊息）
 - [ ] 1.2 以 Codex（`docs/fixtures/codex` 加一份新錄製的多步驟 rollout，含插話、中斷與壓縮）、Antigravity（`docs/fixtures/antigravity`）跑一致性測試；結果回填 design D8 契約表
 - [ ] 1.4 把瀏覽器取樣比對（每 300ms 偵測重複、執行中與結束後重新整理逐則比對）整理成 `docs/` 下的手動驗收腳本，並在目前程式碼上記錄 Claude／Codex／Antigravity 各一輪的基準結果
 
 ## 2. 階段一：日誌資料表與只寫不讀
 
 - [ ] 2.1 在 `migrations.ts` 新增 `session_messages` 資料表（`session_id`、`id`、`seq REAL`、`provider_ids`、`payload`、`source`、`created_at`、`updated_at`；主鍵 `(session_id, id)`，索引 `(session_id, seq)`）；在 `connection.ts` 建立連線時執行 `PRAGMA journal_mode = WAL`（design D14，目前未設定）
-- [ ] 2.2 新增 `session-messages.db.ts` repository：`append`（指派 `floor(max)+1`）、`upsertById`（保留 `seq`、只覆蓋非空欄位）、`foldToolResult`（依 `toolId` 寫入同會話 `tool_use` 列的 `toolResult`）、`insertBetween`（中點）、`list(sessionId, { beforeSeq, limit })`、`maxSeq`、`deleteBySession`、`renumber`；附整合測試
+- [ ] 2.2 新增 `session-messages.db.ts` repository：`append`（即時寫入，指派 `floor(max)+1`）、`insertUserIfAbsent`（使用者訊息專用，不覆寫）、`upsertById`（保留 `seq`、只覆蓋非空欄位）、`foldToolResult`（依 `toolId` 寫入同會話 `tool_use` 列的 `toolResult`）、`insertBetween`（中點）、`list(sessionId, { beforeSeq, limit })`、`maxSeq`、`deleteBySession`、`renumber`；附整合測試
 - [ ] 2.3 新增 `LoggingWriter`（design D2、D3、D5）：
   - 判斷持久性種類、寫入並補上 `seq` 後交給原 writer；單則 `payload` 512 KB 上限與 `truncated` 標記
-  - **完整代理** `ws`、`userId`、`sessionId`、`updateWebSocket`、`setSessionId`、`getSessionId`
+  - **完整代理** `ws`、`userId`、`sessionId`、`updateWebSocket`、`setSessionId`、`getSessionId`；固定宣告 `isWebSocketWriter = true`，讓 Codex／Antigravity 的 `send` 一律送物件；收到字串時先 `JSON.parse`，失敗則原樣轉交並 `logger.warn`（design D2）
   - 每次執行一個實例，維護會話 id 確定前的暫存佇列；新會話在 `session_created`／`setSessionId` 前**不採信訊息自帶的 `sessionId`**（Antigravity 臨時 UUID）；確定時先寫入暫存、對前端**先送 `session_created` 再送暫存訊息**；執行結束仍未確定則暫存只送不寫
   - 帶 `toolId` 的 `tool_result` 併入同 `toolId` 的 `tool_use`（保留 `seq`、送出更新後的 `tool_use`），找不到才以 `${toolId}:result` 獨立寫入
   - 收到 `complete(aborted: true)` 且該次執行未送過 `isInterrupted` 訊息時，先寫入並送出 id 為 `${sessionId}:interrupted:${runId}` 的中斷標記，再送 `complete`
@@ -26,10 +27,10 @@
   - 重新連線（`runtime.reconnect`）先查登記表，查到就 `updateWebSocket` 後沿用同一實例，查不到才新建
   - `abort-session` 把登記的實例傳給 `runtime.abort`
   - 派發處所有送出改走 `sendToClient(writer, message)`（含審批失敗的 `task_notification`）
-  - 外部 REST API（`routes/agent.js`）不包裝，並以測試確認 `/api/agent` 建立的會話在第一次讀取時由 provider 歷史完整匯入
-- [ ] 2.4a 不變量測試：以假的 ws 收集一整輪（含中斷、審批失敗、插話、中途重新連線）送出的訊息，斷言每則持久性種類的訊息都帶 `seq`；並斷言 Claude、Codex、Antigravity 重新連線前後經手的是同一個 `LoggingWriter` 實例
+  - 外部 REST API（`routes/agent.js`）在 `runtime.start` 前同樣以 `LoggingWriter` 包裝 `SSEStreamWriter`／`ResponseCollector`，新會話與帶 `sessionId` 的接續都包裝（design D2）；附測試（以 `sessionId` 接續時日誌有寫入、執行中登記表查得到該會話，UI 同時讀取不會匯入）
+- [ ] 2.4a 不變量測試：以**真實的** Codex（假 app-server）、Antigravity（假 agy）、Claude（mock SDK）runtime 驅動，以假的 ws 收集一整輪（含中斷、審批失敗、插話、中途重新連線）送出的訊息，斷言每則持久性種類的訊息都帶 `seq`；並斷言 Claude、Codex、Antigravity 重新連線前後經手的是同一個 `LoggingWriter` 實例
 - [ ] 2.4b 移除 `antigravity-cli.js` `liveWriter` 的 `pending` 斷線暫存，`send` 一律直接交給 `LoggingWriter`（design D10）；附測試（斷線期間送出的 `tool_result` 已寫入日誌）
-- [ ] 2.5 `chat-command` 與 `chat-steer` 使用 `clientId` 欄位（沿用插話既有命名），派發處以該 id 寫入使用者訊息（圖片只存中繼資料；插話只在被接受時寫入）；`chat-command` 的順序調整為「記錄使用者訊息 → `warnOnConcurrentShellSession` → `runtime.start`」（design D6）；前端送出 `chat-command` 時產生並附上 `clientId`，暫不改變前端顯示
+- [ ] 2.5 `chat-command` 與 `chat-steer` 使用 `clientId` 欄位（沿用插話既有命名），伺服器驗證為 UUID，不符即拒絕；日誌 id 為 `user:<clientId>`，以 insert-if-absent 寫入（同一使用者、同一會話的同 id 使用者訊息視為冪等重送，其他情況拒絕、不覆寫）（design D6）；圖片只存中繼資料；插話只在被接受時寫入；附測試（`clientId` 非 UUID 被拒；`clientId` 對應的 id 已是工具訊息時被拒且原列不變；同一則使用者訊息重送不新增列）；`chat-command` 的順序調整為「記錄使用者訊息 → `warnOnConcurrentShellSession` → `runtime.start`」（design D6）；前端送出 `chat-command` 時產生並附上 `clientId`，暫不改變前端顯示
 - [ ] 2.6 刪除會話時呼叫 `deleteBySession`；`sessionsDb.deleteSessionsByProjectPath` 在同一交易中先刪除該專案所有會話的 `session_messages` 再刪 `sessions`（design D14）；封存與收藏不影響；附測試（硬刪除專案後無孤兒日誌）
 - [ ] 2.6a 日誌清理（design D13）：伺服器啟動時與每 24 小時執行；「最後更新時間」以 `session_messages` 依 `session_id` 彙總的 `MAX(updated_at)` 為準；先依保留天數、再依總大小以會話為單位由舊到新刪除，`LEFT JOIN sessions` 跳過收藏、查登記表跳過執行中的會話；維護按會話彙總的 `payload` 大小；`SESSION_LOG_RETENTION_DAYS`（預設 90）與 `SESSION_LOG_MAX_BYTES`（預設 1 GB）可設定、0 為停用，寫入 `.env.example`；附測試（逾期刪除、超量刪到 90%、收藏與執行中不刪、清理後讀取會重新匯入）
 - [ ] 2.7 Claude runtime 的錯誤包裝去重搬到伺服器端（design D9）：SDK 拋出的錯誤若已以助手正文送出過，不再送出 `error`，附測試
@@ -55,7 +56,7 @@
 - [ ] 4.1 把 store 的狀態轉移抽成純函式 `applyLogMessage(slot, msg)`（按 id upsert、依 `seq` 排序；不帶 `seq` 的串流暫存置於尾端）與 `replaceWithFetched(slot, messages)`（整份取代、保留串流暫存），附單元測試
 - [ ] 4.2 `useSessionStore` 在旗標開啟時改用上述純函式；移除 `computeMerged`、`interleaveByTimestamp`、`dedupeAdjacentAssistantEchoes`、`isErrorAlreadyShown`、`isTransientRetryRecovered`、使用者文字指紋比對、`overlayDefinedFields` 與 `refreshFromServer` 的保留白名單
 - [ ] 4.2a 移除 `useChatRealtimeHandlers.ts` 收到 `complete(aborted)` 時本地合成中斷標記的邏輯，改由伺服器送出（design D3）
-- [ ] 4.3 樂觀使用者訊息以 `clientId` 顯示，收到同 id 帶 `seq` 的訊息後取代（含只傳圖片的情況）；插話改為送出時即以 `clientId` 顯示樂觀訊息，不再等 `steer-accepted` 才 `addMessage`，被拒時移除
+- [ ] 4.3 樂觀使用者訊息以 `user:<clientId>` 顯示，收到同 id 帶 `seq` 的訊息後取代，取代時保留本地的 `images`（design D6；只限使用者訊息的 `images`）；插話改為送出時即以 `clientId` 顯示樂觀訊息，不再等 `steer-accepted` 才 `addMessage`，被拒時移除
 - [ ] 4.4 `finalizeStreaming`：`stream_end` 帶 `messageId` 時沿用該 id 等待定稿 `text` 取代；不帶 `messageId` 時保留暫存，收到下一則帶 `seq` 的助手 `text` 或 `complete` 時清除，不以隨機 id 轉成正式訊息（design D3、D9）；附測試
 - [ ] 4.5 分頁改用 `beforeSeq`（`fetchMore`、`useChatSessionState` 的載入更多）
 - [ ] 4.6 重新連線補回（design D10）：`check-session-status` 附上目前最大 `seq`，伺服器回送 `seq` 更大的日誌訊息後再接續即時流；附整合測試（斷線期間送出的 `tool_result` 在重新連線後出現）

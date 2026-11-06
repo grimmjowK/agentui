@@ -29,7 +29,7 @@
 
 **後端**
 - `server/modules/database/`：新增 `session_messages` 資料表、遷移與 repository。
-- `server/modules/websocket/services/`：新增 `LoggingWriter`，在派發處包裝 WebSocket writer，送出前寫日誌、補上 `seq`；會話 id 確定前暫存；累加執行中段落供重新連線補送。外部 REST API（`/api/agent`）每次都是新會話，不寫日誌，之後在 UI 打開時由 provider 歷史匯入。
+- `server/modules/websocket/services/`：新增 `LoggingWriter`，在派發處包裝 WebSocket writer，送出前寫日誌、補上 `seq`；會話 id 確定前暫存；累加執行中段落供重新連線補送。外部 REST API（`/api/agent`）可接續既有會話，同樣以 `LoggingWriter` 包裝。
 - `server/modules/websocket/services/chat-websocket.service.ts`：`chat-command` 時以客戶端 id 記錄使用者訊息。
 - 各 sessions provider 的 `fetchHistory`：改為供匯入／補齊使用；讀取 API 改讀日誌。
 - `server/modules/providers/provider.routes.ts`：訊息讀取與分頁參數。

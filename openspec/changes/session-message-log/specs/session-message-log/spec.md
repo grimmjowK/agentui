@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: 持久性訊息在送出前寫入對話日誌
-系統 SHALL 在把下列種類的 `NormalizedMessage` 送往前端之前，先寫入伺服器端的對話日誌（`session_messages`）：`text`（使用者與助手）、`thinking`、`tool_use`、`tool_result`、`error`、`status` 為 `warning` 或 `error` 的 `task_notification`、帶 `isInterrupted` 的訊息、壓縮邊界。`stream_delta`、`stream_end`、`status`、`session_created`、`complete`、`permission_request`、`permission_cancelled` 與 `status` 為 `info` 的 `task_notification` MUST NOT 寫入日誌。寫入 MUST 發生在聊天派發處的日誌層（`LoggingWriter` 與派發處的 `sendToClient`）中，涵蓋聊天 WebSocket 上所有會送出持久性訊息的路徑：`runtime.start`、`runtime.reconnect` 與 `runtime.abort` 收到的 writer，以及派發處自行送出的訊息（例如審批失敗的 `task_notification`）。runtime MUST NOT 在日誌層之前自行暫存或丟棄持久性訊息。外部 REST API（`/api/agent`）的執行 MUST NOT 寫入日誌；這類會話在 UI 第一次讀取時依匯入規則從 provider 歷史取得。
+系統 SHALL 在把下列種類的 `NormalizedMessage` 送往前端之前，先寫入伺服器端的對話日誌（`session_messages`）：`text`（使用者與助手）、`thinking`、`tool_use`、`tool_result`、`error`、`status` 為 `warning` 或 `error` 的 `task_notification`、帶 `isInterrupted` 的訊息、壓縮邊界。`stream_delta`、`stream_end`、`status`、`session_created`、`complete`、`permission_request`、`permission_cancelled` 與 `status` 為 `info` 的 `task_notification` MUST NOT 寫入日誌。寫入 MUST 發生在聊天派發處的日誌層（`LoggingWriter` 與派發處的 `sendToClient`）中，涵蓋聊天 WebSocket 上所有會送出持久性訊息的路徑：`runtime.start`、`runtime.reconnect` 與 `runtime.abort` 收到的 writer，以及派發處自行送出的訊息（例如審批失敗的 `task_notification`）。runtime MUST NOT 在日誌層之前自行暫存或丟棄持久性訊息。外部 REST API（`/api/agent`）的執行 MUST 同樣經日誌層寫入，新會話與以 `sessionId` 接續既有會話皆然。日誌層 MUST 向 runtime 宣告 `isWebSocketWriter` 標記，使依此標記決定傳輸格式的 runtime（Codex、Antigravity）一律送出訊息物件；收到字串時 MUST 先解析為訊息物件再寫入。
 
 #### Scenario: 每則持久性訊息都帶序號
 - **WHEN** 一輪執行中依序發生工具呼叫、審批失敗、使用者插話、中斷，期間前端重新連線一次
@@ -19,9 +19,13 @@
 - **WHEN** runtime 連續送出 100 則 `stream_delta`
 - **THEN** 日誌中不新增任何資料列
 
-#### Scenario: 外部 API 的執行
-- **WHEN** CI 透過 `/api/agent` 以 API key 建立一個新會話並執行完畢，之後使用者在 UI 打開該會話
-- **THEN** 執行期間日誌中沒有該會話的資料列；UI 第一次讀取時，provider 歷史完整匯入日誌並顯示
+#### Scenario: 外部 API 接續既有會話
+- **WHEN** CI 透過 `/api/agent` 帶 `sessionId` 接續一個既有會話，執行中使用者在 UI 打開該會話
+- **THEN** 該次執行的持久性訊息都寫入日誌並帶 `seq`；UI 讀取時該會話被視為執行中，只補齊、不匯入
+
+#### Scenario: Codex runtime 送出物件
+- **WHEN** 真實的 Codex runtime 以 `LoggingWriter` 為 writer 執行一輪含工具呼叫的對話
+- **THEN** `LoggingWriter` 收到的每則訊息都是物件，工具呼叫與助手文字都寫入日誌
 
 #### Scenario: info 通知不寫入
 - **WHEN** Codex runtime 送出 `status: 'info'` 的 `task_notification`（版本與執行檔路徑）
@@ -50,7 +54,7 @@
 - **THEN** 日誌層不再額外產生中斷標記，該回合只有一則
 
 ### Requirement: 伺服器指派會話內唯一且穩定的序號
-系統 SHALL 為每則新寫入的訊息指派該會話內唯一的序號 `seq`，新訊息的 `seq` MUST 大於該會話所有既有訊息的 `seq`。同一會話內以相同 `id` 再次寫入時，系統 MUST 就地更新內容並保留原 `seq`，且只以新值中非 `undefined`／`null` 的欄位覆蓋。送往前端的持久性訊息（新增與更新）MUST 帶上 `seq`。
+系統 SHALL 為每則寫入日誌的訊息指派該會話內唯一的序號 `seq`，`seq` 只定義顯示順序。即時寫入（經日誌層送出）的新訊息，其 `seq` MUST 大於該會話目前最大的 `seq`；對帳匯入的訊息 MAY 以兩則既有訊息 `seq` 之間的值插入。同一會話內以相同 `id` 再次寫入時，系統 MUST 就地更新內容並保留原 `seq`，且只以新值中非 `undefined`／`null` 的欄位覆蓋。送往前端的持久性訊息（新增與更新）MUST 帶上 `seq`。
 
 #### Scenario: 工具從開始到完成
 - **WHEN** Codex 對同一工具先送出 `item/started` 映射的 `tool_use`（id `call_1`），再送出 `item/completed` 映射的同 id `tool_use`（含 `toolResult`）
@@ -72,19 +76,27 @@
 - **THEN** 前端照常收到該錯誤；日誌中沒有任何以該臨時 UUID 為 `session_id` 的資料列
 
 ### Requirement: 使用者訊息由伺服器以客戶端 id 記錄
-系統 SHALL 在收到 `chat-command` 時，以及 `chat-steer` 插話被 runtime 接受時，以請求中的 `clientId` 為 id 寫入一則使用者 `text` 訊息並送回前端（帶 `seq`）。被拒絕的插話 MUST NOT 寫入。圖片 MUST 只記錄檔名與尺寸等中繼資料，MUST NOT 把 base64 本體寫入日誌。處理 `chat-command` 時，系統 MUST 先記錄使用者訊息，再送出其他訊息（包括並行終端警告），最後啟動 runtime。
+系統 SHALL 在收到 `chat-command` 時，以及 `chat-steer` 插話被 runtime 接受時，以 `user:<clientId>` 為 id 寫入一則使用者 `text` 訊息並送回前端（帶 `seq`）。`clientId` 為不可信輸入：系統 MUST 驗證其為 UUID 格式，不符時 MUST 拒絕該請求，不寫入日誌也不啟動 runtime。寫入使用者訊息 MUST 只在該 id 不存在時新增；同 id 已存在且為同一使用者、同一會話的使用者訊息時 MUST 視為冪等重送並回傳既有訊息，其他情況 MUST 拒絕，MUST NOT 覆寫既有資料列。被拒絕的插話 MUST NOT 寫入。圖片 MUST 只記錄檔名與尺寸等中繼資料，MUST NOT 把 base64 本體寫入日誌。處理 `chat-command` 時，系統 MUST 先記錄使用者訊息，再送出其他訊息（包括並行終端警告），最後啟動 runtime。
 
 #### Scenario: 並行終端警告排在使用者訊息之後
 - **WHEN** 使用者在一個已有終端機進行中的會話送出訊息，派發處需送出並行終端警告
 - **THEN** 日誌中使用者訊息的 `seq` 小於該警告的 `seq`
 
 #### Scenario: 執行中插話
-- **WHEN** Codex 執行中使用者送出插話，`clientId` 為 `local_steer1`，runtime 回覆接受
-- **THEN** 日誌中出現 id 為 `local_steer1` 的使用者訊息，`seq` 位於插話當下已寫入的訊息之後
+- **WHEN** Codex 執行中使用者送出插話，`clientId` 為一個 UUID，runtime 回覆接受
+- **THEN** 日誌中出現 id 為 `user:<該 UUID>` 的使用者訊息，`seq` 位於插話當下已寫入的訊息之後
 
 #### Scenario: 只傳圖片的訊息
-- **WHEN** 使用者送出不含文字、附一張圖片的訊息，`clientId` 為 `local_abc`
-- **THEN** 日誌中出現 id 為 `local_abc` 的使用者訊息，包含圖片中繼資料但不含 base64 內容；前端收到帶 `seq` 的同 id 訊息
+- **WHEN** 使用者送出不含文字、附一張圖片的訊息，`clientId` 為 `6f1c2a3e-0b4d-4c8e-9a1f-2b3c4d5e6f70`
+- **THEN** 日誌中出現 id 為 `user:6f1c2a3e-0b4d-4c8e-9a1f-2b3c4d5e6f70` 的使用者訊息，包含圖片中繼資料但不含 base64 內容；前端收到帶 `seq` 的同 id 訊息
+
+#### Scenario: 以 clientId 覆寫既有訊息被拒
+- **WHEN** 客戶端送出 `chat-command`，`clientId` 為 `call_1`（非 UUID），或為 UUID 但對應的 `user:<uuid>` 已是另一會話的訊息
+- **THEN** 請求被拒絕，日誌中既有資料列不變，runtime 未啟動
+
+#### Scenario: 冪等重送
+- **WHEN** 前端因網路重試，以相同 `clientId` 對同一會話送出同一則訊息兩次
+- **THEN** 日誌中只有一則該使用者訊息，第二次回傳既有那則的 `seq`
 
 ### Requirement: 讀取時在伺服器端匯入與補齊 provider 歷史
 讀取會話訊息時，系統 SHALL 依 provider 歷史的順序與日誌對帳：歷史訊息的 id（或已記錄的 provider id）已在日誌中時，MUST 以歷史中的內容欄位補齊日誌並寫回，且 MUST NOT 改變其 `seq`；歷史訊息不在日誌中且位於所有已對應訊息之後時，MUST 追加到日誌尾端；位於兩則已對應訊息之間時，MUST 以前後兩者 `seq` 之間的值插入。對帳結果寫回日誌後，相同輸入的再次讀取 MUST 產生相同結果。
@@ -104,8 +116,8 @@
 - **THEN** 該訊息以兩者之間的 `seq` 插入，讀取結果中位於兩者之間
 
 #### Scenario: 使用者訊息依順序對應
-- **WHEN** 日誌中有一則 id 為 `local_abc` 的使用者訊息，歷史中同一回合的使用者訊息 id 為 `msg_123`
-- **THEN** 兩者對應為同一則，`msg_123` 記入 `local_abc` 的 provider id，讀取結果中只有一則使用者訊息
+- **WHEN** 日誌中有一則 id 為 `user:6f1c2a3e-0b4d-4c8e-9a1f-2b3c4d5e6f70` 的使用者訊息，歷史中同一回合的使用者訊息 id 為 `msg_123`
+- **THEN** 兩者對應為同一則，`msg_123` 記入 `user:6f1c2a3e-0b4d-4c8e-9a1f-2b3c4d5e6f70` 的 provider id，讀取結果中只有一則使用者訊息
 
 #### Scenario: 段內數量不符時不配對
 - **WHEN** 某段中日誌有 1 則未對應的使用者訊息，歷史有 2 則
@@ -138,7 +150,11 @@
 - **THEN** 該會話日誌被刪除並從 provider 歷史完整匯入，回傳重建後的訊息數量
 
 ### Requirement: 對帳以 provider 的 id 契約一致性為啟用前提
-系統 SHALL 只對通過「即時重放寫入日誌後，以 provider 歷史對帳不產生任何新匯入」一致性測試的 provider 啟用中段與尾端匯入。未通過的 provider MUST 只在日誌為空時做一次完整匯入，日誌非空時 MUST NOT 匯入。一致性 MUST 逐訊息種類（助手文字、工具呼叫、thinking、壓縮邊界、中斷標記、使用者訊息）判定；provider 歷史解析對同一份歷史檔重複讀取時，每則訊息 MUST 產生相同的 id，沒有 provider 原生 id 的訊息 MUST 以決定性規則產生 id（例如依歷史檔行號），MUST NOT 使用隨機 id。
+系統 SHALL 只對通過「即時重放寫入日誌後，以 provider 歷史對帳不產生任何新匯入」一致性測試的 provider 啟用中段與尾端匯入。未通過的 provider MUST 只在日誌為空時做一次完整匯入，日誌非空時 MUST NOT 匯入。一致性 MUST 逐訊息種類（助手文字、工具呼叫、thinking、壓縮邊界、中斷標記、使用者訊息）判定；provider 歷史解析對同一份歷史檔重複讀取時，每則訊息 MUST 產生相同的 id，沒有 provider 原生 id 的訊息 MUST 以決定性規則產生 id（例如依歷史檔行號），MUST NOT 使用隨機 id。同一則使用者輸入在 provider 歷史中以多種格式出現時（例如 Codex 的 `event_msg/user_message` 與 `response_item` 使用者訊息），歷史解析 MUST 合併為一則邏輯訊息。一致性測試 MUST 同時斷言「對帳後沒有新增匯入」與「每一則即時使用者訊息都配對到 provider 的訊息」。
+
+#### Scenario: Codex 使用者訊息兩種格式並存
+- **WHEN** 一份 Codex rollout 在同一回合中，以 `event_msg/user_message` 與 `response_item` 兩種格式記錄同一則使用者輸入
+- **THEN** 歷史解析只產生一則使用者訊息；與日誌中對應的即時使用者訊息一對一配對
 
 #### Scenario: Codex 歷史 id 決定性
 - **WHEN** 同一份 Codex rollout（含 reasoning、`compacted`、使用者訊息與 `<turn_aborted>`）被解析兩次
