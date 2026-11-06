@@ -125,9 +125,10 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
     rpc.on('failure', (error) => { if (!state.finished) fail(error); });
     rpc.on('request', (request) => {
       const { params } = request;
-      const supported = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval'];
+      const isElicitation = request.method === 'mcpServer/elicitation/request';
+      const supported = ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval', 'mcpServer/elicitation/request'];
       if (!supported.includes(request.method) || state.userId === null || !threadId || params?.threadId !== threadId
-        || (state.turnId && params.turnId !== state.turnId) || state.interrupted || state.finished) {
+        || (state.turnId && params.turnId !== state.turnId && !(isElicitation && params.turnId === null)) || state.interrupted || state.finished) {
         rpc.send({ id: request.id, error: { code: -32601, message: 'Unsupported or invalid Codex approval request' } });
         fail(new Error(`Unsupported or invalid Codex request: ${request.method}`));
         return;
@@ -142,7 +143,7 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
         return;
       }
       codexApprovals.add({
-        userId: state.userId, threadId, turnId: params.turnId, instanceId: state.instanceId,
+        userId: state.userId, threadId, turnId: params.turnId ?? state.turnId ?? '', instanceId: state.instanceId,
         request, item: 'itemId' in params ? items.get(params.itemId) : undefined, notify: emit,
         reply: (result) => rpc.send({ id: request.id, result }),
       });

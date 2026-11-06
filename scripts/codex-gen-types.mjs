@@ -37,6 +37,7 @@ const SERVER_NOTIFICATIONS = [
 
 /** 介接層回應的伺服器請求（審批）。 */
 const SERVER_REQUESTS = [
+  'mcpServer/elicitation/request',
   'item/commandExecution/requestApproval',
   'item/fileChange/requestApproval',
   'item/permissions/requestApproval',

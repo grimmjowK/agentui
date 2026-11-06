@@ -1,11 +1,67 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { elicitationUrl, validateElicitationContent } from '../../../shared/elicitation.js';
+
 import { CodexApprovals } from './approvals.js';
 import type { ServerRequest } from './protocol/index.js';
 
 /** 測試只給出與行為相關的欄位，其餘協議欄位省略。 */
 const wire = (request: unknown) => request as ServerRequest;
+
+test('elicitation validates form input, binds owner/thread, replays and consumes the response once', () => {
+  const approvals = new CodexApprovals();
+  const replies: unknown[] = [];
+  const schema = { type: 'object', properties: { approved: { type: 'boolean' }, count: { type: 'integer', minimum: 1 } }, required: ['approved'] };
+  const id = approvals.add({ userId: 'u', threadId: 't', turnId: '', instanceId: 'r',
+    request: wire({ id: 1, method: 'mcpServer/elicitation/request', params: { mode: 'form', requestedSchema: schema, turnId: null } }),
+    reply: (result) => replies.push(result), notify: () => {},
+  });
+  const decision = { action: 'accept', content: { approved: false, count: 2 } };
+  assert.equal(approvals.decide(id, 'other', 't', decision), false);
+  assert.equal(approvals.decide(id, 'u', 'other', decision), false);
+  for (const invalid of ['accept', { action: 'acceptForSession' }, { action: 'accept', content: {} },
+    { action: 'accept', content: { approved: 'true' } }, { action: 'accept', content: { approved: true, count: 0 } }]) {
+    assert.equal(approvals.decide(id, 'u', 't', invalid), false);
+  }
+  const events: any[] = [];
+  approvals.replay('u', 't', (event) => events.push(event));
+  assert.deepEqual(events[0].input.requestedSchema, schema);
+  assert.equal(approvals.decide(id, 'u', 't', decision), true);
+  assert.deepEqual(replies, [{ ...decision, _meta: null }]);
+  assert.equal(events.at(-1).kind, 'permission_cancelled');
+  assert.equal(approvals.decide(id, 'u', 't', decision), false);
+});
+
+test('elicitation decline/cancel/URL acceptance and lifecycle return protocol action/content', async () => {
+  for (const action of ['decline', 'cancel', 'accept', 'expired', 'cleared']) {
+    const approvals = new CodexApprovals();
+    const replies: unknown[] = [];
+    const id = approvals.add({ userId: 'u', threadId: 't', turnId: '', instanceId: 'r', timeoutMs: action === 'expired' ? 5 : 10000,
+      request: wire({ id: 1, method: 'mcpServer/elicitation/request', params: { mode: 'url', url: 'https://example.com' } }),
+      reply: (result) => replies.push(result), notify: () => {},
+    });
+    if (action === 'expired') await new Promise((resolve) => setTimeout(resolve, 20));
+    else if (action === 'cleared') approvals.clear('r');
+    else assert.equal(approvals.decide(id, 'u', 't', { action, content: { ignored: true } }), true);
+    assert.deepEqual(replies, [{ action: ['expired', 'cleared'].includes(action) ? 'cancel' : action, content: null, _meta: null }]);
+    assert.deepEqual(approvals.listPending('u'), []);
+  }
+});
+
+test('elicitation selections, required fields and links are checked', () => {
+  const schema = { type: 'object', properties: {
+    choice: { type: 'string', oneOf: [{ const: 'yes', title: 'Yes' }, { const: 'no', title: 'No' }] },
+    tags: { type: 'array', minItems: 1, items: { type: 'string', enum: ['a', 'b'] } },
+  }, required: ['choice', 'tags'] };
+  assert.equal(validateElicitationContent(schema, { choice: 'no', tags: ['b'] }), null);
+  assert.ok(validateElicitationContent(schema, { choice: 'other', tags: ['b'] }));
+  assert.ok(validateElicitationContent(schema, { choice: 'yes', tags: [] }));
+  assert.ok(validateElicitationContent(schema, { choice: 'yes', tags: ['other'] }));
+  assert.equal(elicitationUrl('javascript:alert(1)'), null);
+  assert.equal(elicitationUrl('file:///etc/passwd'), null);
+  assert.equal(elicitationUrl('https://example.com/auth'), 'https://example.com/auth');
+});
 
 test('approval replies are bound to owner/thread, limited to advertised choices and consumed once', () => {
   const approvals = new CodexApprovals();

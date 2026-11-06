@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShieldAlertIcon } from 'lucide-react';
 
+
 import type { PendingPermissionRequest } from '../../types/types';
 import { buildClaudeToolPermissionEntry, formatToolInputForDisplay } from '../../utils/chatPermissions';
 import { getClaudeSettings } from '../../utils/chatStorage';
@@ -14,6 +15,8 @@ import {
   ConfirmationActions,
   ConfirmationAction,
 } from '../../../../shared/view/ui';
+
+import CodexElicitationPanel from './CodexElicitationPanel';
 
 registerPermissionPanel('AskUserQuestion', AskUserQuestionPanel);
 
@@ -93,6 +96,9 @@ export default function PermissionRequestsBanner({
         if (request.provider === 'codex') {
           const context = request.context as { decisions?: string[]; expiresAt?: number } | undefined;
           const expired = Boolean(context?.expiresAt && context.expiresAt <= now);
+          if (request.toolName === 'mcpServer/elicitation/request') {
+            return <CodexElicitationPanel key={request.requestId} request={request} expired={expired} onDecision={handlePermissionDecision} />;
+          }
           const input = (request.input ?? {}) as Record<string, unknown>;
           const summary = buildCodexApprovalSummary(request.toolName, input);
           return (
