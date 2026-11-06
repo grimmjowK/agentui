@@ -1,14 +1,14 @@
-import fsSync, { promises as fs } from 'node:fs';
+import fsSync from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline';
 
 import { spawn } from 'cross-spawn';
 import { rgPath } from '@vscode/ripgrep';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import type { SearchableMessage } from '@/shared/interfaces.js';
+import type { LLMProvider } from '@/shared/types.js';
 
-type AnyRecord = Record<string, any>;
-type SearchableProvider = 'claude' | 'codex' | 'gemini';
 
 type SearchSnippetHighlight = {
   start: number;
@@ -20,13 +20,13 @@ type SessionConversationMatch = {
   snippet: string;
   highlights: SearchSnippetHighlight[];
   timestamp: string | null;
-  provider: SearchableProvider;
+  provider: LLMProvider;
   messageUuid?: string | null;
 };
 
 type SessionConversationResult = {
   sessionId: string;
-  provider: SearchableProvider;
+  provider: LLMProvider;
   sessionSummary: string;
   matches: SessionConversationMatch[];
 };
@@ -54,7 +54,7 @@ type SearchSessionConversationsInput = {
 
 type SessionRepositoryRow = ReturnType<typeof sessionsDb.getAllSessions>[number];
 type SearchableSessionRow = SessionRepositoryRow & {
-  provider: SearchableProvider;
+  provider: LLMProvider;
   jsonl_path: string;
 };
 
@@ -64,10 +64,12 @@ type SearchRuntime = {
   limit: number;
   totalMatches: number;
   isAborted: () => boolean;
-  matchedSessionKeys: Set<string>;
-  claudeSessionsByFileKey: Map<string, SearchableSessionRow[]>;
-  claudeFileResultsCache: Map<string, Map<string, SessionConversationResult>>;
+  extractors: Map<LLMProvider, MessageExtractor>;
+  sessionsByFileKey: Map<string, SearchableSessionRow[]>;
+  fileResultsCache: Map<string, Map<string, SessionConversationResult>>;
 };
+
+type MessageExtractor = (filePath: string) => AsyncIterable<SearchableMessage>;
 
 type SearchablePathEntry = {
   normalizedPath: string;
@@ -82,40 +84,10 @@ type ProjectBucket = {
   sessions: SearchableSessionRow[];
 };
 
-const SUPPORTED_PROVIDERS = new Set<SearchableProvider>(['claude', 'codex', 'gemini']);
 const MAX_MATCHES_PER_SESSION = 2;
 const RIPGREP_FILE_CHUNK_SIZE = 40;
 const RIPGREP_CHUNK_CONCURRENCY = 6;
 const UNKNOWN_PROJECT_KEY = '__unknown_project__';
-
-const INTERNAL_CONTENT_PREFIXES = [
-  '<system-reminder>',
-  'Caveat:',
-  'Invalid API key',
-  '[Request interrupted',
-] as const;
-
-/**
- * Codex includes extra internal metadata tags that should not surface as
- * user-facing searchable conversation content.
- */
-const CODEX_INTERNAL_CONTENT_PREFIXES = [
-  '<recommended_plugins>',
-  '<environment_context>',
-  '<environments_instructions>',
-  '<permissions instructions>',
-  '<collaboration_mode>',
-  '<skills_instructions>',
-  '<user_instructions>',
-  '<current_time_reminder>',
-  '<context_window>',
-  '<context_window_guidance>',
-  '<persistent_mode>',
-  '<subagent_notification>',
-  '<turn_aborted>',
-  '# AGENTS.md instructions for ',
-  '<cwd>',
-] as const;
 
 function normalizeComparablePath(inputPath: string): string {
   if (!inputPath || typeof inputPath !== 'string') {
@@ -167,15 +139,6 @@ function toSummaryText(customName: string | null, fallback: string | null | unde
   }
 
   return trimmedFallback.length > 50 ? `${trimmedFallback.slice(0, 50)}...` : trimmedFallback;
-}
-
-function isInternalContent(content: string): boolean {
-  return INTERNAL_CONTENT_PREFIXES.some((prefix) => content.startsWith(prefix));
-}
-
-function isInternalCodexContent(content: string): boolean {
-  const normalized = content.trimStart();
-  return CODEX_INTERNAL_CONTENT_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 function escapeRegex(value: string): string {
@@ -295,201 +258,42 @@ function createWordMatcher(
   return { matchesQuery, buildSnippet };
 }
 
-function extractClaudeText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return '';
-  }
-
-  return content
-    .filter((part: AnyRecord) => part?.type === 'text' && typeof part?.text === 'string')
-    .map((part: AnyRecord) => String(part.text))
-    .join(' ');
-}
-
-function extractTaggedContent(content: string, tagName: string): string | null {
-  const escapedTagName = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = new RegExp(`<${escapedTagName}>([\\s\\S]*?)<\\/${escapedTagName}>`).exec(content);
-  return match ? match[1] : null;
-}
-
-type ClaudeLocalCommandPayload = {
-  commandName: string;
-  commandMessage: string;
-  commandArgs: string;
-};
-
-function parseClaudeLocalCommandPayload(content: string): ClaudeLocalCommandPayload | null {
-  const commandName = extractTaggedContent(content, 'command-name');
-  const commandMessage = extractTaggedContent(content, 'command-message');
-  const commandArgs = extractTaggedContent(content, 'command-args');
-
-  if (commandName === null && commandMessage === null && commandArgs === null) {
-    return null;
-  }
-
-  return {
-    commandName: commandName ?? '',
-    commandMessage: commandMessage ?? '',
-    commandArgs: commandArgs ?? '',
-  };
-}
-
-function buildClaudeLocalCommandDisplayText(payload: ClaudeLocalCommandPayload): string {
-  const commandName = payload.commandName.trim();
-  const commandMessage = payload.commandMessage.trim();
-  const commandArgs = payload.commandArgs.trim();
-  const baseCommand = commandName || commandMessage;
-
-  if (!baseCommand) {
-    return '';
-  }
-
-  return commandArgs ? `${baseCommand} ${commandArgs}` : baseCommand;
-}
-
-function stripAnsiFormatting(text: string): string {
-  return text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, '');
-}
-
-type ClaudeSearchableMessage = {
-  text: string;
-  role: 'user' | 'assistant';
-};
-
 /**
- * Claude mixes visible chat, compact summaries, and local command wrappers into
- * the same transcript stream. Search should operate on the user-visible meaning
- * of those rows rather than the raw wrapper syntax.
+ * 搜尋範圍由「有實作 extractSearchableMessages 的 provider」決定（design D5）。
  */
-function extractClaudeSearchableMessage(entry: AnyRecord): ClaudeSearchableMessage | null {
-  if (!entry.message?.content || entry.isApiErrorMessage) {
-    return null;
-  }
-
-  const rawRole = entry.message.role;
-  if (rawRole !== 'user' && rawRole !== 'assistant') {
-    return null;
-  }
-
-  if (typeof entry.message.content === 'string') {
-    const content = String(entry.message.content);
-
-    if (entry.isCompactSummary === true && content.trim()) {
-      return {
-        text: content,
-        role: 'assistant',
-      };
-    }
-
-    const localCommand = parseClaudeLocalCommandPayload(content);
-    if (localCommand) {
-      const displayText = buildClaudeLocalCommandDisplayText(localCommand);
-      return displayText
-        ? {
-            text: displayText,
-            role: 'user',
-          }
-        : null;
-    }
-
-    const localCommandStdout = extractTaggedContent(content, 'local-command-stdout');
-    if (localCommandStdout !== null) {
-      const stdoutText = stripAnsiFormatting(localCommandStdout).trim();
-      return stdoutText
-        ? {
-            text: stdoutText,
-            role: 'assistant',
-          }
-        : null;
-    }
-
-    if (!content || isInternalContent(content)) {
-      return null;
-    }
-
-    return {
-      text: content,
-      role: rawRole,
-    };
-  }
-
-  const text = extractClaudeText(entry.message.content);
-  if (!text) {
-    return null;
-  }
-
-  if (entry.isCompactSummary === true) {
-    return {
-      text,
-      role: 'assistant',
-    };
-  }
-
-  if (isInternalContent(text)) {
-    return null;
-  }
-
-  return {
-    text,
-    role: rawRole,
-  };
-}
-
-function extractCodexText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return '';
-  }
-
-  return content
-    .map((item) => {
-      if (!item || typeof item !== 'object') {
-        return '';
+function collectExtractors(): {
+  extractors: Map<LLMProvider, MessageExtractor>;
+  pathResolvers: Map<LLMProvider, (filePath: string) => string>;
+  unsearchableProviders: LLMProvider[];
+} {
+  const extractors = new Map<LLMProvider, MessageExtractor>();
+  const pathResolvers = new Map<LLMProvider, (filePath: string) => string>();
+  const unsearchableProviders: LLMProvider[] = [];
+  for (const provider of providerRegistry.listProviders()) {
+    const { sessions } = provider;
+    if (sessions.extractSearchableMessages) {
+      extractors.set(provider.id, (filePath) => sessions.extractSearchableMessages!(filePath));
+      if (sessions.resolveSearchablePath) {
+        pathResolvers.set(provider.id, (filePath) => sessions.resolveSearchablePath!(filePath));
       }
-
-      const record = item as AnyRecord;
-      if (
-        (record.type === 'input_text' || record.type === 'output_text' || record.type === 'text')
-        && typeof record.text === 'string'
-      ) {
-        return record.text;
-      }
-
-      return '';
-    })
-    .filter(Boolean)
-    .join(' ');
+    } else {
+      unsearchableProviders.push(provider.id);
+    }
+  }
+  return { extractors, pathResolvers, unsearchableProviders };
 }
 
-function extractGeminiText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return '';
-  }
-
-  return content
-    .filter((part: AnyRecord) => typeof part?.text === 'string')
-    .map((part: AnyRecord) => String(part.text))
-    .join(' ');
-}
-
-function normalizeSearchableSessions(rows: SessionRepositoryRow[]): SearchableSessionRow[] {
+function normalizeSearchableSessions(
+  rows: SessionRepositoryRow[],
+  extractors: Map<LLMProvider, MessageExtractor>,
+  pathResolvers: Map<LLMProvider, (filePath: string) => string> = new Map(),
+): SearchableSessionRow[] {
   const normalizedRows: SearchableSessionRow[] = [];
   const projectArchiveStateByPath = new Map<string, boolean>();
 
   for (const row of rows) {
-    const provider = row.provider as SearchableProvider;
-    if (!SUPPORTED_PROVIDERS.has(provider)) {
+    const provider = row.provider as LLMProvider;
+    if (!extractors.has(provider)) {
       continue;
     }
 
@@ -524,10 +328,12 @@ function normalizeSearchableSessions(rows: SessionRepositoryRow[]): SearchableSe
       }
     }
 
+    // 預過濾與提取都讀 provider 指定的檔案，否則只在完整版出現的內容會在預過濾被篩掉
+    const resolvePath = pathResolvers.get(provider);
     normalizedRows.push({
       ...row,
       provider,
-      jsonl_path: absoluteJsonlPath,
+      jsonl_path: resolvePath ? resolvePath(absoluteJsonlPath) : absoluteJsonlPath,
     });
   }
 
@@ -796,398 +602,142 @@ function addSessionMatch(
   runtime.totalMatches += 1;
 }
 
-async function parseClaudeSessionMatches(
+type SessionSearchState = {
+  matches: SessionConversationMatch[];
+  summary: string | null;
+  lastUserText: string | null;
+  lastAssistantText: string | null;
+};
+
+/**
+ * 解析一個會話檔案，回傳檔內每個會話的命中結果。一個檔案可能含多個會話（Claude resume），
+ * 所以以檔案為單位快取，同檔的其他會話直接取用。
+ */
+async function parseFileMatches(
   session: SearchableSessionRow,
   runtime: SearchRuntime,
-): Promise<SessionConversationResult | null> {
+): Promise<Map<string, SessionConversationResult>> {
+  const extract = runtime.extractors.get(session.provider);
   const fileKey = normalizeComparablePath(session.jsonl_path);
-  if (!fileKey) {
-    return null;
+  const sessionsInFile = (runtime.sessionsByFileKey.get(fileKey) ?? [session])
+    .filter((candidate) => candidate.provider === session.provider);
+  const customNameBySessionId = new Map(sessionsInFile.map((candidate) => [candidate.session_id, candidate.custom_name ?? null]));
+  const stateBySessionId = new Map<string, SessionSearchState>();
+
+  if (!extract) {
+    return new Map();
   }
-
-  if (!runtime.claudeFileResultsCache.has(fileKey)) {
-    const sessionsForFile = runtime.claudeSessionsByFileKey.get(fileKey) || [];
-    const matchedSessionsForFile = sessionsForFile.filter((candidate) =>
-      runtime.matchedSessionKeys.has(getSessionKey(candidate)),
-    );
-
-    const targetSessions = matchedSessionsForFile.length > 0
-      ? matchedSessionsForFile
-      : [session];
-
-    const targetSessionIds = new Set(targetSessions.map((candidate) => candidate.session_id));
-    const customNameBySessionId = new Map<string, string | null>();
-    for (const candidate of targetSessions) {
-      customNameBySessionId.set(candidate.session_id, candidate.custom_name ?? null);
-    }
-
-    type ClaudeSessionSearchState = {
-      matches: SessionConversationMatch[];
-      pendingSummaries: Map<string, string>;
-      fallbackUserText: string | null;
-      fallbackAssistantText: string | null;
-      resolvedSummary: string | null;
-    };
-
-    const sessionStateById = new Map<string, ClaudeSessionSearchState>();
-    const getSessionState = (sessionId: string): ClaudeSessionSearchState => {
-      if (!sessionStateById.has(sessionId)) {
-        sessionStateById.set(sessionId, {
-          matches: [],
-          pendingSummaries: new Map<string, string>(),
-          fallbackUserText: null,
-          fallbackAssistantText: null,
-          resolvedSummary: null,
-        });
-      }
-      return sessionStateById.get(sessionId) as ClaudeSessionSearchState;
-    };
-
-    let currentSessionId: string | null = null;
-
-    try {
-      const fileStream = fsSync.createReadStream(session.jsonl_path);
-      const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
-      for await (const line of rl) {
-        if (runtime.totalMatches >= runtime.limit || runtime.isAborted()) {
-          break;
-        }
-        if (!line.trim()) {
-          continue;
-        }
-
-        let entry: AnyRecord;
-        try {
-          entry = JSON.parse(line) as AnyRecord;
-        } catch {
-          continue;
-        }
-
-        if (entry.sessionId) {
-          currentSessionId = String(entry.sessionId);
-        }
-        const entrySessionId = entry.sessionId
-          ? String(entry.sessionId)
-          : currentSessionId;
-        if (!entrySessionId || !targetSessionIds.has(entrySessionId)) {
-          continue;
-        }
-
-        const state = getSessionState(entrySessionId);
-
-        if (entry.type === 'summary' && entry.summary) {
-          const summaryValue = String(entry.summary);
-          if (entry.sessionId) {
-            state.resolvedSummary = summaryValue;
-          } else if (entry.leafUuid) {
-            state.pendingSummaries.set(String(entry.leafUuid), summaryValue);
-          }
-        }
-
-        if (!state.resolvedSummary && entry.parentUuid) {
-          const pendingSummary = state.pendingSummaries.get(String(entry.parentUuid));
-          if (pendingSummary) {
-            state.resolvedSummary = pendingSummary;
-          }
-        }
-
-        const searchableMessage = extractClaudeSearchableMessage(entry);
-        if (!searchableMessage) {
-          continue;
-        }
-
-        const { text, role } = searchableMessage;
-
-        /**
-         * Claude compact summaries are the most faithful session-summary source
-         * after a `/compact` because they describe the post-compaction state that
-         * the resumed session actually continues from. Prefer them over generic
-         * fallback user text when present.
-         */
-        if (entry.isCompactSummary === true) {
-          state.resolvedSummary = text;
-        }
-
-        if (role === 'user') {
-          state.fallbackUserText = text;
-        } else {
-          state.fallbackAssistantText = text;
-        }
-
-        if (!runtime.matchesQuery(text)) {
-          continue;
-        }
-
-        const { snippet, highlights } = runtime.buildSnippet(text);
-        addSessionMatch(runtime, state.matches, {
-          role,
-          snippet,
-          highlights,
-          timestamp: entry.timestamp ? String(entry.timestamp) : null,
-          provider: 'claude',
-          messageUuid: entry.uuid ? String(entry.uuid) : null,
-        });
-      }
-    } catch {
-      runtime.claudeFileResultsCache.set(fileKey, new Map());
-      return null;
-    }
-
-    const fileResults = new Map<string, SessionConversationResult>();
-    for (const [sessionId, state] of sessionStateById.entries()) {
-      if (state.matches.length === 0) {
-        continue;
-      }
-
-      fileResults.set(sessionId, {
-        sessionId,
-        provider: 'claude',
-        sessionSummary: toSummaryText(
-          customNameBySessionId.get(sessionId) ?? null,
-          state.resolvedSummary || state.fallbackUserText || state.fallbackAssistantText,
-          'New Session',
-        ),
-        matches: state.matches,
-      });
-    }
-
-    runtime.claudeFileResultsCache.set(fileKey, fileResults);
-  }
-
-  return runtime.claudeFileResultsCache.get(fileKey)?.get(session.session_id) ?? null;
-}
-
-function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boolean {
-  if (!payload || payload.type !== 'user_message') {
-    return false;
-  }
-
-  if (payload.kind && payload.kind !== 'plain') {
-    return false;
-  }
-
-  return typeof payload.message === 'string' && payload.message.trim().length > 0;
-}
-
-async function parseCodexSessionMatches(
-  session: SearchableSessionRow,
-  runtime: SearchRuntime,
-): Promise<SessionConversationResult | null> {
-  const matches: SessionConversationMatch[] = [];
-  let latestUserMessageText: string | null = null;
-  const seenMessageFingerprints = new Set<string>();
 
   try {
-    const fileStream = fsSync.createReadStream(session.jsonl_path);
-    const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
-
-    for await (const line of rl) {
+    for await (const message of extract(session.jsonl_path)) {
       if (runtime.totalMatches >= runtime.limit || runtime.isAborted()) {
         break;
       }
-      if (!line.trim()) {
+
+      const sessionId = message.sessionId ?? session.session_id;
+      if (!customNameBySessionId.has(sessionId)) {
         continue;
       }
 
-      let entry: AnyRecord;
-      try {
-        entry = JSON.parse(line) as AnyRecord;
-      } catch {
+      let state = stateBySessionId.get(sessionId);
+      if (!state) {
+        state = { matches: [], summary: null, lastUserText: null, lastAssistantText: null };
+        stateBySessionId.set(sessionId, state);
+      }
+
+      if (message.role === 'summary') {
+        state.summary = message.text;
         continue;
       }
 
-      let text: string | null = null;
-      let role: 'user' | 'assistant' | null = null;
-
-      if (entry.type === 'event_msg' && isVisibleCodexUserMessage(entry.payload as AnyRecord)) {
-        text = String(entry.payload.message);
-        role = 'user';
-      } else if (
-        entry.type === 'event_msg'
-        && entry.payload?.type === 'agent_reasoning'
-        && typeof entry.payload?.text === 'string'
-      ) {
-        text = String(entry.payload.text);
-        role = 'assistant';
-      } else if (entry.type === 'response_item' && entry.payload?.type === 'message') {
-        const payload = entry.payload as AnyRecord;
-        if (payload.role === 'user') {
-          text = extractCodexText(payload.content);
-          role = 'user';
-        } else if (payload.role === 'assistant') {
-          text = extractCodexText(payload.content);
-          role = 'assistant';
-        }
-      } else if (entry.type === 'response_item' && entry.payload?.type === 'reasoning') {
-        const summaryText = Array.isArray(entry.payload.summary)
-          ? entry.payload.summary
-            .map((item: AnyRecord) => (typeof item?.text === 'string' ? item.text : ''))
-            .filter(Boolean)
-            .join('\n')
-          : '';
-
-        if (summaryText.trim()) {
-          text = summaryText;
-          role = 'assistant';
-        }
+      if (message.role === 'user') {
+        state.lastUserText = message.text;
+      } else {
+        state.lastAssistantText = message.text;
       }
 
-      if (!text || !role) {
-        continue;
-      }
-      if (isInternalCodexContent(text)) {
-        continue;
-      }
-      if (role === 'user') {
-        latestUserMessageText = text;
-      }
-
-      const fingerprint = `${role}:${text.trim().toLowerCase()}`;
-      if (seenMessageFingerprints.has(fingerprint)) {
-        continue;
-      }
-      seenMessageFingerprints.add(fingerprint);
-
-      if (!runtime.matchesQuery(text)) {
+      if (!runtime.matchesQuery(message.text)) {
         continue;
       }
 
-      const { snippet, highlights } = runtime.buildSnippet(text);
-      addSessionMatch(runtime, matches, {
-        role,
+      const { snippet, highlights } = runtime.buildSnippet(message.text);
+      addSessionMatch(runtime, state.matches, {
+        role: message.role,
         snippet,
         highlights,
-        timestamp: entry.timestamp ? String(entry.timestamp) : null,
-        provider: 'codex',
+        timestamp: message.timestamp ?? null,
+        provider: session.provider,
+        messageUuid: message.messageUuid,
       });
     }
   } catch {
-    return null;
+    return new Map();
   }
 
-  if (matches.length === 0) {
-    return null;
-  }
-
-  return {
-    sessionId: session.session_id,
-    provider: 'codex',
-    sessionSummary: toSummaryText(session.custom_name, latestUserMessageText, 'Codex Session'),
-    matches,
-  };
-}
-
-async function parseGeminiSessionMatches(
-  session: SearchableSessionRow,
-  runtime: SearchRuntime,
-): Promise<SessionConversationResult | null> {
-  let data: string;
-  try {
-    data = await fs.readFile(session.jsonl_path, 'utf8');
-  } catch {
-    return null;
-  }
-
-  let parsed: AnyRecord;
-  try {
-    parsed = JSON.parse(data) as AnyRecord;
-  } catch {
-    return null;
-  }
-
-  const sourceMessages = Array.isArray(parsed.messages) ? parsed.messages as AnyRecord[] : [];
-  if (sourceMessages.length === 0) {
-    return null;
-  }
-
-  const matches: SessionConversationMatch[] = [];
-  let firstUserText: string | null = null;
-
-  for (const msg of sourceMessages) {
-    if (runtime.totalMatches >= runtime.limit || runtime.isAborted()) {
-      break;
-    }
-
-    const role = msg.type === 'user'
-      ? 'user'
-      : (msg.type === 'gemini' || msg.type === 'assistant')
-        ? 'assistant'
-        : null;
-    if (!role) {
+  const results = new Map<string, SessionConversationResult>();
+  for (const [sessionId, state] of stateBySessionId) {
+    if (state.matches.length === 0) {
       continue;
     }
 
-    const text = extractGeminiText(msg.content);
-    if (!text) {
-      continue;
-    }
-
-    if (role === 'user' && !firstUserText) {
-      firstUserText = text;
-    }
-
-    if (!runtime.matchesQuery(text)) {
-      continue;
-    }
-
-    const { snippet, highlights } = runtime.buildSnippet(text);
-    addSessionMatch(runtime, matches, {
-      role,
-      snippet,
-      highlights,
-      timestamp: msg.timestamp ? String(msg.timestamp) : null,
-      provider: 'gemini',
+    results.set(sessionId, {
+      sessionId,
+      provider: session.provider,
+      sessionSummary: toSummaryText(
+        customNameBySessionId.get(sessionId) ?? null,
+        state.summary || state.lastUserText || state.lastAssistantText,
+        'New Session',
+      ),
+      matches: state.matches,
     });
   }
-
-  if (matches.length === 0) {
-    return null;
-  }
-
-  return {
-    sessionId: session.session_id,
-    provider: 'gemini',
-    sessionSummary: toSummaryText(session.custom_name, firstUserText, 'Gemini Session'),
-    matches,
-  };
+  return results;
 }
 
 async function parseSessionMatches(
   session: SearchableSessionRow,
   runtime: SearchRuntime,
 ): Promise<SessionConversationResult | null> {
-  if (session.provider === 'claude') {
-    return parseClaudeSessionMatches(session, runtime);
+  const fileKey = normalizeComparablePath(session.jsonl_path);
+  if (!runtime.fileResultsCache.has(fileKey)) {
+    runtime.fileResultsCache.set(fileKey, await parseFileMatches(session, runtime));
   }
-  if (session.provider === 'codex') {
-    return parseCodexSessionMatches(session, runtime);
-  }
-  return parseGeminiSessionMatches(session, runtime);
+  return runtime.fileResultsCache.get(fileKey)?.get(session.session_id) ?? null;
 }
+
+type SearchConversationsResult = {
+  results: ProjectConversationResult[];
+  totalMatches: number;
+  query: string;
+  /** 已註冊但沒有實作提取方法的 provider，它們的會話不在搜尋範圍內。 */
+  unsearchableProviders: LLMProvider[];
+};
 
 export async function searchConversations(
   query: string,
   limit = 50,
   onProjectResult: ((update: SessionConversationSearchProgressUpdate) => void) | null = null,
   signal: AbortSignal | null = null,
-): Promise<{ results: ProjectConversationResult[]; totalMatches: number; query: string }> {
+): Promise<SearchConversationsResult> {
   const safeQuery = typeof query === 'string' ? query.trim() : '';
   const safeLimit = Math.max(1, Math.min(Number.isFinite(limit) ? limit : 50, 200));
   const words = safeQuery.toLowerCase().split(/\s+/).filter((word) => word.length > 0);
 
+  const { extractors, pathResolvers, unsearchableProviders } = collectExtractors();
+  const empty: SearchConversationsResult = { results: [], totalMatches: 0, query: safeQuery, unsearchableProviders };
+
   if (words.length === 0) {
-    return { results: [], totalMatches: 0, query: safeQuery };
+    return empty;
   }
 
   const isAborted = () => signal?.aborted === true;
   if (isAborted()) {
-    return { results: [], totalMatches: 0, query: safeQuery };
+    return empty;
   }
 
-  const searchableSessions = normalizeSearchableSessions(sessionsDb.getAllSessions());
+  const searchableSessions = normalizeSearchableSessions(sessionsDb.getAllSessions(), extractors, pathResolvers);
   if (searchableSessions.length === 0) {
-    return { results: [], totalMatches: 0, query: safeQuery };
+    return empty;
   }
 
   const sessionsByPathKey = new Map<string, SearchableSessionRow[]>();
@@ -1218,7 +768,7 @@ export async function searchConversations(
     signal ?? undefined,
   );
   if (isAborted() || matchedFileKeys.size === 0) {
-    return { results: [], totalMatches: 0, query: safeQuery };
+    return empty;
   }
 
   const matchedSessionKeys = new Set<string>();
@@ -1243,17 +793,10 @@ export async function searchConversations(
     limit: safeLimit,
     totalMatches: 0,
     isAborted,
-    matchedSessionKeys,
-    claudeSessionsByFileKey: new Map<string, SearchableSessionRow[]>(),
-    claudeFileResultsCache: new Map<string, Map<string, SessionConversationResult>>(),
+    extractors,
+    sessionsByFileKey: sessionsByPathKey,
+    fileResultsCache: new Map<string, Map<string, SessionConversationResult>>(),
   };
-
-  for (const [fileKey, sessions] of sessionsByPathKey.entries()) {
-    const claudeSessions = sessions.filter((session) => session.provider === 'claude');
-    if (claudeSessions.length > 0) {
-      runtime.claudeSessionsByFileKey.set(fileKey, claudeSessions);
-    }
-  }
 
   for (const bucket of projectBuckets) {
     if (runtime.totalMatches >= runtime.limit || runtime.isAborted()) {
@@ -1304,6 +847,7 @@ export async function searchConversations(
     results,
     totalMatches: runtime.totalMatches,
     query: safeQuery,
+    unsearchableProviders,
   };
 }
 
@@ -1318,8 +862,8 @@ export const sessionConversationsSearchService = {
   /**
    * Streams progress updates while the search scans provider session logs.
    */
-  async search(input: SearchSessionConversationsInput): Promise<void> {
-    await searchConversations(
+  async search(input: SearchSessionConversationsInput): Promise<{ unsearchableProviders: LLMProvider[] }> {
+    return searchConversations(
       input.query,
       input.limit,
       input.onProgress ?? null,

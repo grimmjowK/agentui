@@ -20,7 +20,7 @@
     "runClaudeCli": "Esegui Claude CLI in una directory di progetto per iniziare"
   },
   "app": {
-    "title": "CloudCLI",
+    "title": "EAO",
     "subtitle": "Interfaccia assistente di programmazione AI"
   },
   "sessions": {
@@ -120,7 +120,8 @@
     "matches_one": "{{count}} corrispondenza",
     "matches_other": "{{count}} corrispondenze",
     "projectsScanned_one": "{{count}} progetto analizzato",
-    "projectsScanned_other": "{{count}} progetti analizzati"
+    "projectsScanned_other": "{{count}} progetti analizzati",
+    "unsearchableProviders": "Non cercate: conversazioni {{providers}}"
   },
   "deleteConfirmation": {
     "deleteProject": "Rimuovi progetto",
@@ -132,5 +133,10 @@
     "deleteAllData": "Elimina tutti i dati permanentemente",
     "allConversationsDeleted": "Il progetto verrà rimosso dalla barra laterale. I tuoi file, memorie e dati delle sessioni verranno preservati.",
     "cannotUndo": "Puoi riaggiungerlo in seguito."
+  },
+  "pendingApprovals": {
+    "badge": "In attesa di approvazione",
+    "inbox_one": "{{count}} approvazione in attesa",
+    "inbox_other": "{{count}} approvazioni in attesa"
   }
 }

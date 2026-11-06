@@ -7,13 +7,14 @@ without guessing which files need to move.
 
 ## Current Provider Shape
 
-Every provider wrapper exposes five facets:
+Every provider wrapper exposes six facets:
 
 - `auth`
 - `mcp`
 - `skills`
 - `sessions`
 - `sessionSynchronizer`
+- `runtime`
 
 These correspond to the shared interfaces in `server/shared/interfaces.ts`:
 
@@ -22,6 +23,7 @@ These correspond to the shared interfaces in `server/shared/interfaces.ts`:
 - `IProviderSkills`
 - `IProviderSessions`
 - `IProviderSessionSynchronizer`
+- `IProviderRuntime`
 
 The services that consume them are:
 
@@ -30,16 +32,20 @@ The services that consume them are:
 - `providerSkillsService`
 - `sessionsService`
 - `sessionSynchronizerService`
+- `sessionConversationsSearchService` (uses the optional `sessions.extractSearchableMessages`)
+- the chat WebSocket (`chat-websocket.service.ts`) and `/api/agent` (use `runtime`)
 
 Current provider ids in this repo are:
 
 - `claude`
 - `codex`
 - `cursor`
-- `gemini`
+- `antigravity`
 
-Those ids are mirrored in backend unions and frontend provider constants. If
-adding a new provider, update every place that hardcodes this list.
+The single source of truth is `shared/providers.ts`: `PROVIDER_IDS` (from which
+`LLMProvider` is derived) and `PROVIDER_INFO` (capabilities, permission modes,
+settings storage key). Adding a row there makes `npm run typecheck` point at
+every place that still needs the new id.
 
 ## Current File Layout
 
@@ -53,9 +59,13 @@ server/modules/providers/list/<provider>/
   <provider>-skills.provider.ts
   <provider>-sessions.provider.ts
   <provider>-session-synchronizer.provider.ts
+  <provider>-runtime.provider.ts
 ```
 
-The existing provider folders are `claude`, `codex`, `cursor`, and `gemini`.
+The existing provider folders are `claude`, `codex`, `cursor`, and `antigravity`.
+Codex and Antigravity also have an event mapper (`codex-item-mapper.ts`,
+`antigravity-tool-mapper.ts`) that converts native events and history into
+Claude tool shapes, so the chat UI never branches on provider.
 
 ## What Each Facet Does
 
@@ -66,7 +76,24 @@ The existing provider folders are `claude`, `codex`, `cursor`, and `gemini`.
 | `skills` | Discover provider-native skill markdown files | `SkillsProvider` -> `providerSkillsService` |
 | `sessions` | Normalize live events and fetch session history | `IProviderSessions` -> `sessionsService` |
 | `sessionSynchronizer` | Scan transcript artifacts and upsert session metadata | `IProviderSessionSynchronizer` -> `sessionSynchronizerService` |
+| `runtime` | Start, abort, reconnect and list live runs; optional `steer` and `getPendingApprovals` | `IProviderRuntime` -> chat WebSocket / `/api/agent` |
 
+Optional `sessions` methods:
+
+| Method | Used by | Implemented by |
+| --- | --- | --- |
+| `extractSearchableMessages(filePath)` | Full-text search. Providers without it are reported in the search `done` event as `unsearchableProviders`. | Claude, Codex, Antigravity |
+| `listArtifacts(sessionId)` | `GET /api/providers/sessions/:sessionId/artifacts` (returns `[]` when missing). Must keep every file inside the provider's artifact root (realpath check). | Antigravity (`brain/<id>/*.md`) |
+
+`runtime` rules:
+
+- `abort` returns `{ ok, emitsTerminal }`. Set `emitsTerminal: true` only when the
+  runtime itself sends the terminal `complete`; the dispatcher sends one otherwise,
+  so every abort produces exactly one.
+- `steer(sessionId, userId, text)` (Codex only) must check owner, run state and
+  current turn before calling the CLI, and must never fail the running turn.
+- `getPendingApprovals(userId, sessionId?)` returns only that user's items; without
+  `sessionId` it lists all sessions (global approval inbox).
 `sessions` and `sessionSynchronizer` are separate concerns:
 
 - `sessions` handles runtime event normalization and history fetches.
@@ -76,10 +103,10 @@ The existing provider folders are `claude`, `codex`, `cursor`, and `gemini`.
 
 1. Add the provider id everywhere it is part of the contract.
 
-- Update `server/shared/types.ts` `LLMProvider`.
-- Update `src/types/app.ts` `LLMProvider` if the frontend should know about it.
+- Add a row to `PROVIDER_IDS` and `PROVIDER_INFO` in `shared/providers.ts`;
+  `LLMProvider` on both sides derives from it. Run `npm run typecheck` and fix
+  every reported spot.
 - Update `server/modules/providers/provider.routes.ts`.
-- Update `server/routes/agent.js` if the provider is launchable from the agent runtime.
 - Update `server/index.js` if the provider needs runtime boot or shutdown wiring.
 - Update `shared/modelConstants.js` if the provider appears in UI provider pickers.
 - Update `src/components/chat/hooks/useChatProviderState.ts` and
@@ -121,7 +148,7 @@ Current MCP formats in this repo are:
 | Claude | `.mcp.json` in user / local / project locations | `user`, `local`, `project` | `stdio`, `http`, `sse` |
 | Codex | `.codex/config.toml` | `user`, `project` | `stdio`, `http` |
 | Cursor | `.cursor/mcp.json` | `user`, `project` | `stdio`, `http` |
-| Gemini | `.gemini/settings.json` | `user`, `project` | `stdio`, `http` |
+| Antigravity | `<config root>/mcp.json`, `<workspace>/.agents/mcp.json` | `user`, `project` | `stdio`, `http` |
 
 5. Implement skills.
 
@@ -141,7 +168,7 @@ Current skill discovery roots are:
 | Claude | `~/.claude/skills` | `<workspace>/.claude/skills` | `/` | Also discovers Claude plugin skills from enabled plugin installs. Command skills live under `commands/`; markdown skills live under `skills/` and are scanned recursively. |
 | Codex | `~/.agents/skills`, `~/.codex/skills/.system`, `/etc/codex/skills` | `<workspace>/.agents/skills`, `path.dirname(workspacePath)/.agents/skills`, topmost git root `.agents/skills` | `$` | Overlapping roots are deduplicated before scanning. |
 | Cursor | `~/.cursor/skills` | `<workspace>/.cursor/skills`, `<workspace>/.agents/skills` | `/` | Uses slash-style commands. |
-| Gemini | `~/.gemini/skills`, `~/.agents/skills` | `<workspace>/.gemini/skills`, `<workspace>/.agents/skills` | `/` | Uses slash-style commands. |
+| Antigravity | `<config root>/skills`, `~/.agents/skills` | `<workspace>/.agents/skills`, `<workspace>/.gemini/antigravity/skills` | `/` | Uses slash-style commands. |
 
 Command forms currently used by the providers are:
 
@@ -149,7 +176,7 @@ Command forms currently used by the providers are:
 - Claude plugin skills: `/plugin-name:skill-name`
 - Codex skills: `$skill-name`
 - Cursor skills: `/skill-name`
-- Gemini skills: `/skill-name`
+- Antigravity skills: `/skill-name`
 
 6. Implement sessions.
 
@@ -176,8 +203,11 @@ Command forms currently used by the providers are:
   - `normalizeSessionName(...)`
   - `readFileTimestamps(...)`
 - Make the sync resilient to partial, malformed, or missing provider files.
-- The orchestration service runs all provider synchronizers and only advances
-  `scan_state.last_scanned_at` when every provider succeeds.
+- The orchestration service runs every provider synchronizer independently and
+  advances that provider's own cursor (`app_config` key `scan_cursor:<provider>`)
+  only when it succeeds; one failing provider does not hold back the others.
+- Projects expose sessions grouped as `sessionsByProvider[<provider>]`; do not add
+  per-provider `xxxSessions` fields.
 
 Current session sync roots are:
 
@@ -186,20 +216,20 @@ Current session sync roots are:
 | Claude | `~/.claude/projects/**/*.jsonl` | Uses `~/.claude/history.jsonl` for name lookup and the trailing `ai-title`, `last-prompt`, or `custom-title` entries for title recovery. |
 | Codex | `~/.codex/sessions/**/*.jsonl` | Uses `~/.codex/session_index.jsonl` for title lookup and the last `task_complete` message for a fallback title. |
 | Cursor | `~/.cursor/projects/**/*.jsonl` | Uses sibling `worker.log` to recover `workspacePath`, then derives the session title from the first user prompt. |
-| Gemini | `~/.gemini/tmp/**/*.jsonl` | Current full scans only index temp JSONL chat artifacts. Single-file sync also accepts legacy `.json` files. |
+| Antigravity | `~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl` (also `~/.gemini/antigravity/brain`, `$ANTIGRAVITY_HOME/brain`) | The brain directory name is the session id; the title comes from `conversation_summaries.db` when present. |
 
 8. Register the provider.
 
 - Add the new provider class to `server/modules/providers/provider.registry.ts`.
 - Update `server/modules/providers/provider.routes.ts` provider parsing.
+- Add `<provider>-runtime.provider.ts` implementing `IProviderRuntime` and expose it as `runtime`.
 - If the provider introduces a new service or lifecycle hook, export it from the module entrypoint that consumes providers.
 
 9. Wire runtime and UI surfaces outside the providers module when needed.
 
-If the provider can run live chat sessions, update the runtime entrypoints too:
-
-- `server/routes/agent.js`
-- `server/index.js`
+Live chat runs go through `runtime` automatically (the chat WebSocket and
+`/api/agent` dispatch via `providerRegistry`). Only touch `server/index.js` if
+the runtime needs boot or shutdown wiring.
 
 If the provider is visible in the UI, update:
 
@@ -217,9 +247,11 @@ import { <Provider>McpProvider } from './<provider>-mcp.provider.js';
 import { <Provider>SkillsProvider } from './<provider>-skills.provider.js';
 import { <Provider>SessionsProvider } from './<provider>-sessions.provider.js';
 import { <Provider>SessionSynchronizer } from './<provider>-session-synchronizer.provider.js';
+import { <Provider>RuntimeProvider } from './<provider>-runtime.provider.js';
 import type {
   IProviderAuth,
   IProviderMcp,
+  IProviderRuntime,
   IProviderSessionSynchronizer,
   IProviderSessions,
   IProviderSkills,
@@ -232,6 +264,7 @@ export class <Provider>Provider extends AbstractProvider {
   readonly sessions: IProviderSessions = new <Provider>SessionsProvider();
   readonly sessionSynchronizer: IProviderSessionSynchronizer =
     new <Provider>SessionSynchronizer();
+  readonly runtime: IProviderRuntime = new <Provider>RuntimeProvider();
 
   constructor() {
     super('<provider>');
@@ -295,11 +328,11 @@ Requirements:
    - server/modules/providers/list/<provider>/<provider>-skills.provider.ts
    - server/modules/providers/list/<provider>/<provider>-sessions.provider.ts
    - server/modules/providers/list/<provider>/<provider>-session-synchronizer.provider.ts
+   - server/modules/providers/list/<provider>/<provider>-runtime.provider.ts
 2) Register in:
    - server/modules/providers/provider.registry.ts
    - server/modules/providers/provider.routes.ts
-   - server/shared/types.ts LLMProvider
-   - src/types/app.ts LLMProvider
+   - shared/providers.ts PROVIDER_IDS / PROVIDER_INFO
 3) Mirror the nearest existing provider implementation for file naming, style,
    and error handling.
 4) Implement skills support with SkillsProvider and the current skill roots.
@@ -332,8 +365,8 @@ alongside the implementation.
 
 - Adding provider files but forgetting `provider.registry.ts` or
   `provider.routes.ts`.
-- Updating backend provider ids but not `src/types/app.ts` or the frontend
-  provider constants.
+- Hardcoding a provider list instead of reading `PROVIDER_IDS` / `PROVIDER_INFO`.
+- Mapping a provider's new tool in the frontend instead of its backend mapper.
 - Omitting `skills` or `sessionSynchronizer` from the wrapper.
 - Returning duplicate normalized message ids for split content.
 - Treating `limit === 0` as unbounded history.

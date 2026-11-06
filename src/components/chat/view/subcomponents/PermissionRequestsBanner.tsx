@@ -70,7 +70,7 @@ export default function PermissionRequestsBanner({
   const [submitted, setSubmitted] = useState<Set<string>>(new Set());
   // Filter out plan tool requests — they are handled inline by PlanDisplay
   const filteredRequests = pendingPermissionRequests.filter(
-    (r) => r.toolName !== 'ExitPlanMode' && r.toolName !== 'exit_plan_mode'
+    (r) => r.toolName !== 'ExitPlanMode'
   );
   const hasExpiringCodexRequest = filteredRequests.some(
     (r) => r.provider === 'codex' && Boolean((r.context as { expiresAt?: number } | undefined)?.expiresAt),

@@ -65,16 +65,8 @@ function ChatInterface({
   const {
     provider,
     setProvider,
-    cursorModel,
-    setCursorModel,
-    claudeModel,
-    setClaudeModel,
-    codexModel,
-    setCodexModel,
-    geminiModel,
-    setGeminiModel,
-    antigravityModel,
-    setAntigravityModel,
+    modelByProvider,
+    setModelFor,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -177,6 +169,9 @@ function ChatInterface({
     isInputFocused,
     pendingCommand,
     clearPendingCommand,
+    canSteer,
+    isSteerPending,
+    handleSteerResult,
     handleModelSwitch,
     currentModel,
     isModelMenuOpen,
@@ -188,16 +183,8 @@ function ChatInterface({
     provider,
     permissionMode,
     cyclePermissionMode,
-    cursorModel,
-    claudeModel,
-    codexModel,
-    geminiModel,
-    antigravityModel,
-    setClaudeModel,
-    setCursorModel,
-    setCodexModel,
-    setGeminiModel,
-    setAntigravityModel,
+    modelByProvider,
+    setModelFor,
     isLoading,
     canAbortSession,
     tokenBudget,
@@ -256,7 +243,6 @@ function ChatInterface({
     setCanAbortSession,
     setClaudeStatus,
     setTokenBudget,
-    setPendingPermissionRequests,
     pendingViewSessionRef,
     streamTimerRef,
     accumulatedStreamRef,
@@ -265,6 +251,7 @@ function ChatInterface({
     onSessionNotProcessing,
     onNavigateToSession,
     onWebSocketReconnect: handleWebSocketReconnect,
+    onSteerResult: handleSteerResult,
     sessionStore,
   });
 
@@ -305,20 +292,22 @@ function ChatInterface({
     return () => clearTimeout(timer);
   }, [isLoading, latestMessage, selectedSession, selectedProject, sendMessage]);
 
+  // 全域池含所有會話的項目，這裡只渲染目前會話的（尚未取得 id 的新會話請求也算目前會話）
+  const viewSessionId = selectedSession?.id || currentSessionId || null;
+  const sessionPermissionRequests = useMemo(
+    () => pendingPermissionRequests.filter((request) => (
+      request.sessionId ? request.sessionId === viewSessionId : !selectedSession?.id
+    )),
+    [pendingPermissionRequests, selectedSession?.id, viewSessionId],
+  );
+
   const permissionContextValue = useMemo(() => ({
-    pendingPermissionRequests,
+    pendingPermissionRequests: sessionPermissionRequests,
     handlePermissionDecision,
-  }), [pendingPermissionRequests, handlePermissionDecision]);
+  }), [sessionPermissionRequests, handlePermissionDecision]);
 
   if (!selectedProject) {
-    const selectedProviderLabel =
-      provider === 'cursor'
-        ? t('messageTypes.cursor')
-        : provider === 'codex'
-          ? t('messageTypes.codex')
-          : provider === 'gemini'
-            ? t('messageTypes.gemini')
-            : t('messageTypes.claude');
+    const selectedProviderLabel = t(`messageTypes.${provider}`, { defaultValue: provider });
 
     return (
       <div className="flex h-full items-center justify-center">
@@ -348,16 +337,8 @@ function ChatInterface({
           provider={provider}
           setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
           textareaRef={textareaRef}
-          claudeModel={claudeModel}
-          setClaudeModel={setClaudeModel}
-          cursorModel={cursorModel}
-          setCursorModel={setCursorModel}
-          codexModel={codexModel}
-          setCodexModel={setCodexModel}
-          geminiModel={geminiModel}
-          setGeminiModel={setGeminiModel}
-          antigravityModel={antigravityModel}
-          setAntigravityModel={setAntigravityModel}
+          modelByProvider={modelByProvider}
+          setModelFor={setModelFor}
           tasksEnabled={tasksEnabled}
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}
@@ -385,11 +366,13 @@ function ChatInterface({
         />
 
         <ChatComposer
-          pendingPermissionRequests={pendingPermissionRequests}
+          pendingPermissionRequests={sessionPermissionRequests}
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
           claudeStatus={claudeStatus}
           isLoading={isLoading}
+          canSteer={canSteer}
+          isSteerPending={isSteerPending}
           onAbortSession={handleAbortSession}
           provider={provider}
           permissionMode={permissionMode}
@@ -444,14 +427,7 @@ function ChatInterface({
           onTextareaInput={handleTextareaInput}
           onInputFocusChange={handleInputFocusChange}
           placeholder={t('input.placeholder', {
-            provider:
-              provider === 'cursor'
-                ? t('messageTypes.cursor')
-                : provider === 'codex'
-                  ? t('messageTypes.codex')
-                  : provider === 'gemini'
-                    ? t('messageTypes.gemini')
-                    : t('messageTypes.claude'),
+            provider: t(`messageTypes.${provider}`, { defaultValue: provider }),
           })}
           isTextareaExpanded={isTextareaExpanded}
           sendByCtrlEnter={sendByCtrlEnter}

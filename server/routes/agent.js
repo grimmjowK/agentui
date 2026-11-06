@@ -5,15 +5,14 @@ import os from 'os';
 import { promises as fs } from 'fs';
 import crypto from 'crypto';
 import { userDb, apiKeysDb, githubTokensDb, projectsDb } from '../modules/database/index.js';
-import { queryClaudeSDK } from '../claude-sdk.js';
-import { spawnCursor } from '../cursor-cli.js';
-import { queryCodex } from '../openai-codex.js';
-import { spawnGemini } from '../gemini-cli.js';
-import { spawnAntigravity } from '../antigravity-cli.js';
+import { providerRegistry } from '../modules/providers/index.js';
 import { Octokit } from '@octokit/rest';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, ANTIGRAVITY_MODELS } from '../../shared/modelConstants.js';
+import { CODEX_MODELS, ANTIGRAVITY_MODELS } from '../../shared/modelConstants.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { normalizeProjectPath } from '../shared/utils.js';
+
+// Claude and Cursor fall back to their own CLI defaults when no model is given.
+const DEFAULT_MODELS = { codex: CODEX_MODELS.DEFAULT, antigravity: ANTIGRAVITY_MODELS.DEFAULT };
 
 const router = express.Router();
 
@@ -634,7 +633,7 @@ class ResponseCollector {
  *                          - Source for auto-generated branch names (if createBranch=true and no branchName)
  *                          - Fallback for PR title if no commits are made
  *
- * @param {string} provider - (Optional) AI provider to use. Options: 'claude' | 'cursor' | 'codex' | 'gemini' | 'antigravity'
+ * @param {string} provider - (Optional) AI provider to use. Options: 'claude' | 'cursor' | 'codex' | 'antigravity'
  *                           Default: 'claude'
  *
  * @param {boolean} stream - (Optional) Enable Server-Sent Events (SSE) streaming for real-time updates.
@@ -646,7 +645,7 @@ class ResponseCollector {
  *
  *                        Claude models: 'sonnet' (default), 'opus', 'haiku', 'opusplan', 'sonnet[1m]'
  *                        Cursor models: 'gpt-5' (default), 'gpt-5.2', 'gpt-5.2-high', 'sonnet-4.5', 'opus-4.5',
- *                                       'gemini-3-pro', 'composer-1', 'auto', 'gpt-5.1', 'gpt-5.1-high',
+ *                                       'composer-1', 'auto', 'gpt-5.1', 'gpt-5.1-high',
  *                                       'gpt-5.1-codex', 'gpt-5.1-codex-high', 'gpt-5.1-codex-max',
  *                                       'gpt-5.1-codex-max-high', 'opus-4.1', 'grok', and thinking variants
  *                        Codex models: 'gpt-5.2' (default), 'gpt-5.1-codex-max', 'o3', 'o4-mini'
@@ -752,7 +751,7 @@ class ResponseCollector {
  * Input Validations (400 Bad Request):
  *   - Either githubUrl OR projectPath must be provided (not neither)
  *   - message must be non-empty string
- *   - provider must be 'claude', 'cursor', 'codex', 'gemini', or 'antigravity'
+ *   - provider must be 'claude', 'cursor', 'codex', or 'antigravity'
  *   - createBranch/createPR requires githubUrl OR projectPath (not neither)
  *   - branchName must pass Git naming rules (if provided)
  *
@@ -860,8 +859,8 @@ router.post('/', validateExternalApiKey, async (req, res) => {
     return res.status(400).json({ error: 'message is required' });
   }
 
-  if (!['claude', 'cursor', 'codex', 'gemini', 'antigravity'].includes(provider)) {
-    return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", "gemini", or "antigravity"' });
+  if (!['claude', 'cursor', 'codex', 'antigravity'].includes(provider)) {
+    return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", or "antigravity"' });
   }
 
   // Validate GitHub branch/PR creation requirements
@@ -939,59 +938,18 @@ router.post('/', validateExternalApiKey, async (req, res) => {
       });
     }
 
-    // Start the appropriate session
-    if (provider === 'claude') {
-      console.log('🤖 Starting Claude SDK session');
-
-      await queryClaudeSDK(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model,
-        permissionMode: 'bypassPermissions' // Bypass all permissions for API calls
-      }, writer);
-
-    } else if (provider === 'cursor') {
-      console.log('🖱️ Starting Cursor CLI session');
-
-      await spawnCursor(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model || undefined,
-        skipPermissions: true // Bypass permissions for Cursor
-      }, writer);
-    } else if (provider === 'codex') {
-      console.log('🤖 Starting Codex SDK session');
-
-      await queryCodex(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model || CODEX_MODELS.DEFAULT,
-        permissionMode: 'bypassPermissions'
-      }, writer);
-    } else if (provider === 'gemini') {
-      console.log('✨ Starting Gemini CLI session');
-
-      await spawnGemini(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model,
-        skipPermissions: true // CLI mode bypasses permissions
-      }, writer);
-    } else if (provider === 'antigravity') {
-      console.log('🌌 Starting Antigravity CLI session');
-
-      await spawnAntigravity(message.trim(), {
-        projectPath: finalProjectPath,
-        cwd: finalProjectPath,
-        sessionId: sessionId || null,
-        model: model || ANTIGRAVITY_MODELS.DEFAULT,
-        permissionMode: 'bypassPermissions' // External API runs without interactive approval
-      }, writer);
-    }
+    // Start the session through the provider registry. External API runs never
+    // wait for interactive approval: Claude/Codex/Antigravity read permissionMode,
+    // Cursor reads skipPermissions.
+    console.log(`🤖 Starting ${provider} session`);
+    await providerRegistry.resolveProvider(provider).runtime.start(message.trim(), {
+      projectPath: finalProjectPath,
+      cwd: finalProjectPath,
+      sessionId: sessionId || null,
+      model: model || DEFAULT_MODELS[provider],
+      permissionMode: 'bypassPermissions',
+      skipPermissions: true,
+    }, writer);
 
     // Handle GitHub branch and PR creation after successful agent completion
     let branchInfo = null;

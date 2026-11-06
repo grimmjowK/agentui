@@ -36,8 +36,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
     codexPermissionMode,
     setCodexPermissionMode,
     providerAuthStatus,
-    geminiPermissionMode,
-    setGeminiPermissionMode,
     openLoginForProvider,
     openInstallForProvider,
     closeLoginModal,
@@ -137,8 +135,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
                   onAntigravityPermissionsChange={setAntigravityPermissions}
                   codexPermissionMode={codexPermissionMode}
                   onCodexPermissionModeChange={setCodexPermissionMode}
-                  geminiPermissionMode={geminiPermissionMode}
-                  onGeminiPermissionModeChange={setGeminiPermissionMode}
                   projects={projects}
                 />
               )}

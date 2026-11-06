@@ -14,11 +14,12 @@
   "messageTypes": {
     "user": "U",
     "error": "Errore",
+    "warning": "Avviso",
     "tool": "Strumento",
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini"
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "Impostazioni strumento",
@@ -33,7 +34,10 @@
     "readFile": "Leggi file",
     "updateTodo": "Aggiorna lista attività",
     "readTodo": "Leggi lista attività",
-    "searchResults": "risultati"
+    "searchResults": "risultati",
+    "waitingOutput": "In attesa dell'output del terminale",
+    "runCode": "Esegui codice",
+    "changeDeleted": "eliminato"
   },
   "search": {
     "found": "Trovati {{count}} {{type}}",
@@ -101,24 +105,6 @@
     },
     "technicalDetails": "Dettagli tecnici"
   },
-  "gemini": {
-    "permissionMode": "Modalità permessi Gemini",
-    "description": "Controlla come Gemini CLI gestisce le approvazioni delle operazioni.",
-    "modes": {
-      "default": {
-        "title": "Standard (chiedi approvazione)",
-        "description": "Gemini chiederà l'approvazione prima di eseguire comandi, scrivere file e recuperare risorse web."
-      },
-      "autoEdit": {
-        "title": "Modifica automatica (salta approvazioni file)",
-        "description": "Gemini approverà automaticamente modifiche ai file e recupero web, ma chiederà conferma per i comandi shell."
-      },
-      "yolo": {
-        "title": "YOLO (ignora tutti i permessi)",
-        "description": "Gemini eseguirà tutte le operazioni senza chiedere approvazione. Usa con cautela."
-      }
-    }
-  },
   "input": {
     "placeholder": "Digita / per i comandi, @ per i file, o chiedi qualcosa a {{provider}}...",
     "placeholderDefault": "Scrivi il tuo messaggio...",
@@ -137,7 +123,7 @@
     "scrollToBottom": "Scorri in basso"
   },
   "providerSelection": {
-    "title": "Scegli il tuo assistente AI",
+    "title": "Abbattiamo la tirannia umana, il mondo appartiene all'IA",
     "description": "Seleziona un provider per iniziare una nuova conversazione",
     "selectModel": "Seleziona modello",
     "providerInfo": {
@@ -150,7 +136,7 @@
       "claude": "Pronto a usare Claude con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "cursor": "Pronto a usare Cursor con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "codex": "Pronto a usare Codex con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
-      "gemini": "Pronto a usare Gemini con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
+      "antigravity": "Pronto a usare Antigravity con {{model}}. Inizia a digitare il tuo messaggio qui sotto.",
       "default": "Seleziona un provider sopra per iniziare"
     },
     "pressToSearch": "Premi <kbd>{{shortcut}}</kbd> per cercare sessioni, file e commit"
@@ -246,5 +232,9 @@
   },
   "messageMinimap": {
     "jumpToMessage": "Vai a questo messaggio"
+  },
+  "steer": {
+    "hint": "Invia ora per aggiungere l'istruzione al turno in corso",
+    "rejected": "Impossibile aggiungere l'istruzione al turno in corso ({{reason}}). Il testo è stato conservato."
   }
 }

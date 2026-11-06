@@ -8,7 +8,6 @@ export type AgentCategory = 'account' | 'permissions' | 'mcp' | 'skills';
 export type ProjectSortOrder = 'name' | 'date';
 export type SaveStatus = 'success' | 'error' | null;
 export type CodexPermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
-export type GeminiPermissionMode = 'default' | 'auto_edit' | 'yolo';
 
 export type SettingsProject = {
   name: string;

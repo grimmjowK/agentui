@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { FileText } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import ChatInterface from '../../chat/view/ChatInterface';
 import FileTree from '../../file-tree/view/FileTree';
@@ -18,6 +20,9 @@ import { TaskMasterPanel } from '../../task-master';
 import MainContentHeader from './subcomponents/MainContentHeader';
 import MainContentStateView from './subcomponents/MainContentStateView';
 import ErrorBoundary from './ErrorBoundary';
+import SessionArtifactsPanel from './subcomponents/SessionArtifactsPanel';
+import { useSessionArtifacts } from '../hooks/useSessionArtifacts';
+import { PROVIDER_INFO, isLLMProvider } from '../../../../shared/providers';
 
 type TaskMasterContextValue = {
   currentProject?: Project | null;
@@ -109,6 +114,13 @@ function MainContent({
     },
   });
 
+  const { t } = useTranslation();
+  const sessionProvider = selectedSession?.__provider;
+  const supportsArtifacts = isLLMProvider(sessionProvider) && PROVIDER_INFO[sessionProvider].capabilities.artifacts;
+  const artifacts = useSessionArtifacts(selectedSession?.id ?? null, supportsArtifacts, latestMessage);
+  const [isArtifactsOpen, setIsArtifactsOpen] = useState(false);
+  const showArtifactsPanel = supportsArtifacts && isArtifactsOpen && activeTab === 'chat';
+
   if (isLoading) {
     return <MainContentStateView mode="loading" isMobile={isMobile} onMenuClick={onMenuClick} />;
   }
@@ -127,6 +139,23 @@ function MainContent({
         shouldShowTasksTab={shouldShowTasksTab}
         isMobile={isMobile}
         onMenuClick={onMenuClick}
+        extraActions={supportsArtifacts && activeTab === 'chat' ? (
+          <button
+            type="button"
+            onClick={() => setIsArtifactsOpen((open) => !open)}
+            aria-pressed={isArtifactsOpen}
+            title={t('artifacts.toggle')}
+            className={`flex flex-shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs ${
+              isArtifactsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
+            }`}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">{t('artifacts.title')}</span>
+            {artifacts.length > 0 && (
+              <span className="rounded-full bg-primary/15 px-1.5 text-[10px] text-primary">{artifacts.length}</span>
+            )}
+          </button>
+        ) : null}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -199,6 +228,10 @@ function MainContent({
             </div>
           )}
         </div>
+
+        {showArtifactsPanel && (
+          <SessionArtifactsPanel artifacts={artifacts} onClose={() => setIsArtifactsOpen(false)} />
+        )}
 
         <EditorSidebar
           editingFile={editingFile}

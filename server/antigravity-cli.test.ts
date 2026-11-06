@@ -98,3 +98,84 @@ test('result-only responses establish session identity and preserve errors', () 
   assert.equal(handler.error, 'Permission denied');
   assert.equal(messages.filter((msg) => msg.kind === 'text').length, 0);
 });
+
+test('findPermissionDeniedNotice 認得 headless 自動拒絕審批的 stderr', async () => {
+  const { findPermissionDeniedNotice } = await import('./antigravity-cli.js');
+  const stderr = 'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)).\n';
+  assert.match(findPermissionDeniedNotice(stderr) ?? '', /auto-denied/);
+  assert.equal(findPermissionDeniedNotice('some other warning\n'), null);
+  assert.equal(findPermissionDeniedNotice(''), null);
+});
+
+test('id 契約：每段回覆各自收尾，stream_end 帶與歷史相同的 id，result 不重送已串流的回覆', () => {
+  const messages: any[] = [];
+  const handler = new AntigravityResponseHandler('sid', { isWebSocketWriter: true, send: (msg: any) => messages.push(msg) });
+  const step = (s: object) => handler.handleJsonEvent({ event: 'step_update', step_update: { conversation_id: 'sid', ...s } });
+  step({ step_index: 1, step_type: 'agent_response', state: 'ACTIVE', text_delta: '先跑一下' });
+  step({ step_index: 2, step_type: 'tool', state: 'ACTIVE', tool_name: 'run_command', tool_info: { parameters: { CommandLine: 'ls' } } });
+  step({ step_index: 2, step_type: 'tool', state: 'DONE', tool_name: 'run_command', tool_info: { output: 'a.txt' } });
+  step({ step_index: 3, step_type: 'agent_response', state: 'ACTIVE', text_delta: '完成' });
+  handler.handleJsonEvent({ event: 'result', result: { conversation_id: 'sid', status: 'SUCCESS', response: '完成' } });
+  handler.flush();
+
+  const ends = messages.filter((m) => m.kind === 'stream_end').map((m) => m.messageId);
+  assert.deepEqual(ends, ['agy_sid_step_1', 'agy_sid_step_3']);
+  const texts = messages.filter((m) => m.kind === 'text').map((m) => [m.id, m.content]);
+  assert.deepEqual(texts, [['agy_sid_step_1', '先跑一下'], ['agy_sid_step_3', '完成']]);
+  assert.equal(messages.find((m) => m.kind === 'tool_use')?.id, 'agy_tool_2');
+});
+
+test('id 契約：agent_response 一到 DONE 就收尾，不等到下一段（背景等待期間串流佔位不能殘留）', () => {
+  // agy 1.5.0 實測順序：文字步驟 DONE 後接 system_message，下一段文字要等背景指令跑完才來
+  const messages: any[] = [];
+  const handler = new AntigravityResponseHandler('sid', { isWebSocketWriter: true, send: (msg: any) => messages.push(msg) });
+  const step = (s: object) => handler.handleJsonEvent({ event: 'step_update', step_update: { conversation_id: 'sid', ...s } });
+  step({ step_index: 3, step_type: 'agent_response', state: 'ACTIVE', text_delta: '已在背景啟動，' });
+  step({ step_index: 3, step_type: 'agent_response', state: 'DONE', text_delta: '等待完成\n' });
+  assert.deepEqual(messages.filter((m) => m.kind === 'stream_end').map((m) => m.messageId), ['agy_sid_step_3']);
+  step({ step_index: 4, step_type: 'system_message', state: 'DONE' });
+  step({ step_index: 5, step_type: 'agent_response', state: 'ACTIVE', text_delta: '下一段' });
+  handler.flush();
+  assert.deepEqual(messages.filter((m) => m.kind === 'text').map((m) => [m.id, m.content]), [
+    ['agy_sid_step_3', '已在背景啟動，等待完成\n'],
+    ['agy_sid_step_5', '下一段'],
+  ]);
+});
+
+test('transient mid-stream retry error is cleared when subsequent step_update or result succeeds', () => {
+  const messages: any[] = [];
+  const handler = new AntigravityResponseHandler('sid', { isWebSocketWriter: true, send: (msg: any) => messages.push(msg) });
+  handler.handleJsonEvent({
+    type: 'error',
+    error: 'API error (attempt 2): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": read: connection reset by peer',
+  });
+  handler.handleChunk(Buffer.from('API error (attempt 2): request failed: connection reset by peer\n'));
+  handler.handleJsonEvent({
+    event: 'step_update',
+    step_update: { conversation_id: 'sid', step_index: 1, step_type: 'agent_response', state: 'DONE', text_delta: '重試成功後的回覆' },
+  });
+  handler.handleJsonEvent({
+    event: 'result',
+    result: { conversation_id: 'sid', status: 'SUCCESS', response: '重試成功後的回覆' },
+  });
+  handler.flush();
+
+  assert.equal(handler.error, null);
+  assert.equal(messages.filter((m) => m.kind === 'error').length, 0);
+  assert.deepEqual(messages.filter((m) => m.kind === 'text').map((m) => m.content), ['重試成功後的回覆']);
+});
+
+test('unrecovered error event is emitted on flush when stream terminates without recovery', () => {
+  const messages: any[] = [];
+  const handler = new AntigravityResponseHandler('sid', { isWebSocketWriter: true, send: (msg: any) => messages.push(msg) });
+  handler.handleJsonEvent({
+    type: 'error',
+    error: 'API error (attempt 3): connection reset by peer',
+  });
+  handler.flush();
+
+  assert.equal(handler.error, 'API error (attempt 3): connection reset by peer');
+  assert.deepEqual(messages.filter((m) => m.kind === 'error').map((m) => m.content), [
+    'API error (attempt 3): connection reset by peer',
+  ]);
+});

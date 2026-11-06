@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { CodexApprovals } from './approvals.js';
+import type { ServerRequest } from './protocol/index.js';
+
+/** 測試只給出與行為相關的欄位，其餘協議欄位省略。 */
+const wire = (request: unknown) => request as ServerRequest;
 
 test('approval replies are bound to owner/thread, limited to advertised choices and consumed once', () => {
   const approvals = new CodexApprovals();
   const replies: unknown[] = [];
   const events: Record<string, any>[] = [];
   const id = approvals.add({ userId: 'u1', threadId: 't1', turnId: 'turn1', instanceId: 'run1',
-    request: { id: 'original-id', method: 'item/commandExecution/requestApproval', params: { availableDecisions: ['accept', 'decline'] } },
+    request: wire({ id: 'original-id', method: 'item/commandExecution/requestApproval', params: { availableDecisions: ['accept', 'decline'] } }),
     reply: (result) => replies.push(result), notify: (message) => events.push(message),
   });
   assert.equal(approvals.decide(id, 'u2', 't1', 'accept'), false);
@@ -25,7 +29,7 @@ test('reconnection replays only the owner requests; shutdown refuses them', () =
   const approvals = new CodexApprovals();
   const replies: unknown[] = [];
   approvals.add({ userId: 7, threadId: 'thread', turnId: 'turn', instanceId: 'run',
-    request: { id: 0, method: 'item/fileChange/requestApproval' },
+    request: wire({ id: 0, method: 'item/fileChange/requestApproval' }),
     reply: (result) => replies.push(result), notify: () => {},
   });
   const events: unknown[] = [];
@@ -45,7 +49,7 @@ test('extra permissions grant only the requested object for this turn', () => {
   const replies: unknown[] = [];
   const permissions = { network: { enabled: true } };
   const id = approvals.add({ userId: 'u', threadId: 't', turnId: 'turn', instanceId: 'r',
-    request: { id: 0, method: 'item/permissions/requestApproval', params: { permissions } },
+    request: wire({ id: 0, method: 'item/permissions/requestApproval', params: { permissions } }),
     reply: (result) => replies.push(result), notify: () => {},
   });
   approvals.decide(id, 'u', 't', 'accept');
@@ -56,7 +60,7 @@ test('expiry cancels advertised command operation and cannot be approved later',
   const approvals = new CodexApprovals();
   const replies: unknown[] = [];
   const id = approvals.add({ userId: 'u', threadId: 't', turnId: 'turn', instanceId: 'r', timeoutMs: 10,
-    request: { id: 0, method: 'item/commandExecution/requestApproval', params: { availableDecisions: ['accept', 'cancel'] } },
+    request: wire({ id: 0, method: 'item/commandExecution/requestApproval', params: { availableDecisions: ['accept', 'cancel'] } }),
     reply: (result) => replies.push(result), notify: () => {},
   });
   await new Promise((resolve) => setTimeout(resolve, 30));
@@ -71,21 +75,21 @@ test('decision set filtering keeps supported choices and falls back to decline w
 
   // 正常候选集合：原样保留受支持的简单枚举。
   approvals.add({ userId: 'u', threadId: 't', turnId: 'turn', instanceId: 'r1',
-    request: { id: 1, method: 'item/commandExecution/requestApproval', params: { availableDecisions: ['accept', 'cancel'] } },
+    request: wire({ id: 1, method: 'item/commandExecution/requestApproval', params: { availableDecisions: ['accept', 'cancel'] } }),
     reply: () => {}, notify });
   assert.deepEqual(cards.at(-1)?.context.decisions, ['accept', 'cancel']);
 
   // 候选集合被过滤后仍非空：丢掉不支持的对象型决定，保留简单枚举。
   approvals.add({ userId: 'u', threadId: 't', turnId: 'turn', instanceId: 'r2',
-    request: { id: 2, method: 'item/commandExecution/requestApproval',
-      params: { availableDecisions: ['accept', { acceptWithExecpolicyAmendment: { execpolicy_amendment: [] } }, 'decline'] } },
+    request: wire({ id: 2, method: 'item/commandExecution/requestApproval',
+      params: { availableDecisions: ['accept', { acceptWithExecpolicyAmendment: { execpolicy_amendment: [] } }, 'decline'] } }),
     reply: () => {}, notify });
   assert.deepEqual(cards.at(-1)?.context.decisions, ['accept', 'decline']);
 
   // 候选集合被过滤后为空：只提供不支持的对象型决定 → 回退为仅拒绝，不产出空卡片。
   approvals.add({ userId: 'u', threadId: 't', turnId: 'turn', instanceId: 'r3',
-    request: { id: 3, method: 'item/commandExecution/requestApproval',
-      params: { availableDecisions: [{ acceptWithExecpolicyAmendment: { execpolicy_amendment: [] } }] } },
+    request: wire({ id: 3, method: 'item/commandExecution/requestApproval',
+      params: { availableDecisions: [{ acceptWithExecpolicyAmendment: { execpolicy_amendment: [] } }] } }),
     reply: () => {}, notify });
   assert.deepEqual(cards.at(-1)?.context.decisions, ['decline']);
 });
@@ -106,4 +110,17 @@ test('actual recorded command fixture does not expose unadvertised decisions or 
   assert.equal(approvals.decide(id, 1, 't', 'acceptForSession'), false);
   assert.equal(approvals.decide(id, 1, 't', 'accept'), true);
   assert.deepEqual(response, { id: 0, result: { decision: 'accept' } });
+});
+
+test('listPending 只列出該使用者的項目，可依會話過濾', () => {
+  const approvals = new CodexApprovals();
+  const add = (userId: string, threadId: string, id: number) => approvals.add({ userId, threadId, turnId: 'turn', instanceId: `r${id}`,
+    request: wire({ id, method: 'item/fileChange/requestApproval', params: {} }), reply: () => {}, notify: () => {} });
+  const mine = add('u1', 't1', 1);
+  add('u1', 't2', 2);
+  add('u2', 't1', 3);
+  assert.deepEqual(approvals.listPending('u1').map((item) => item.sessionId).sort(), ['t1', 't2']);
+  assert.deepEqual(approvals.listPending('u1', 't1').map((item) => item.requestId), [mine]);
+  assert.equal(approvals.listPending('u1')[0].provider, 'codex');
+  assert.deepEqual(approvals.listPending(null), []);
 });

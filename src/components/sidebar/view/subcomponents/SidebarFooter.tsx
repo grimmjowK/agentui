@@ -39,7 +39,7 @@ export default function SidebarFooter({
             rel="noopener noreferrer"
             className="text-[10px] text-muted-foreground/40 transition-colors hover:text-muted-foreground"
           >
-            CloudCLI v{version} – {t('branding.openSource')}
+            EAO v{version} – {t('branding.openSource')}
           </a>
         </div>
       )}

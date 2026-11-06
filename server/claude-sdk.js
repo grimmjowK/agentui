@@ -25,14 +25,18 @@ import {
   notifyRunStopped,
   notifyUserIfEnabled
 } from './services/notification-orchestrator.js';
-import { sessionsService } from './modules/providers/services/sessions.service.js';
-import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
+import { providerAuthService, sessionsService } from './modules/providers/index.js';
 import { createNormalizedMessage } from './shared/utils.js';
+import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
 
 const activeSessions = new Map();
+// 被使用者中斷的 query：中斷的終止事件由 dispatcher 立即送出，這裡的 complete/error 必須略過，
+// 否則一次中斷會出現兩個終止事件（晚到的那個還可能把同會話新開的一輪誤判為結束）
+const abortedQueries = new WeakSet();
 const pendingToolApprovals = new Map();
 
-const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 55000;
+// 預設 10 分鐘，與 Codex 審批一致；0 以外的無效值回退預設
+const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 600000;
 
 const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
 const CLAUDE_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -92,7 +96,7 @@ function waitForToolApproval(requestId, options = {}) {
     const resolver = (decision) => {
       finalize(decision);
     };
-    // Attach metadata for getPendingApprovalsForSession lookup
+    // Attach metadata for getPendingApprovals lookup
     if (metadata) {
       Object.assign(resolver, metadata);
     }
@@ -100,11 +104,19 @@ function waitForToolApproval(requestId, options = {}) {
   });
 }
 
-function resolveToolApproval(requestId, decision) {
+/**
+ * 只有發起這個 run 的使用者能審批（與 codexApprovals.decide 相同的嚴格比對）：
+ * 呼叫者缺少 userId、或與請求記錄的 userId 不一致時拒絕。回傳是否已處理。
+ */
+function resolveToolApproval(requestId, userId, decision) {
   const resolver = pendingToolApprovals.get(requestId);
-  if (resolver) {
-    resolver(decision);
+  if (!resolver || userId === null || userId === undefined
+    || resolver._userId === null || resolver._userId === undefined
+    || String(resolver._userId) !== String(userId)) {
+    return false;
   }
+  resolver(decision);
+  return true;
 }
 
 // Match stored permission entries against a tool + input combo.
@@ -317,93 +329,6 @@ function extractTokenBudget(resultMessage, lastUsage, lastModel) {
 }
 
 /**
- * Handles image processing for SDK queries
- * Saves base64 images to temporary files and returns modified prompt with file paths
- * @param {string} command - Original user prompt
- * @param {Array} images - Array of image objects with base64 data
- * @param {string} cwd - Working directory for temp file creation
- * @returns {Promise<Object>} {modifiedCommand, tempImagePaths, tempDir}
- */
-async function handleImages(command, images, cwd) {
-  const tempImagePaths = [];
-  let tempDir = null;
-
-  if (!images || images.length === 0) {
-    return { modifiedCommand: command, tempImagePaths, tempDir };
-  }
-
-  try {
-    // Create temp directory in the project directory
-    const workingDir = cwd || process.cwd();
-    tempDir = path.join(workingDir, '.tmp', 'images', Date.now().toString());
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Save each image to a temp file
-    for (const [index, image] of images.entries()) {
-      // Extract base64 data and mime type
-      const matches = image.data.match(/^data:([^;]+);base64,(.+)$/);
-      if (!matches) {
-        console.error('Invalid image data format');
-        continue;
-      }
-
-      const [, mimeType, base64Data] = matches;
-      const extension = mimeType.split('/')[1] || 'png';
-      const filename = `image_${index}.${extension}`;
-      const filepath = path.join(tempDir, filename);
-
-      // Write base64 data to file
-      await fs.writeFile(filepath, Buffer.from(base64Data, 'base64'));
-      tempImagePaths.push(filepath);
-    }
-
-    // Include the full image paths in the prompt
-    let modifiedCommand = command;
-    if (tempImagePaths.length > 0 && command && command.trim()) {
-      const imageNote = `\n\n[Images provided at the following paths:]\n${tempImagePaths.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
-      modifiedCommand = command + imageNote;
-    }
-
-    // Images processed
-    return { modifiedCommand, tempImagePaths, tempDir };
-  } catch (error) {
-    console.error('Error processing images for SDK:', error);
-    return { modifiedCommand: command, tempImagePaths, tempDir };
-  }
-}
-
-/**
- * Cleans up temporary image files
- * @param {Array<string>} tempImagePaths - Array of temp file paths to delete
- * @param {string} tempDir - Temp directory to remove
- */
-async function cleanupTempFiles(tempImagePaths, tempDir) {
-  if (!tempImagePaths || tempImagePaths.length === 0) {
-    return;
-  }
-
-  try {
-    // Delete individual temp files
-    for (const imagePath of tempImagePaths) {
-      await fs.unlink(imagePath).catch(err =>
-        console.error(`Failed to delete temp image ${imagePath}:`, err)
-      );
-    }
-
-    // Delete temp directory
-    if (tempDir) {
-      await fs.rm(tempDir, { recursive: true, force: true }).catch(err =>
-        console.error(`Failed to delete temp directory ${tempDir}:`, err)
-      );
-    }
-
-    // Temp files cleaned
-  } catch (error) {
-    console.error('Error during temp file cleanup:', error);
-  }
-}
-
-/**
  * Loads MCP server configurations from ~/.claude.json
  * @param {string} cwd - Current working directory for project-specific configs
  * @returns {Object|null} MCP servers object or null if none found
@@ -473,6 +398,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
   let sessionCreatedSent = false;
   let tempImagePaths = [];
   let tempDir = null;
+  let queryInstance;
 
   const emitNotification = (event) => {
     notifyUserIfEnabled({
@@ -564,6 +490,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
         timeoutMs: requiresInteraction ? 0 : undefined,
         signal: context?.signal,
         metadata: {
+          _userId: ws?.userId ?? null,
           _sessionId: capturedSessionId || sessionId || null,
           _toolName: toolName,
           _input: input,
@@ -600,7 +527,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const prevStreamTimeout = process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
     process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '300000';
 
-    let queryInstance;
     try {
       queryInstance = query({
         prompt: finalCommand,
@@ -684,12 +610,15 @@ async function queryClaudeSDK(command, options = {}, ws) {
     }
 
     // Clean up session on completion
-    if (capturedSessionId) {
+    // 只刪自己的登記：中斷後使用者可能已在同一會話開了新一輪
+    if (capturedSessionId && getSession(capturedSessionId)?.instance === queryInstance) {
       removeSession(capturedSessionId);
     }
 
     // Clean up temporary image files
     await cleanupTempFiles(tempImagePaths, tempDir);
+
+    if (abortedQueries.has(queryInstance)) return;
 
     // Send completion event
     ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude' }));
@@ -706,12 +635,15 @@ async function queryClaudeSDK(command, options = {}, ws) {
     console.error('SDK query error:', error);
 
     // Clean up session on error
-    if (capturedSessionId) {
+    // 只刪自己的登記：中斷後使用者可能已在同一會話開了新一輪
+    if (capturedSessionId && getSession(capturedSessionId)?.instance === queryInstance) {
       removeSession(capturedSessionId);
     }
 
     // Clean up temporary image files on error
     await cleanupTempFiles(tempImagePaths, tempDir);
+
+    if (queryInstance && abortedQueries.has(queryInstance)) return;
 
     // Check if this is a session resume failure (exit code 1 during resume)
     const isResumeFailure = sessionId && error.message && (
@@ -769,7 +701,8 @@ async function abortClaudeSDKSession(sessionId) {
   try {
     console.log(`Aborting SDK session: ${sessionId}`);
 
-    // Call interrupt() on the query instance
+    // 先標記再 interrupt：interrupt 期間迴圈就可能結束並走到收尾
+    abortedQueries.add(session.instance);
     await session.instance.interrupt();
 
     // Update session status
@@ -784,6 +717,8 @@ async function abortClaudeSDKSession(sessionId) {
     return true;
   } catch (error) {
     console.error(`Error aborting session ${sessionId}:`, error);
+    // 中斷失敗代表這一輪仍在跑，讓它照常送出自己的終止事件
+    abortedQueries.delete(session.instance);
     return false;
   }
 }
@@ -807,20 +742,24 @@ function getActiveClaudeSDKSessions() {
 }
 
 /**
- * Get pending tool approvals for a specific session.
- * @param {string} sessionId - The session ID
+ * 列出某使用者的待審批項目；帶 sessionId 時只列該會話，不帶則跨所有會話。
+ * @param {string|number|null} userId
+ * @param {string} [sessionId]
  * @returns {Array} Array of pending permission request objects
  */
-function getPendingApprovalsForSession(sessionId) {
+function getPendingApprovals(userId, sessionId) {
   const pending = [];
+  if (userId === null || userId === undefined) return pending;
   for (const [requestId, resolver] of pendingToolApprovals.entries()) {
-    if (resolver._sessionId === sessionId) {
+    if (String(resolver._userId) !== String(userId)) continue;
+    if (!sessionId || resolver._sessionId === sessionId) {
       pending.push({
         requestId,
         toolName: resolver._toolName || 'UnknownTool',
         input: resolver._input,
         context: resolver._context,
-        sessionId,
+        sessionId: resolver._sessionId,
+        provider: 'claude',
         receivedAt: resolver._receivedAt || new Date(),
       });
     }
@@ -850,7 +789,8 @@ export {
   isClaudeSDKSessionActive,
   getActiveClaudeSDKSessions,
   resolveToolApproval,
-  getPendingApprovalsForSession,
+  getPendingApprovals,
+  waitForToolApproval,
   reconnectSessionWriter,
   extractTokenBudget
 };

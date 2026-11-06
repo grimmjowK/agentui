@@ -8,7 +8,7 @@ interface MarkdownContentProps {
 
 /**
  * Renders markdown content with proper styling
- * Used by: exit_plan_mode, long text results, etc.
+ * Used by: ExitPlanMode, long text results, etc.
  */
 export const MarkdownContent: React.FC<MarkdownContentProps> = ({
   content,

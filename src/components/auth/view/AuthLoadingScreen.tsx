@@ -9,7 +9,7 @@ export default function AuthLoadingScreen() {
           <img src="/logo-mark.svg" alt="" className="h-16 w-16" />
         </div>
 
-        <h1 className="mb-2 text-2xl font-bold text-foreground">CloudCLI</h1>
+        <h1 className="mb-2 text-2xl font-bold text-foreground">EAO</h1>
 
         <div className="flex items-center justify-center space-x-2">
           {loadingDotAnimationDelays.map((delay) => (

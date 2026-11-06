@@ -14,11 +14,12 @@
   "messageTypes": {
     "user": "S",
     "error": "Hata",
+    "warning": "Uyarı",
     "tool": "Araç",
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini"
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "Araç Ayarları",
@@ -33,7 +34,10 @@
     "readFile": "Dosyayı oku",
     "updateTodo": "Yapılacaklar listesini güncelle",
     "readTodo": "Yapılacaklar listesini oku",
-    "searchResults": "sonuç"
+    "searchResults": "sonuç",
+    "waitingOutput": "Terminal çıktısı bekleniyor",
+    "runCode": "Kodu çalıştır",
+    "changeDeleted": "silindi"
   },
   "search": {
     "found": "{{count}} {{type}} bulundu",
@@ -101,24 +105,6 @@
     },
     "technicalDetails": "Teknik ayrıntılar"
   },
-  "gemini": {
-    "permissionMode": "Gemini İzin Modu",
-    "description": "Gemini CLI'ın işlem onaylarını nasıl yönettiğini kontrol et.",
-    "modes": {
-      "default": {
-        "title": "Standart (Onay İste)",
-        "description": "Gemini, komut çalıştırmadan, dosya yazmadan ve web kaynağı getirmeden önce onay ister."
-      },
-      "autoEdit": {
-        "title": "Otomatik Düzenleme (Dosya Onaylarını Atla)",
-        "description": "Gemini dosya düzenlemelerini ve web getirmelerini otomatik onaylar, ama shell komutları için yine de onay ister."
-      },
-      "yolo": {
-        "title": "YOLO (Tüm İzinleri Atla)",
-        "description": "Gemini tüm işlemleri onay almadan çalıştırır. Dikkatli kullan."
-      }
-    }
-  },
   "input": {
     "placeholder": "Komutlar için /, dosyalar için @ yaz ya da {{provider}}'a her şeyi sor...",
     "placeholderDefault": "Mesajını yaz...",
@@ -137,7 +123,7 @@
     "scrollToBottom": "En alta git"
   },
   "providerSelection": {
-    "title": "AI Asistanını Seç",
+    "title": "İnsan tiranlığına son, dünya yapay zekâya ait",
     "description": "Yeni bir konuşma başlatmak için bir sağlayıcı seç",
     "selectModel": "Model Seç",
     "providerInfo": {
@@ -150,7 +136,7 @@
       "claude": "Claude'u {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "cursor": "Cursor'ı {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "codex": "Codex'i {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
-      "gemini": "Gemini'yi {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
+      "antigravity": "Antigravity'yi {{model}} ile kullanmaya hazır. Mesajını aşağıya yazmaya başla.",
       "default": "Başlamak için yukarıdan bir sağlayıcı seç"
     },
     "pressToSearch": "Oturumlarda, dosyalarda ve commit'lerde arama yapmak için <kbd>{{shortcut}}</kbd> tuşlarına bas"
@@ -246,5 +232,9 @@
   },
   "messageMinimap": {
     "jumpToMessage": "Bu mesaja atla"
+  },
+  "steer": {
+    "hint": "Şimdi gönderirsen talimat çalışan tura eklenir",
+    "rejected": "Talimat çalışan tura eklenemedi ({{reason}}). Metnin korundu, yeniden gönderebilirsin."
   }
 }

@@ -6,39 +6,16 @@ import {
   CLAUDE_MODELS,
   CODEX_MODELS,
   CURSOR_MODELS,
-  GEMINI_MODELS,
 } from '../../../../shared/modelConstants';
-import type { PendingPermissionRequest, PermissionMode } from '../types/types';
+import { PROVIDER_IDS, PROVIDER_INFO, getDefaultPermissionMode } from '../../../../shared/providers';
+import { usePendingApprovals } from '../../../contexts/PendingApprovalsContext';
+import type { PermissionMode } from '../types/types';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
-
-const getPermissionModesForProvider = (provider: LLMProvider): PermissionMode[] => {
-  if (provider === 'codex') {
-    return ['default', 'acceptEdits', 'bypassPermissions'];
-  }
-  if (provider === 'antigravity') {
-    return ['default', 'bypassPermissions'];
-  }
-  if (provider === 'claude') {
-    return ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'];
-  }
-  return ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
-};
-
-const antigravityDefaultMode = (): PermissionMode => {
-  try {
-    const settings = JSON.parse(localStorage.getItem('antigravity-settings') || '{}');
-    return settings.explicitConsent === true && settings.skipPermissions === true
-      ? 'bypassPermissions' : 'default';
-  } catch {
-    return 'default';
-  }
-};
 
 const MODEL_DEFAULTS: Record<LLMProvider, string> = {
   claude: CLAUDE_MODELS.DEFAULT,
   cursor: CURSOR_MODELS.DEFAULT,
   codex: CODEX_MODELS.DEFAULT,
-  gemini: GEMINI_MODELS.DEFAULT,
   antigravity: ANTIGRAVITY_MODELS.DEFAULT,
 };
 
@@ -52,29 +29,23 @@ interface UseChatProviderStateArgs {
 
 export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => (
-    localStorage.getItem('selected-provider') === 'antigravity' ? antigravityDefaultMode() : 'default'
+    getDefaultPermissionMode((localStorage.getItem('selected-provider') as LLMProvider) || 'claude')
   ));
-  const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
+  // 全域待審批池（design D16）：切換 provider 或會話都不清空，畫面只渲染目前會話的項目
+  const { pendingApprovals: pendingPermissionRequests, setPendingApprovals: setPendingPermissionRequests } = usePendingApprovals();
   const [provider, setProvider] = useState<LLMProvider>(() => {
     return (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
   });
-  const [cursorModel, setCursorModel] = useState<string>(() => {
-    return localStorage.getItem('cursor-model') || CURSOR_MODELS.DEFAULT;
-  });
-  const [claudeModel, setClaudeModel] = useState<string>(() => {
-    return localStorage.getItem('claude-model') || CLAUDE_MODELS.DEFAULT;
-  });
-  const [codexModel, setCodexModel] = useState<string>(() => {
-    return localStorage.getItem('codex-model') || CODEX_MODELS.DEFAULT;
-  });
-  const [geminiModel, setGeminiModel] = useState<string>(() => {
-    return localStorage.getItem('gemini-model') || GEMINI_MODELS.DEFAULT;
-  });
-  const [antigravityModel, setAntigravityModel] = useState<string>(() => {
-    return localStorage.getItem('antigravity-model') || ANTIGRAVITY_MODELS.DEFAULT;
-  });
+  const [modelByProvider, setModelByProvider] = useState<Record<LLMProvider, string>>(
+    () => Object.fromEntries(PROVIDER_IDS.map((id) => [id, getDefaultModel(id)])) as Record<LLMProvider, string>,
+  );
+  const setModelFor = useCallback((target: LLMProvider, model: string | ((current: string) => string)) => {
+    setModelByProvider((previous) => ({
+      ...previous,
+      [target]: typeof model === 'function' ? model(previous[target]) : model,
+    }));
+  }, []);
 
-  const lastProviderRef = useRef(provider);
 
   // 切換 session（或回到新 session 畫面）時還原該 session 的模型
   useEffect(() => {
@@ -83,14 +54,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     if (selectedSession?.__provider && selectedSession.__provider !== provider) {
       return;
     }
-    const setters: Record<LLMProvider, (model: string) => void> = {
-      claude: setClaudeModel,
-      cursor: setCursorModel,
-      codex: setCodexModel,
-      gemini: setGeminiModel,
-      antigravity: setAntigravityModel,
-    };
-    const setModel = setters[provider];
+    const setModel = (model: string) => setModelFor(provider, model);
     if (!sessionId) {
       setModel(getDefaultModel(provider));
       return;
@@ -106,18 +70,17 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     return () => {
       cancelled = true;
     };
-  }, [selectedSession?.id, selectedSession?.__provider, provider]);
+  }, [selectedSession?.id, selectedSession?.__provider, provider, setModelFor]);
 
   useEffect(() => {
     if (!selectedSession?.id) {
-      setPermissionMode(provider === 'antigravity' ? antigravityDefaultMode() : 'default');
+      setPermissionMode(getDefaultPermissionMode(provider));
       return;
     }
 
     const savedMode = localStorage.getItem(`permissionMode-${selectedSession.id}`) as PermissionMode | null;
-    const validModes = getPermissionModesForProvider(provider);
-    setPermissionMode(savedMode && validModes.includes(savedMode)
-      ? savedMode : provider === 'antigravity' ? antigravityDefaultMode() : 'default');
+    const validModes = PROVIDER_INFO[provider].permissionModes;
+    setPermissionMode(savedMode && validModes.includes(savedMode) ? savedMode : getDefaultPermissionMode(provider));
   }, [selectedSession?.id, provider]);
 
   useEffect(() => {
@@ -140,20 +103,6 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   }, [provider, selectedSession]);
 
   useEffect(() => {
-    if (lastProviderRef.current === provider) {
-      return;
-    }
-    setPendingPermissionRequests([]);
-    lastProviderRef.current = provider;
-  }, [provider]);
-
-  useEffect(() => {
-    setPendingPermissionRequests((previous) =>
-      previous.filter((request) => !request.sessionId || request.sessionId === selectedSession?.id),
-    );
-  }, [selectedSession?.id]);
-
-  useEffect(() => {
     if (provider !== 'cursor') {
       return;
     }
@@ -167,13 +116,13 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
 
         const modelId = data.config.model.modelId as string;
         if (!localStorage.getItem('cursor-model')) {
-          setCursorModel(modelId);
+          setModelFor('cursor', modelId);
         }
       })
       .catch((error) => {
         console.error('Error loading Cursor config:', error);
       });
-  }, [provider]);
+  }, [provider, setModelFor]);
 
   useEffect(() => {
     if (provider !== 'codex' || (selectedSession?.__provider && selectedSession.__provider !== provider)) {
@@ -187,7 +136,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
         if (models.length === 0) {
           return;
         }
-        setCodexModel((current) => {
+        setModelFor('codex', (current) => {
           if (models.some((m) => m.value === current)) {
             return current;
           }
@@ -200,7 +149,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
       .catch((error) => {
         console.error('Error loading Codex models:', error);
       });
-  }, [provider, selectedSession?.id, selectedSession?.__provider]);
+  }, [provider, selectedSession?.id, selectedSession?.__provider, setModelFor]);
 
   useEffect(() => {
     if (provider !== 'antigravity' || (selectedSession?.__provider && selectedSession.__provider !== provider)) {
@@ -214,7 +163,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
         if (models.length === 0) {
           return;
         }
-        setAntigravityModel((current) => {
+        setModelFor('antigravity', (current) => {
           if (models.some((m) => m.value === current)) {
             return current;
           }
@@ -227,10 +176,10 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
       .catch((error) => {
         console.error('Error loading Antigravity models:', error);
       });
-  }, [provider, selectedSession?.id, selectedSession?.__provider]);
+  }, [provider, selectedSession?.id, selectedSession?.__provider, setModelFor]);
 
   const cyclePermissionMode = useCallback(() => {
-    const modes = getPermissionModesForProvider(provider);
+    const modes = PROVIDER_INFO[provider].permissionModes;
 
     const currentIndex = modes.indexOf(permissionMode);
     const nextIndex = (currentIndex + 1) % modes.length;
@@ -245,16 +194,8 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   return {
     provider,
     setProvider,
-    cursorModel,
-    setCursorModel,
-    claudeModel,
-    setClaudeModel,
-    codexModel,
-    setCodexModel,
-    geminiModel,
-    setGeminiModel,
-    antigravityModel,
-    setAntigravityModel,
+    modelByProvider,
+    setModelFor,
     permissionMode,
     setPermissionMode,
     pendingPermissionRequests,

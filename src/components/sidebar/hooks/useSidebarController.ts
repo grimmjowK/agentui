@@ -56,6 +56,8 @@ export type ConversationSearchResults = {
   results: ConversationProjectResult[];
   totalMatches: number;
   query: string;
+  /** 會話不在搜尋範圍內的 provider（搜尋完成時由後端告知）。 */
+  unsearchableProviders?: string[];
 };
 
 export type SearchProgress = {
@@ -181,7 +183,7 @@ export function useSidebarController({
     if (projects.length > 0 && !isLoading) {
       const loadedProjects = new Set<string>();
       projects.forEach((project) => {
-        if (project.sessions && project.sessions.length >= 0) {
+        if (project.sessionsByProvider) {
           loadedProjects.add(project.projectId);
         }
       });
@@ -392,15 +394,19 @@ export function useSidebarController({
       }
     });
 
-    es.addEventListener('done', () => {
+    es.addEventListener('done', (evt) => {
       if (seq !== searchSeqRef.current) { es.close(); return; }
       es.close();
       eventSourceRef.current = null;
       setIsSearching(false);
       setSearchProgress(null);
-      if (accumulated.length === 0) {
-        setConversationResults({ results: [], totalMatches: 0, query });
+      let unsearchableProviders: string[] = [];
+      try {
+        unsearchableProviders = (JSON.parse(evt.data) as { unsearchableProviders?: string[] }).unsearchableProviders ?? [];
+      } catch {
+        // Ignore malformed SSE data
       }
+      setConversationResults({ results: [...accumulated], totalMatches, query, unsearchableProviders });
     });
 
     es.addEventListener('error', () => {

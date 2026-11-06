@@ -5,6 +5,8 @@ import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
+import { mapRolloutEntry, type MappedMessage } from '@/modules/providers/list/codex/codex-item-mapper.js';
+import { extractCodexSearchableMessages } from '@/modules/providers/list/codex/codex-searchable-messages.js';
 
 const PROVIDER = 'codex';
 
@@ -121,6 +123,7 @@ async function getCodexSessionMessages(
     }
 
     const messages: AnyRecord[] = [];
+    const splitToolIds = new Map<string, string[]>();
     let tokenUsage: AnyRecord | null = null;
     const fileStream = fsSync.createReadStream(sessionFilePath);
     const rl = readline.createInterface({
@@ -196,6 +199,8 @@ async function getCodexSessionMessages(
             if (textContent.trim()) {
               messages.push({
                 type: 'assistant',
+                // payload.id 即 app-server 即時事件的 item.id（id 契約）
+                uuid: typeof entry.payload.id === 'string' ? entry.payload.id : undefined,
                 timestamp: entry.timestamp,
                 message: {
                   role: 'assistant',
@@ -206,133 +211,8 @@ async function getCodexSessionMessages(
           }
         }
 
-        if (entry.type === 'response_item' && entry.payload?.type === 'reasoning') {
-          const summaryText = Array.isArray(entry.payload.summary)
-            ? entry.payload.summary
-                .map((item: AnyRecord) => item?.text)
-                .filter(Boolean)
-                .join('\n')
-            : '';
-
-          if (summaryText.trim()) {
-            messages.push({
-              type: 'thinking',
-              timestamp: entry.timestamp,
-              message: {
-                role: 'assistant',
-                content: summaryText,
-              },
-            });
-          }
-        }
-
-        if (entry.type === 'response_item' && entry.payload?.type === 'function_call') {
-          let toolName = entry.payload.name;
-          let toolInput = entry.payload.arguments;
-
-          if (toolName === 'shell_command' || toolName === 'exec') {
-            toolName = 'Bash';
-            try {
-              const args = typeof entry.payload.arguments === 'string'
-                ? JSON.parse(entry.payload.arguments) as AnyRecord
-                : (entry.payload.arguments as AnyRecord);
-              if (args && typeof args === 'object') {
-                const cmd = args.command || args.cmd;
-                if (typeof cmd === 'string') {
-                  toolInput = JSON.stringify({ command: cmd });
-                }
-              }
-            } catch {
-              // Keep original arguments when parsing fails.
-            }
-          }
-
-          messages.push({
-            type: 'tool_use',
-            timestamp: entry.timestamp,
-            toolName,
-            toolInput,
-            toolCallId: entry.payload.call_id,
-          });
-        }
-
-        if (entry.type === 'response_item' && entry.payload?.type === 'function_call_output') {
-          const payload = (entry.payload || {}) as AnyRecord;
-          const output = payload.output;
-          let isError = Boolean(payload.is_error || payload.isError);
-          if (!isError && typeof payload.exit_code === 'number' && payload.exit_code !== 0) {
-            isError = true;
-          }
-          if (!isError && typeof payload.exitCode === 'number' && payload.exitCode !== 0) {
-            isError = true;
-          }
-          if (!isError && payload.status === 'failed') {
-            isError = true;
-          }
-          if (!isError && typeof output === 'string' && (
-            /exit code:?\s*[1-9]\d*/i.test(output)
-            || /failed \(exit\s*[1-9]\d*\)/i.test(output)
-          )) {
-            isError = true;
-          }
-
-          messages.push({
-            type: 'tool_result',
-            timestamp: entry.timestamp,
-            toolCallId: payload.call_id,
-            output: typeof output === 'string' ? output : JSON.stringify(output || ''),
-            isError,
-          });
-        }
-
-        if (entry.type === 'response_item' && entry.payload?.type === 'custom_tool_call') {
-          const toolName = entry.payload.name || 'custom_tool';
-          const input = entry.payload.input || '';
-
-          if (toolName === 'apply_patch') {
-            const fileMatch = String(input).match(/\*\*\* Update File: (.+)/);
-            const filePath = fileMatch ? fileMatch[1].trim() : 'unknown';
-            const lines = String(input).split('\n');
-            const oldLines: string[] = [];
-            const newLines: string[] = [];
-
-            for (const lineContent of lines) {
-              if (lineContent.startsWith('-') && !lineContent.startsWith('---')) {
-                oldLines.push(lineContent.slice(1));
-              } else if (lineContent.startsWith('+') && !lineContent.startsWith('+++')) {
-                newLines.push(lineContent.slice(1));
-              }
-            }
-
-            messages.push({
-              type: 'tool_use',
-              timestamp: entry.timestamp,
-              toolName: 'Edit',
-              toolInput: JSON.stringify({
-                file_path: filePath,
-                old_string: oldLines.join('\n'),
-                new_string: newLines.join('\n'),
-              }),
-              toolCallId: entry.payload.call_id,
-            });
-          } else {
-            messages.push({
-              type: 'tool_use',
-              timestamp: entry.timestamp,
-              toolName,
-              toolInput: input,
-              toolCallId: entry.payload.call_id,
-            });
-          }
-        }
-
-        if (entry.type === 'response_item' && entry.payload?.type === 'custom_tool_call_output') {
-          messages.push({
-            type: 'tool_result',
-            timestamp: entry.timestamp,
-            toolCallId: entry.payload.call_id,
-            output: entry.payload.output || '',
-          });
+        for (const mapped of mapRolloutEntry(entry, splitToolIds)) {
+          messages.push({ type: 'mapped', timestamp: entry.timestamp, mapped });
         }
       } catch {
         // Skip malformed lines.
@@ -368,15 +248,30 @@ async function getCodexSessionMessages(
 }
 
 export class CodexSessionsProvider implements IProviderSessions {
+  extractSearchableMessages = extractCodexSearchableMessages;
+
   /**
    * Normalizes a persisted Codex JSONL entry.
    *
-   * Live Codex SDK events are transformed before they reach normalizeMessage(),
-   * while history entries already use a compact message/tool shape from projects.js.
+   * Tool-related rollout entries arrive pre-mapped (`type: 'mapped'`) from
+   * codex-item-mapper; user/assistant text uses a compact message shape.
    */
   private normalizeHistoryEntry(raw: AnyRecord, sessionId: string | null): NormalizedMessage[] {
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('codex');
+
+    if (raw.type === 'mapped') {
+      const mapped = raw.mapped as MappedMessage;
+      return [createNormalizedMessage({
+        ...mapped,
+        kind: mapped.kind as NormalizedMessage['kind'],
+        // tool_use 以 toolId（rollout call_id，等於即時 item.id）為 id，與即時訊息對齊
+        id: mapped.id || (mapped.kind === 'tool_use' && typeof mapped.toolId === 'string' && mapped.toolId) || baseId,
+        sessionId,
+        timestamp: ts,
+        provider: PROVIDER,
+      })];
+    }
 
     if (raw.type === 'thinking' || raw.isReasoning) {
       const thinkingContent = typeof raw.message?.content === 'string'
@@ -473,7 +368,8 @@ export class CodexSessionsProvider implements IProviderSessions {
   }
 
   /**
-   * Normalizes either a Codex history entry or a transformed live SDK event.
+   * Normalizes a Codex history entry. Live events are mapped in openai-codex.ts
+   * via codex-item-mapper and never reach this method.
    */
   normalizeMessage(rawMessage: unknown, sessionId: string | null): NormalizedMessage[] {
     const raw = readObjectRecord(rawMessage);
@@ -481,128 +377,12 @@ export class CodexSessionsProvider implements IProviderSessions {
       return [];
     }
 
-    if (raw.message?.role || raw.type === 'tool_use' || raw.type === 'tool_result' || raw.type === 'thinking' || raw.toolName) {
+    if (raw.type === 'mapped' || raw.message?.role || raw.type === 'tool_use' || raw.type === 'tool_result' || raw.type === 'thinking' || raw.toolName) {
       return this.normalizeHistoryEntry(raw, sessionId);
     }
 
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('codex');
-
-    if (raw.type === 'item') {
-      switch (raw.itemType) {
-        case 'agent_message':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'text',
-            role: 'assistant',
-            content: raw.message?.content || '',
-          })];
-        case 'reasoning':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'thinking',
-            content: raw.message?.content || '',
-          })];
-        case 'command_execution': {
-          const isCmdError = raw.status === 'failed' || raw.status === 'declined' || (typeof raw.exitCode === 'number' && raw.exitCode !== 0);
-          const isCmdDone = raw.status === 'completed' || isCmdError;
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: 'Bash',
-            toolInput: { command: raw.command },
-            toolId: baseId,
-            output: raw.output,
-            exitCode: raw.exitCode,
-            status: raw.status,
-            ...(isCmdDone ? {
-              toolResult: {
-                content: raw.output || (isCmdError ? `Exit code ${raw.exitCode ?? 1}` : ''),
-                isError: isCmdError,
-              },
-            } : {}),
-          })];
-        }
-        case 'file_change':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: 'FileChanges',
-            toolInput: raw.changes,
-            toolId: baseId,
-            status: raw.status,
-          })];
-        case 'mcp_tool_call':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: raw.tool || 'MCP',
-            toolInput: raw.arguments,
-            toolId: baseId,
-            server: raw.server,
-            result: raw.result,
-            error: raw.error,
-            status: raw.status,
-          })];
-        case 'web_search':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: 'WebSearch',
-            toolInput: { query: raw.query },
-            toolId: baseId,
-          })];
-        case 'todo_list':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: 'TodoList',
-            toolInput: { items: raw.items },
-            toolId: baseId,
-          })];
-        case 'error':
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'error',
-            content: raw.message?.content || 'Unknown error',
-          })];
-        default:
-          return [createNormalizedMessage({
-            id: baseId,
-            sessionId,
-            timestamp: ts,
-            provider: PROVIDER,
-            kind: 'tool_use',
-            toolName: raw.itemType || 'Unknown',
-            toolInput: raw.item || raw,
-            toolId: baseId,
-          })];
-      }
-    }
 
     if (raw.type === 'turn_complete') {
       return [createNormalizedMessage({

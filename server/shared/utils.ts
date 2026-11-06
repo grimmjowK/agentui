@@ -727,6 +727,27 @@ export async function buildLookupMap(
 }
 
 /**
+ * 逐行讀取 JSONL，略過空行與無法解析的行。讀檔錯誤會拋出，由呼叫端決定如何處理。
+ */
+export async function* readJsonlEntries(filePath: string): AsyncGenerator<Record<string, any>> {
+  const lineReader = readline.createInterface({ input: fs.createReadStream(filePath), crlfDelay: Infinity });
+  for await (const line of lineReader) {
+    if (!line.trim()) {
+      continue;
+    }
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry && typeof entry === 'object') {
+      yield entry as Record<string, any>;
+    }
+  }
+}
+
+/**
  * Reads a JSONL file and returns the first extracted payload that matches caller criteria.
  *
  * The caller supplies an `extractor` that validates provider-specific row

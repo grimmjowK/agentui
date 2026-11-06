@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { PROVIDER_INFO, isLLMProvider } from '../../../../../shared/providers';
 import type {
   ChangeEvent,
   ClipboardEvent,
@@ -57,6 +58,9 @@ interface ChatComposerProps {
   handleGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
   claudeStatus: { text: string; tokens: number; can_interrupt: boolean } | null;
   isLoading: boolean;
+  /** 執行中仍可送出，改為插話（provider 支援 midTurnSteer）。 */
+  canSteer?: boolean;
+  isSteerPending?: boolean;
   onAbortSession: () => void;
   provider: Provider | string;
   permissionMode: PermissionMode | string;
@@ -119,6 +123,8 @@ export default function ChatComposer({
   handleGrantToolPermission,
   claudeStatus,
   isLoading,
+  canSteer = false,
+  isSteerPending = false,
   onAbortSession,
   provider,
   permissionMode,
@@ -397,11 +403,11 @@ export default function ChatComposer({
               </div>
             </button>
 
-            {(provider === 'claude' || provider === 'codex') && (
+            {isLLMProvider(provider) && PROVIDER_INFO[provider].capabilities.effort && (
               <ThinkingModeSelector provider={provider} selectedMode={thinkingMode} onModeChange={setThinkingMode} onClose={() => {}} className="" />
             )}
 
-            {/* 只在 provider 实际报告了用量时显示；Gemini / Antigravity / Cursor 无数据，显示 0% 会误导 */}
+            {/* 只在 provider 实际报告了用量时显示；Antigravity / Cursor 无数据，显示 0% 会误导 */}
             {tokenBudget?.total ? <TokenUsagePie used={tokenBudget.used || 0} total={tokenBudget.total} /> : null}
 
             <PromptInputButton
@@ -453,7 +459,9 @@ export default function ChatComposer({
               onOpenChange={onModelMenuOpenChange}
             />
             <PromptInputSubmit
-              disabled={(!input.trim() && !pendingCommand) || isLoading}
+              disabled={(!input.trim() && !pendingCommand && attachedImages.length === 0) || (isLoading && !canSteer) || isSteerPending}
+              status={canSteer ? 'ready' : undefined}
+              title={canSteer ? t('steer.hint') : undefined}
               className="h-10 w-10 sm:h-10 sm:w-10"
               onMouseDown={(event) => {
                 event.preventDefault();

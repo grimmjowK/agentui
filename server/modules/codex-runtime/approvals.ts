@@ -1,16 +1,20 @@
 import { randomUUID } from 'node:crypto';
 
-import type { RpcMessage } from './app-server.js';
+import type { MessageKind } from '@/shared/types.js';
+
+import type { ServerRequest } from './protocol/index.js';
+
+type Notification = { kind: MessageKind } & Record<string, any>;
 
 type Pending = {
   userId: string | number;
   threadId: string;
   turnId: string;
   instanceId: string;
-  request: RpcMessage;
-  message: Record<string, any>;
+  request: ServerRequest;
+  message: Notification;
   reply: (result: unknown) => void;
-  notify: (message: Record<string, any>) => void;
+  notify: (message: Notification) => void;
   timer: ReturnType<typeof setTimeout>;
 };
 
@@ -26,7 +30,8 @@ export class CodexApprovals {
     const expiresAt = Date.now() + (options.timeoutMs ?? 600000);
     const method = options.request.method!;
     const isPermissions = method === 'item/permissions/requestApproval';
-    const advertised = options.request.params?.availableDecisions;
+    // 舊版（0.155）在參數中提供 availableDecisions；0.163 的協議已無此欄位，走下方預設集合
+    const advertised = (options.request.params as { availableDecisions?: unknown } | undefined)?.availableDecisions;
     // 仅支持简单枚举决定；对象型决定（acceptWithExecpolicyAmendment、applyNetworkPolicyAmendment，
     // 见 docs/codex-runtime-protocol.md 0.163.0 记录）需要额外 UI 展示策略修正内容，暂不支持而过滤掉。
     let decisions = isPermissions ? ['accept', 'decline']
@@ -38,9 +43,10 @@ export class CodexApprovals {
         { advertised });
       decisions = ['decline'];
     }
-    const message = {
+    const message: Notification = {
       kind: 'permission_request', provider: 'codex', sessionId: options.threadId,
       requestId, toolName: method, input: { ...options.request.params, item: options.item },
+      receivedAt: new Date().toISOString(),
       context: { provider: 'codex', decisions, expiresAt, scope: isPermissions ? 'turn' : 'operation' },
     };
     const timer = setTimeout(() => {
@@ -82,6 +88,22 @@ export class CodexApprovals {
         try { this.finish(id, 'decline', 'cancelled'); } catch { /* Disconnected runtime. */ }
       }
     }
+  }
+
+  /** 某使用者的待審批項目；帶 threadId 時只列該會話。 */
+  listPending(userId: string | number | null, threadId?: string) {
+    if (userId === null) return [];
+    return [...this.pending.values()]
+      .filter((entry) => String(entry.userId) === String(userId) && (!threadId || entry.threadId === threadId))
+      .map(({ message }) => ({
+        requestId: message.requestId,
+        toolName: message.toolName,
+        input: message.input,
+        context: message.context,
+        sessionId: message.sessionId,
+        provider: 'codex' as const,
+        receivedAt: message.receivedAt,
+      }));
   }
 
   replay(userId: string | number | null, threadId: string, notify: Pending['notify']) {

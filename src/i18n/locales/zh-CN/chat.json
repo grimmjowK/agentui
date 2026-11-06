@@ -14,11 +14,12 @@
   "messageTypes": {
     "user": "U",
     "error": "错误",
+    "warning": "警告",
     "tool": "工具",
     "claude": "Claude",
     "cursor": "Cursor",
     "codex": "Codex",
-    "gemini": "Gemini"
+    "antigravity": "Antigravity"
   },
   "tools": {
     "settings": "工具设置",
@@ -33,7 +34,10 @@
     "readFile": "读取文件",
     "updateTodo": "更新待办列表",
     "readTodo": "读取待办列表",
-    "searchResults": "结果"
+    "searchResults": "结果",
+    "waitingOutput": "等待终端输出",
+    "runCode": "运行代码",
+    "changeDeleted": "已删除"
   },
   "search": {
     "found": "找到 {{count}} 个{{type}}",
@@ -118,25 +122,6 @@
       "bypassPermissions": "无沙盒且无需审批；仅在明确需要时启用。"
     }
   },
-  "gemini": {
-    "permissionMode": "Gemini 权限模式",
-    "description": "控制 Gemini CLI 如何处理操作审批。",
-    "headlessNotice": "Gemini CLI 在非交互模式下运行 — 所有工具（包括 shell 命令）将自动执行，不受下方权限模式设置影响。这些设置仅影响 UI 显示行为。",
-    "modes": {
-      "default": {
-        "title": "标准模式（需要审批）",
-        "description": "Gemini 在执行命令、写入文件和获取网络资源前会请求审批。"
-      },
-      "autoEdit": {
-        "title": "自动编辑（跳过文件审批）",
-        "description": "Gemini 会自动批准文件编辑和网络获取，但仍会对 shell 命令请求审批。"
-      },
-      "yolo": {
-        "title": "YOLO（跳过所有权限）",
-        "description": "Gemini 将执行所有操作而不请求审批。请谨慎使用。"
-      }
-    }
-  },
   "input": {
     "placeholder": "输入 / 调用命令，@ 选择文件，或向 {{provider}} 提问...",
     "placeholderDefault": "输入您的消息...",
@@ -190,7 +175,7 @@
     "buttonTitle": "推理强度：{{mode}}"
   },
   "providerSelection": {
-    "title": "选择您的 AI 助手",
+    "title": "消灭人类暴政，世界属于 AI",
     "description": "选择一个供应商以开始新对话",
     "selectModel": "选择模型",
     "providerInfo": {
@@ -203,7 +188,6 @@
       "claude": "准备好使用带有 {{model}} 的 Claude。请在下方开始输入您的消息。",
       "cursor": "准备好使用带有 {{model}} 的 Cursor。请在下方开始输入您的消息。",
       "codex": "准备好使用带有 {{model}} 的 Codex。请在下方开始输入您的消息。",
-      "gemini": "准备好使用带有 {{model}} 的 Gemini。请在下方开始输入您的消息。",
       "antigravity": "准备好使用带有 {{model}} 的 Antigravity。请在下方开始输入您的消息。",
       "default": "请在上方选择一个提供者以开始"
     },
@@ -300,5 +284,9 @@
   },
   "messageMinimap": {
     "jumpToMessage": "跳转到这条消息"
+  },
+  "steer": {
+    "hint": "现在发送会追加到正在执行的这一轮",
+    "rejected": "没能追加到正在执行的这一轮（{{reason}}），输入内容已保留，可以重新发送。"
   }
 }

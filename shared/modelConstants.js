@@ -82,29 +82,6 @@ export const CODEX_MODELS = {
 };
 
 /**
- * Gemini Models
- */
-export const GEMINI_MODELS = {
-  OPTIONS: [
-    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
-    { value: "gemini-3-pro-preview", label: "Gemini 3 Pro Preview" },
-    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite" },
-    { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
-    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-    { value: "gemini-2.0-pro-exp", label: "Gemini 2.0 Pro Experimental" },
-    {
-      value: "gemini-2.0-flash-thinking-exp",
-      label: "Gemini 2.0 Flash Thinking",
-    },
-  ],
-
-  DEFAULT: "gemini-3.1-pro-preview",
-};
-
-/**
  * Antigravity Models
  */
 export const ANTIGRAVITY_MODELS = {
@@ -134,6 +111,5 @@ export const PROVIDERS = [
   { id: "claude", name: "Anthropic", models: CLAUDE_MODELS },
   { id: "codex", name: "OpenAI", models: CODEX_MODELS },
   { id: "antigravity", name: "Antigravity", models: ANTIGRAVITY_MODELS },
-  { id: "gemini", name: "Google", models: GEMINI_MODELS },
   { id: "cursor", name: "Cursor", models: CURSOR_MODELS },
 ];

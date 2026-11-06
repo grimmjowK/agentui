@@ -35,6 +35,7 @@
     "build:server": "tsc -p server/tsconfig.json && tsc-alias -p server/tsconfig.json && node -e \"require('node:fs').chmodSync('dist-server/server/cli.js', 0o755)\"",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p server/tsconfig.json",
+    "test": "tsx --tsconfig server/tsconfig.json --test --experimental-test-module-mocks 'server/**/*.test.ts' && tsx --test 'src/**/*.test.ts'",
     "lint": "eslint src/ server/",
     "lint:fix": "eslint src/ server/ --fix",
     "start": "npm run build && npm run server",
@@ -46,7 +47,8 @@
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/fix-node-pty.js",
     "prepare": "husky",
-    "update:platform": "./update-platform.sh"
+    "update:platform": "./update-platform.sh",
+    "codex:gen-types": "node scripts/codex-gen-types.mjs"
   },
   "keywords": [
     "claude code",
@@ -54,8 +56,7 @@
     "claude-code-ui",
     "cloudcli",
     "codex",
-    "gemini",
-    "gemini-cli",
+    "antigravity",
     "cursor",
     "cursor-cli",
     "anthropic",

@@ -250,29 +250,6 @@ function buildShellCommand(
     return { command: executable, executable, args, mode: hasSession && sessionId ? 'resume' : 'new' };
   }
 
-  if (provider === 'gemini') {
-    const command = initialCommand || 'gemini';
-    let resumeId = '';
-    if (hasSession && sessionId) {
-      try {
-        const existingSession = dependencies.getSessionById(sessionId, 'gemini');
-        if (existingSession && existingSession.cliSessionId) {
-          resumeId = existingSession.cliSessionId;
-          if (!safeSessionIdPattern.test(resumeId)) {
-            resumeId = '';
-          }
-        }
-      } catch (error) {
-        console.error('Failed to get Gemini CLI session ID:', error);
-      }
-    }
-
-    if (hasSession && resumeId) {
-      return { command: `${command} --resume "${resumeId}"`, mode: 'resume' };
-    }
-    return { command, mode: 'new' };
-  }
-
   if (provider === 'antigravity') {
     const executable = resolveAntigravityExecutablePath();
     if (hasSession && (!sessionId || !safeSessionIdPattern.test(sessionId))) {
@@ -626,11 +603,9 @@ export function handleShellConnection(
               ? 'Cursor'
               : provider === 'codex'
                 ? 'Codex'
-                : provider === 'gemini'
-                  ? 'Gemini'
-                  : provider === 'antigravity'
-                    ? 'Antigravity'
-                    : 'Claude';
+                : provider === 'antigravity'
+                  ? 'Antigravity'
+                  : 'Claude';
           welcomeMsg = shellCommandResult.mode === 'resume'
             ? `\x1b[36mResuming ${providerName} session ${sessionId} in: ${projectPath}\x1b[0m\r\n`
             : `\x1b[36mStarting new ${providerName} session in: ${projectPath}\x1b[0m\r\n`;

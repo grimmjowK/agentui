@@ -1,6 +1,7 @@
 import type { TFunction } from 'i18next';
 
 import type { Project } from '../../../types/app';
+import { getProjectSessions } from '../../../utils/projectSessions';
 import type { ProjectSortOrder, SettingsProject, SessionViewModel, SessionWithProvider } from '../types/types';
 
 export const readProjectSortOrder = (): ProjectSortOrder => {
@@ -84,7 +85,6 @@ export const createSessionViewModel = (
   return {
     isCursorSession: session.__provider === 'cursor',
     isCodexSession: session.__provider === 'codex',
-    isGeminiSession: session.__provider === 'gemini',
     isActive: diffInMinutes < 10,
     sessionName: getSessionName(session, t),
     sessionTime: getSessionTime(session),
@@ -93,33 +93,8 @@ export const createSessionViewModel = (
 };
 
 export const getAllSessions = (project: Project): SessionWithProvider[] => {
-  const claudeSessions = [...(project.sessions || [])].map((session) => ({
-    ...session,
-    __provider: 'claude' as const,
-  }));
-
-  const cursorSessions = (project.cursorSessions || []).map((session) => ({
-    ...session,
-    __provider: 'cursor' as const,
-  }));
-
-  const codexSessions = (project.codexSessions || []).map((session) => ({
-    ...session,
-    __provider: 'codex' as const,
-  }));
-
-  const geminiSessions = (project.geminiSessions || []).map((session) => ({
-    ...session,
-    __provider: 'gemini' as const,
-  }));
-
-  const antigravitySessions = (project.antigravitySessions || []).map((session) => ({
-    ...session,
-    __provider: 'antigravity' as const,
-  }));
-
   // 收藏的会话在文件夹内置顶，其余按最后活动时间倒序
-  return [...claudeSessions, ...cursorSessions, ...codexSessions, ...geminiSessions, ...antigravitySessions].sort(
+  return (getProjectSessions(project) as SessionWithProvider[]).sort(
     (a, b) =>
       Number(Boolean(b.isStarred)) - Number(Boolean(a.isStarred)) ||
       getSessionDate(b).getTime() - getSessionDate(a).getTime(),

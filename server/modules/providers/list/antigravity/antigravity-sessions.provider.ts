@@ -3,12 +3,98 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 
-import type { IProviderSessions } from '@/shared/interfaces.js';
+import type { IProviderSessions, SearchableMessage, SessionArtifact } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
-import { createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
+import { createNormalizedMessage, generateMessageId, readJsonlEntries } from '@/shared/utils.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
+import {
+  agyTextId,
+  agyToolId,
+  decodeTranscriptArgs,
+  isAgyToolError,
+  mapAgyTool,
+  stripStepHeader,
+} from '@/modules/providers/list/antigravity/antigravity-tool-mapper.js';
 
 const PROVIDER = 'antigravity';
+
+/** brain 根目錄候選；ANTIGRAVITY_HOME 優先。 */
+function brainRoots(): string[] {
+  const roots = [
+    path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain'),
+    path.join(os.homedir(), '.gemini', 'antigravity', 'brain'),
+  ];
+  if (process.env.ANTIGRAVITY_HOME) {
+    roots.unshift(path.join(process.env.ANTIGRAVITY_HOME, 'brain'));
+  }
+  return roots;
+}
+
+/**
+ * transcript.jsonl 是給模型注入上下文的 compact 版，過長欄位會被截成 `<truncated N bytes>`；
+ * 同目錄的 transcript_full.jsonl 行序相同、內容完整。索引與監聽仍以 transcript.jsonl 為準，
+ * 讀內容時改讀 full 版。
+ */
+function preferFullTranscript(transcriptPath: string): string {
+  if (path.basename(transcriptPath) !== 'transcript.jsonl') return transcriptPath;
+  const fullPath = path.join(path.dirname(transcriptPath), 'transcript_full.jsonl');
+  return fsSync.existsSync(fullPath) ? fullPath : transcriptPath;
+}
+
+const isInside = (root: string, target: string) => {
+  const relative = path.relative(root, target);
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+};
+
+/**
+ * 只讀 `brain/<sessionId>/` 頂層的 `.md`（實測只有 task.md，附 .metadata.json），
+ * 子目錄（.system_generated、scratch、.user_uploaded）一律不看。
+ * 每個檔案以 realpath 解析後必須仍在 brain 根目錄內，指向外部的符號連結會被略過。
+ */
+export async function listBrainArtifacts(sessionId: string, roots: string[] = brainRoots()): Promise<SessionArtifact[]> {
+  for (const root of roots) {
+    let realRoot: string;
+    let realDir: string;
+    try {
+      realRoot = await fsSync.promises.realpath(root);
+      realDir = await fsSync.promises.realpath(path.join(root, sessionId));
+    } catch {
+      continue;
+    }
+    if (!isInside(realRoot, realDir)) return [];
+
+    const artifacts: SessionArtifact[] = [];
+    for (const entry of await fsSync.promises.readdir(realDir, { withFileTypes: true })) {
+      if (!entry.name.endsWith('.md') || entry.isDirectory()) continue;
+      try {
+        const realFile = await fsSync.promises.realpath(path.join(realDir, entry.name));
+        if (!isInside(realRoot, realFile)) continue;
+        const stat = await fsSync.promises.stat(realFile);
+        if (!stat.isFile()) continue;
+        const content = await fsSync.promises.readFile(realFile, 'utf8');
+        const heading = /^#\s+(.+)$/m.exec(content)?.[1]?.trim();
+        artifacts.push({
+          id: entry.name,
+          title: heading || entry.name.replace(/\.md$/, ''),
+          fileName: entry.name,
+          updatedAt: stat.mtime.toISOString(),
+          content,
+        });
+      } catch {
+        // 讀取期間被刪除或權限不足：略過這個檔案
+      }
+    }
+    return artifacts.sort((left, right) => left.fileName.localeCompare(right.fileName));
+  }
+  return [];
+}
+
+/** USER_INPUT 的內容包在 `<USER_REQUEST>` 裡，外層還有系統附加的中繼資料。 */
+function readUserRequest(content: unknown): string {
+  const text = typeof content === 'string' ? content : '';
+  const match = text.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
+  return match ? match[1].trim() : text;
+}
 
 export class AntigravitySessionsProvider implements IProviderSessions {
   /**
@@ -51,6 +137,32 @@ export class AntigravitySessionsProvider implements IProviderSessions {
   }
 
   /**
+   * 搜尋只看使用者輸入（USER_INPUT）與模型回覆（PLANNER_RESPONSE 的 content），
+   * 不含工具輸出（GENERIC）與系統訊息。
+   */
+  resolveSearchablePath(filePath: string): string {
+    return preferFullTranscript(filePath);
+  }
+
+  async *extractSearchableMessages(filePath: string): AsyncGenerator<SearchableMessage> {
+    for await (const entry of readJsonlEntries(filePath)) {
+      const timestamp = entry.created_at ? String(entry.created_at) : null;
+      if (entry.type === 'USER_INPUT') {
+        const text = readUserRequest(entry.content);
+        if (text.trim()) {
+          yield { role: 'user', text, timestamp };
+        }
+      } else if (entry.type === 'PLANNER_RESPONSE' && typeof entry.content === 'string' && entry.content.trim()) {
+        yield { role: 'assistant', text: entry.content, timestamp };
+      }
+    }
+  }
+
+  listArtifacts(sessionId: string): Promise<SessionArtifact[]> {
+    return listBrainArtifacts(sessionId);
+  }
+
+  /**
    * Loads session history from the native transcript JSONL file.
    */
   async fetchHistory(
@@ -65,14 +177,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
 
     let sessionFilePath = await sessionPinService.resolveTranscriptPath(sessionId);
     if (!sessionFilePath) {
-      const candidateRoots = [
-        path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain'),
-        path.join(os.homedir(), '.gemini', 'antigravity', 'brain'),
-      ];
-      if (process.env.ANTIGRAVITY_HOME) {
-        candidateRoots.unshift(path.join(process.env.ANTIGRAVITY_HOME, 'brain'));
-      }
-      for (const root of candidateRoots) {
+      for (const root of brainRoots()) {
         let candidate = path.join(root, sessionId, '.system_generated', 'logs', 'transcript.jsonl');
         if (!fsSync.existsSync(candidate)) {
           candidate = path.join(root, sessionId, 'transcript.jsonl');
@@ -88,9 +193,10 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     }
 
     const normalized: NormalizedMessage[] = [];
+    const toolResults = new Map<string, { content: string; isError: boolean }>();
 
     try {
-      const fileStream = fsSync.createReadStream(sessionFilePath);
+      const fileStream = fsSync.createReadStream(preferFullTranscript(sessionFilePath));
       const rl = readline.createInterface({
         input: fileStream,
         crlfDelay: Infinity,
@@ -108,13 +214,14 @@ export class AntigravitySessionsProvider implements IProviderSessions {
           const tsStr = entry.created_at ? new Date(String(entry.created_at)).toISOString() : new Date().toISOString();
 
           // 1. Antigravity transcript format
+          // CLI 寫給模型的系統通知（例如續接時「伺服器重啟、子 agent 已停止」），不是對話內容
+          if (entry.type === 'SYSTEM_MESSAGE' || entry.source === 'SYSTEM') {
+            continue;
+          }
+
           // USER_INPUT step
           if (entry.type === 'USER_INPUT' || entry.source === 'USER_EXPLICIT') {
-            let content = typeof entry.content === 'string' ? entry.content : '';
-            const requestMatch = content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
-            if (requestMatch) {
-              content = requestMatch[1].trim();
-            }
+            const content = readUserRequest(entry.content);
             if (content.trim()) {
               normalized.push(
                 createNormalizedMessage({
@@ -131,8 +238,13 @@ export class AntigravitySessionsProvider implements IProviderSessions {
             continue;
           }
 
-          // Skip generic execution output
+          // GENERIC 步驟是工具輸出，以 step_index 配對回 tool_use
           if (entry.type === 'GENERIC') {
+            const output = stripStepHeader(typeof entry.content === 'string' ? entry.content : '');
+            toolResults.set(agyToolId(entry.step_index), {
+              content: output,
+              isError: isAgyToolError(entry.status, output),
+            });
             continue;
           }
 
@@ -142,7 +254,7 @@ export class AntigravitySessionsProvider implements IProviderSessions {
             if (content.trim()) {
               normalized.push(
                 createNormalizedMessage({
-                  id: `${baseId}_model`,
+                  id: typeof entry.step_index === 'number' ? agyTextId(sessionId, entry.step_index) : `${baseId}_model`,
                   sessionId,
                   timestamp: tsStr,
                   provider: PROVIDER,
@@ -158,13 +270,18 @@ export class AntigravitySessionsProvider implements IProviderSessions {
               for (let i = 0; i < entry.tool_calls.length; i++) {
                 const call = entry.tool_calls[i] as AnyRecord;
                 if (!call) continue;
-                const toolName = typeof call.name === 'string' ? call.name : (call.toolName as string) || 'tool';
-                const toolInput = call.args || call.toolInput || {};
-                const toolId = (call.id as string) || `${baseId}_tool_${i}`;
+                const { toolName, toolInput } = mapAgyTool(
+                  typeof call.name === 'string' ? call.name : '',
+                  decodeTranscriptArgs(call.args),
+                );
+                // 第 k 個呼叫的結果在第 step_index + 1 + k 步，與即時 step_update 的 step_index 相同
+                const toolId = typeof entry.step_index === 'number'
+                  ? agyToolId(entry.step_index + 1 + i)
+                  : `${baseId}_tool_${i}`;
 
                 normalized.push(
                   createNormalizedMessage({
-                    id: `${baseId}_call_${i}`,
+                    id: typeof entry.step_index === 'number' ? toolId : `${baseId}_call_${i}`,
                     sessionId,
                     timestamp: tsStr,
                     provider: PROVIDER,
@@ -202,6 +319,12 @@ export class AntigravitySessionsProvider implements IProviderSessions {
     } catch (error) {
       console.warn(`Failed to read Antigravity transcript for ${sessionId}:`, error);
       return { messages: [], total: 0, hasMore: false, offset, limit };
+    }
+
+    for (const msg of normalized) {
+      if (msg.kind === 'tool_use' && msg.toolId && toolResults.has(msg.toolId)) {
+        msg.toolResult = toolResults.get(msg.toolId);
+      }
     }
 
     const start = Math.max(0, offset);

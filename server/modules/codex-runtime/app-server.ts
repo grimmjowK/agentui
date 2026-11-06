@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { buildCodexChildEnv } from './child-env.js';
+import type { ClientRequestMap, ClientRequestMethod, ServerNotification, ServerRequest } from './protocol/index.js';
 
 export type RpcMessage = {
   id?: string | number;
@@ -14,6 +15,18 @@ export type RpcMessage = {
   result?: any;
   error?: { code?: number; message: string };
 };
+
+/**
+ * 通知與伺服器請求依生成的協議型別分派。型別只涵蓋介接層處理的方法；
+ * 其他方法仍會發出事件，由各處理器以 method 比對後忽略。
+ */
+export interface CodexAppServer {
+  on(event: 'notification', listener: (message: ServerNotification) => void): this;
+  on(event: 'request', listener: (message: ServerRequest) => void): this;
+  on(event: 'failure', listener: (error: Error) => void): this;
+  on(event: 'diagnostic', listener: (text: string) => void): this;
+  on(event: 'closed', listener: () => void): this;
+}
 
 /** Owns a bidirectional app-server connection. Never treats stderr as protocol data. */
 export class CodexAppServer extends EventEmitter {
@@ -115,7 +128,11 @@ export class CodexAppServer extends EventEmitter {
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
-  request(method: string, params: Record<string, unknown> = {}, timeoutMs = 45000): Promise<any> {
+  request<M extends ClientRequestMethod>(
+    method: M,
+    params: ClientRequestMap[M]['params'],
+    timeoutMs = 45000,
+  ): Promise<ClientRequestMap[M]['result']> {
     return new Promise((resolve, reject) => {
       const id = ++this.sequence;
       const timer = setTimeout(() => {
@@ -132,8 +149,8 @@ export class CodexAppServer extends EventEmitter {
 
   async initialize() {
     const result = await this.request('initialize', {
-      clientInfo: { name: 'agentui', version: '1.0.0' },
-      capabilities: { experimentalApi: true },
+      clientInfo: { name: 'agentui', title: null, version: '1.0.0' },
+      capabilities: { experimentalApi: true, requestAttestation: false },
     });
     this.send({ method: 'initialized', params: {} });
     return result;

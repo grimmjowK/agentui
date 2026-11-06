@@ -10,8 +10,9 @@ import type {
   TouchEvent,
 } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { useTranslation } from 'react-i18next';
 
-import { ANTIGRAVITY_MODELS } from '../../../../shared/modelConstants';
+import { PROVIDER_INFO } from '../../../../shared/providers';
 import { authenticatedFetch } from '../../../utils/api';
 import { EFFORT_STORAGE_KEY, resolveEffort } from '../constants/thinkingModes';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
@@ -39,16 +40,8 @@ interface UseChatComposerStateArgs {
   provider: LLMProvider;
   permissionMode: PermissionMode | string;
   cyclePermissionMode: () => void;
-  cursorModel: string;
-  claudeModel: string;
-  codexModel: string;
-  geminiModel: string;
-  antigravityModel?: string;
-  setClaudeModel: (model: string) => void;
-  setCursorModel: (model: string) => void;
-  setCodexModel: (model: string) => void;
-  setGeminiModel: (model: string) => void;
-  setAntigravityModel?: (model: string) => void;
+  modelByProvider: Record<LLMProvider, string>;
+  setModelFor: (provider: LLMProvider, model: string) => void;
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
@@ -117,16 +110,8 @@ export function useChatComposerState({
   provider,
   permissionMode,
   cyclePermissionMode,
-  cursorModel,
-  claudeModel,
-  codexModel,
-  geminiModel,
-  antigravityModel,
-  setClaudeModel,
-  setCursorModel,
-  setCodexModel,
-  setGeminiModel,
-  setAntigravityModel,
+  modelByProvider,
+  setModelFor,
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -163,6 +148,12 @@ export function useChatComposerState({
   const [uploadingImages, setUploadingImages] = useState<Map<string, number>>(new Map());
   const [imageErrors, setImageErrors] = useState<Map<string, string>>(new Map());
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
+  const { t } = useTranslation('chat');
+  // 執行中插話（design D9）：等待後端回覆期間不能再送第二則
+  const pendingSteerRef = useRef<{ clientId: string; text: string } | null>(null);
+  const [isSteerPending, setIsSteerPending] = useState(false);
+  const steerSessionId = currentSessionId || selectedSession?.id || null;
+  const canSteer = isLoading && PROVIDER_INFO[provider].capabilities.midTurnSteer && Boolean(steerSessionId);
   // 推理强度（effort）。跨消息、跨会话保持，不再每次发送后重置
   const [thinkingMode, setThinkingMode] = useState(() => safeLocalStorage.getItem(EFFORT_STORAGE_KEY) || 'default');
   useEffect(() => {
@@ -194,26 +185,9 @@ export function useChatComposerState({
   const handleModelSwitch = useCallback((modelValue: string) => {
     // 已有 session 只記到該 session；新 session 才更新全域預設
     const sessionId = selectedSession?.id;
-    const persist = (globalKey: string) => {
-      if (sessionId) saveSessionModel(sessionId, modelValue);
-      else localStorage.setItem(globalKey, modelValue);
-    };
-    if (provider === 'claude') {
-      setClaudeModel(modelValue);
-      persist('claude-model');
-    } else if (provider === 'cursor') {
-      setCursorModel(modelValue);
-      persist('cursor-model');
-    } else if (provider === 'codex') {
-      setCodexModel(modelValue);
-      persist('codex-model');
-    } else if (provider === 'gemini') {
-      setGeminiModel(modelValue);
-      persist('gemini-model');
-    } else if (provider === 'antigravity') {
-      setAntigravityModel?.(modelValue);
-      persist('antigravity-model');
-    }
+    setModelFor(provider, modelValue);
+    if (sessionId) saveSessionModel(sessionId, modelValue);
+    else localStorage.setItem(`${provider}-model`, modelValue);
     setInput('');
     inputValueRef.current = '';
     addMessage({
@@ -221,7 +195,7 @@ export function useChatComposerState({
       content: `Model switched to: **${modelValue}**`,
       timestamp: Date.now(),
     });
-  }, [provider, selectedSession?.id, setClaudeModel, setCursorModel, setCodexModel, setGeminiModel, setAntigravityModel, addMessage]);
+  }, [provider, selectedSession?.id, setModelFor, addMessage]);
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -367,7 +341,7 @@ export function useChatComposerState({
           projectId: selectedProject.projectId,
           sessionId: currentSessionId,
           provider,
-          model: provider === 'cursor' ? cursorModel : provider === 'codex' ? codexModel : provider === 'gemini' ? geminiModel : provider === 'antigravity' ? antigravityModel : claudeModel,
+          model: modelByProvider[provider],
           tokenUsage: tokenBudget,
         };
 
@@ -415,12 +389,8 @@ export function useChatComposerState({
       }
     },
     [
-      antigravityModel,
-      claudeModel,
-      codexModel,
+      modelByProvider,
       currentSessionId,
-      cursorModel,
-      geminiModel,
       handleBuiltInCommand,
       handleCustomCommand,
       input,
@@ -437,11 +407,7 @@ export function useChatComposerState({
     inputValueRef.current = '';
   }, []);
 
-  const currentModel = provider === 'claude' ? claudeModel
-    : provider === 'cursor' ? cursorModel
-    : provider === 'codex' ? codexModel
-    : provider === 'antigravity' ? (antigravityModel || ANTIGRAVITY_MODELS.DEFAULT)
-    : geminiModel;
+  const currentModel = modelByProvider[provider];
 
   const {
     slashCommands,
@@ -593,7 +559,21 @@ export function useChatComposerState({
         return;
       }
 
-      if (!currentInput.trim() || isLoading || !selectedProject) {
+      if (canSteer && !pendingCommand && steerSessionId) {
+        if (!currentInput.trim() || pendingSteerRef.current) return;
+        const clientId = crypto.randomUUID();
+        pendingSteerRef.current = { clientId, text: currentInput };
+        setIsSteerPending(true);
+        const sent = sendMessage({ type: 'chat-steer', provider, sessionId: steerSessionId, text: currentInput, clientId });
+        if (!sent) {
+          pendingSteerRef.current = null;
+          setIsSteerPending(false);
+          addMessage({ type: 'error', content: t('steer.rejected', { reason: 'disconnected' }), timestamp: new Date() });
+        }
+        return;
+      }
+
+      if ((!currentInput.trim() && attachedImages.length === 0) || isLoading || !selectedProject) {
         return;
       }
 
@@ -714,17 +694,7 @@ export function useChatComposerState({
 
       const getToolsSettings = () => {
         try {
-          const settingsKey =
-            provider === 'cursor'
-              ? 'cursor-tools-settings'
-              : provider === 'codex'
-                ? 'codex-settings'
-                : provider === 'gemini'
-                  ? 'gemini-settings'
-                  : provider === 'antigravity'
-                    ? 'antigravity-settings'
-                    : 'claude-settings';
-          const savedSettings = safeLocalStorage.getItem(settingsKey);
+          const savedSettings = safeLocalStorage.getItem(PROVIDER_INFO[provider].settingsStorageKey);
           if (savedSettings) {
             return JSON.parse(savedSettings);
           }
@@ -743,90 +713,28 @@ export function useChatComposerState({
       const resolvedProjectPath = selectedProject.fullPath || selectedProject.path || '';
       const sessionSummary = getNotificationSessionSummary(selectedSession, currentInput);
 
-      let sent = false;
-      if (provider === 'cursor') {
-        sent = sendMessage({
-          type: 'cursor-command',
-          command: messageContent,
+      // 單一送出路徑：各家參數差異由 provider 資訊表決定（design D10/D12）。
+      // runtime 只讀自己認得的欄位：Cursor 讀 skipPermissions，其餘讀 permissionMode。
+      const info = PROVIDER_INFO[provider];
+      const sent = sendMessage({
+        type: 'chat-command',
+        provider,
+        command: messageContent,
+        sessionId: effectiveSessionId,
+        options: {
+          cwd: resolvedProjectPath,
+          projectPath: resolvedProjectPath,
           sessionId: effectiveSessionId,
-          options: {
-            cwd: resolvedProjectPath,
-            projectPath: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            model: cursorModel,
-            skipPermissions: toolsSettings?.skipPermissions || false,
-            sessionSummary,
-            toolsSettings,
-          },
-        });
-      } else if (provider === 'codex') {
-        sent = sendMessage({
-          type: 'codex-command',
-          command: messageContent,
-          sessionId: effectiveSessionId,
-          options: {
-            cwd: resolvedProjectPath,
-            projectPath: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            model: codexModel,
-            sessionSummary,
-            ...effortOption,
-            permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
-          },
-        });
-      } else if (provider === 'gemini') {
-        sent = sendMessage({
-          type: 'gemini-command',
-          command: messageContent,
-          sessionId: effectiveSessionId,
-          options: {
-            cwd: resolvedProjectPath,
-            projectPath: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            model: geminiModel,
-            sessionSummary,
-            permissionMode,
-            toolsSettings,
-          },
-        });
-      } else if (provider === 'antigravity') {
-        sent = sendMessage({
-          type: 'antigravity-command',
-          command: messageContent,
-          sessionId: effectiveSessionId,
-          options: {
-            cwd: resolvedProjectPath,
-            projectPath: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            model: antigravityModel,
-            sessionSummary,
-            permissionMode,
-            toolsSettings,
-            skipPermissions: permissionMode === 'bypassPermissions',
-          },
-        });
-      } else {
-        sent = sendMessage({
-          type: 'claude-command',
-          command: messageContent,
-          options: {
-            projectPath: resolvedProjectPath,
-            cwd: resolvedProjectPath,
-            sessionId: effectiveSessionId,
-            resume: Boolean(effectiveSessionId),
-            toolsSettings,
-            permissionMode,
-            model: claudeModel,
-            sessionSummary,
-            ...effortOption,
-            images: uploadedImages,
-          },
-        });
-      }
+          resume: Boolean(effectiveSessionId),
+          model: modelByProvider[provider],
+          sessionSummary,
+          toolsSettings,
+          skipPermissions: toolsSettings?.skipPermissions || false,
+          permissionMode: info.mapPermissionMode ? info.mapPermissionMode(permissionMode as PermissionMode) : permissionMode,
+          ...(info.capabilities.effort ? effortOption : {}),
+          ...(info.capabilities.images ? { images: uploadedImages } : {}),
+        },
+      });
 
       if (!sent) {
         restoreDraft();
@@ -851,16 +759,12 @@ export function useChatComposerState({
       }
     },
     [
-      antigravityModel,
       selectedSession,
       attachedImages,
-      claudeModel,
-      codexModel,
       currentModel,
       currentSessionId,
-      cursorModel,
       executeCommand,
-      geminiModel,
+      modelByProvider,
       isLoading,
       onSessionActive,
       onSessionProcessing,
@@ -880,6 +784,9 @@ export function useChatComposerState({
       slashCommands,
       thinkingMode,
       pendingCommand,
+      canSteer,
+      steerSessionId,
+      t,
     ],
   );
 
@@ -1096,11 +1003,8 @@ export function useChatComposerState({
             decision: decision.updatedInput || (decision.allow ? 'accept' : 'decline') });
           return;
         }
-        const responseType = provider === 'gemini'
-          ? 'gemini-permission-response'
-          : 'claude-permission-response';
         sendMessage({
-          type: responseType,
+          type: 'claude-permission-response',
           requestId,
           allow: Boolean(decision?.allow),
           updatedInput: decision?.updatedInput,
@@ -1130,9 +1034,46 @@ export function useChatComposerState({
     [onInputFocusChange],
   );
 
+  /** 後端回覆 steer-accepted / steer-rejected：成功才清空輸入並加入使用者訊息，失敗保留輸入。 */
+  const handleSteerResult = useCallback(
+    (result: { type: string; clientId?: string | null; reason?: string }) => {
+      const pending = pendingSteerRef.current;
+      if (!pending || result.clientId !== pending.clientId) return;
+      pendingSteerRef.current = null;
+      setIsSteerPending(false);
+
+      if (result.type !== 'steer-accepted') {
+        addMessage({ type: 'error', content: t('steer.rejected', { reason: result.reason ?? 'rejected' }), timestamp: new Date() });
+        return;
+      }
+
+      addMessage({ type: 'user', content: pending.text, timestamp: new Date() });
+      // 等待期間若使用者已改寫輸入，就不覆蓋
+      if (inputValueRef.current === pending.text) {
+        setInput('');
+        inputValueRef.current = '';
+        setIsTextareaExpanded(false);
+        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      }
+      setTimeout(() => scrollToBottom(), 100);
+    },
+    [addMessage, scrollToBottom, t],
+  );
+
+  // 這一輪結束後就不會再有回覆，放掉等待狀態
+  useEffect(() => {
+    if (!isLoading && pendingSteerRef.current) {
+      pendingSteerRef.current = null;
+      setIsSteerPending(false);
+    }
+  }, [isLoading]);
+
   return {
     input,
     setInput,
+    canSteer,
+    isSteerPending,
+    handleSteerResult,
     textareaRef,
     inputHighlightRef,
     isTextareaExpanded,

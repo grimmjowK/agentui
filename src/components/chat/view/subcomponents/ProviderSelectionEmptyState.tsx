@@ -11,7 +11,6 @@ import {
   CLAUDE_MODELS,
   CURSOR_MODELS,
   CODEX_MODELS,
-  GEMINI_MODELS,
   PROVIDERS,
 } from "../../../../../shared/modelConstants";
 import type { ProjectSession, LLMProvider } from "../../../../types/app";
@@ -39,16 +38,8 @@ type ProviderSelectionEmptyStateProps = {
   provider: LLMProvider;
   setProvider: (next: LLMProvider) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement>;
-  claudeModel: string;
-  setClaudeModel: (model: string) => void;
-  cursorModel: string;
-  setCursorModel: (model: string) => void;
-  codexModel: string;
-  setCodexModel: (model: string) => void;
-  geminiModel: string;
-  setGeminiModel: (model: string) => void;
-  antigravityModel?: string;
-  setAntigravityModel?: (model: string) => void;
+  modelByProvider: Record<LLMProvider, string>;
+  setModelFor: (provider: LLMProvider, model: string) => void;
   tasksEnabled: boolean;
   isTaskMasterInstalled: boolean | null;
   onShowAllTasks?: (() => void) | null;
@@ -70,32 +61,15 @@ const PROVIDER_GROUPS: ProviderGroup[] = PROVIDERS.map((p) => ({
 function getModelConfig(p: LLMProvider) {
   if (p === "claude") return CLAUDE_MODELS;
   if (p === "codex") return CODEX_MODELS;
-  if (p === "gemini") return GEMINI_MODELS;
   if (p === "antigravity") return ANTIGRAVITY_MODELS;
   return CURSOR_MODELS;
-}
-
-function getCurrentModel(
-  p: LLMProvider,
-  c: string,
-  cu: string,
-  co: string,
-  g: string,
-  a?: string,
-) {
-  if (p === "claude") return c;
-  if (p === "codex") return co;
-  if (p === "gemini") return g;
-  if (p === "antigravity") return a || ANTIGRAVITY_MODELS.DEFAULT;
-  return cu;
 }
 
 function getProviderDisplayName(p: LLMProvider) {
   if (p === "claude") return "Claude";
   if (p === "cursor") return "Cursor";
   if (p === "codex") return "Codex";
-  if (p === "antigravity") return "Antigravity";
-  return "Gemini";
+  return "Antigravity";
 }
 
 export default function ProviderSelectionEmptyState({
@@ -104,16 +78,8 @@ export default function ProviderSelectionEmptyState({
   provider,
   setProvider,
   textareaRef,
-  claudeModel,
-  setClaudeModel,
-  cursorModel,
-  setCursorModel,
-  codexModel,
-  setCodexModel,
-  geminiModel,
-  setGeminiModel,
-  antigravityModel,
-  setAntigravityModel,
+  modelByProvider,
+  setModelFor,
   tasksEnabled,
   isTaskMasterInstalled,
   onShowAllTasks,
@@ -176,14 +142,7 @@ export default function ProviderSelectionEmptyState({
     defaultValue: "Start the next task",
   });
 
-  const currentModel = getCurrentModel(
-    provider,
-    claudeModel,
-    cursorModel,
-    codexModel,
-    geminiModel,
-    antigravityModel,
-  );
+  const currentModel = modelByProvider[provider];
 
   const currentModelLabel = useMemo(() => {
     const options = liveModelsByProvider[provider] ?? getModelConfig(provider).OPTIONS;
@@ -195,24 +154,10 @@ export default function ProviderSelectionEmptyState({
 
   const setModelForProvider = useCallback(
     (providerId: LLMProvider, modelValue: string) => {
-      if (providerId === "claude") {
-        setClaudeModel(modelValue);
-        localStorage.setItem("claude-model", modelValue);
-      } else if (providerId === "codex") {
-        setCodexModel(modelValue);
-        localStorage.setItem("codex-model", modelValue);
-      } else if (providerId === "gemini") {
-        setGeminiModel(modelValue);
-        localStorage.setItem("gemini-model", modelValue);
-      } else if (providerId === "antigravity") {
-        setAntigravityModel?.(modelValue);
-        localStorage.setItem("antigravity-model", modelValue);
-      } else {
-        setCursorModel(modelValue);
-        localStorage.setItem("cursor-model", modelValue);
-      }
+      setModelFor(providerId, modelValue);
+      localStorage.setItem(`${providerId}-model`, modelValue);
     },
-    [setClaudeModel, setCursorModel, setCodexModel, setGeminiModel, setAntigravityModel],
+    [setModelFor],
   );
 
   const handleModelSelect = useCallback(
@@ -325,25 +270,7 @@ export default function ProviderSelectionEmptyState({
           </Dialog>
 
           <p className="mt-4 text-center text-sm text-muted-foreground/70">
-            {
-              {
-                claude: t("providerSelection.readyPrompt.claude", {
-                  model: claudeModel,
-                }),
-                cursor: t("providerSelection.readyPrompt.cursor", {
-                  model: cursorModel,
-                }),
-                codex: t("providerSelection.readyPrompt.codex", {
-                  model: codexModel,
-                }),
-                gemini: t("providerSelection.readyPrompt.gemini", {
-                  model: geminiModel,
-                }),
-                antigravity: t("providerSelection.readyPrompt.antigravity", {
-                  model: antigravityModel,
-                }),
-              }[provider]
-            }
+            {t(`providerSelection.readyPrompt.${provider}`, { model: currentModel })}
           </p>
 
           <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground/60">

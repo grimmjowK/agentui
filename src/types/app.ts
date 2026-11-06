@@ -1,4 +1,6 @@
-export type LLMProvider = 'claude' | 'cursor' | 'codex' | 'gemini' | 'antigravity';
+import type { LLMProvider } from '../../shared/providers';
+
+export type { LLMProvider };
 
 export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'tasks' | 'preview' | `plugin:${string}`;
 
@@ -43,11 +45,7 @@ export interface Project {
   fullPath: string;
   path?: string;
   isStarred?: boolean;
-  sessions?: ProjectSession[];
-  cursorSessions?: ProjectSession[];
-  codexSessions?: ProjectSession[];
-  geminiSessions?: ProjectSession[];
-  antigravitySessions?: ProjectSession[];
+  sessionsByProvider?: Partial<Record<LLMProvider, ProjectSession[]>>;
   sessionMeta?: ProjectSessionMeta;
   taskmaster?: ProjectTaskmasterInfo;
   [key: string]: unknown;

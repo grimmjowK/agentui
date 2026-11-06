@@ -84,7 +84,7 @@
     "openInEditor": "Apri nell'editor"
   },
   "mainContent": {
-    "loading": "Caricamento CloudCLI",
+    "loading": "Caricamento EAO",
     "settingUpWorkspace": "Preparazione dell'area di lavoro...",
     "chooseProject": "Scegli il tuo progetto",
     "selectProjectDescription": "Seleziona un progetto dalla barra laterale per iniziare a programmare con Claude. Ogni progetto contiene le tue sessioni di chat e la cronologia dei file.",
@@ -263,5 +263,11 @@
       "updateAvailable": "Aggiornamento disponibile",
       "closeSidebar": "Chiudi barra laterale"
     }
+  },
+  "artifacts": {
+    "title": "Artefatti",
+    "toggle": "Mostra o nascondi gli artefatti della sessione",
+    "close": "Chiudi artefatti",
+    "empty": "Questa sessione non ha ancora artefatti."
   }
 }

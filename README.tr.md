@@ -1,7 +1,7 @@
 <div align="center">
   <img src="public/logo-mark.svg" alt="CloudCLI UI" width="64" height="64">
   <h1>Cloud CLI (Claude Code UI olarak da bilinir)</h1>
-  <p><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>, <a href="https://developers.openai.com/codex">Codex</a> ve <a href="https://geminicli.com/">Gemini-CLI</a> için masaüstü ve mobil arayüz.<br>Yerel ya da uzaktan kullanarak aktif projelerine ve oturumlarına her yerden erişebilirsin.</p>
+  <p><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>, <a href="https://developers.openai.com/codex">Codex</a> ve <a href="https://www.antigravity.google/docs/cli/">Antigravity CLI</a> için masaüstü ve mobil arayüz.<br>Yerel ya da uzaktan kullanarak aktif projelerine ve oturumlarına her yerden erişebilirsin.</p>
 </div>
 
 <p align="center">
@@ -41,7 +41,7 @@
 <h3>CLI Seçimi</h3>
 <img src="public/screenshots/cli-selection.png" alt="CLI Seçimi" width="400">
 <br>
-<em>Claude Code, Gemini, Cursor CLI ve Codex arasında seçim yap</em>
+<em>Claude Code, Antigravity, Cursor CLI ve Codex arasında seçim yap</em>
 </td>
 </tr>
 </table>
@@ -101,7 +101,7 @@ Ajanları hipervizör seviyesinde izolasyonlu sandbox'larda çalıştır. Varsay
 npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project
 ```
 
-Claude Code, Codex ve Gemini CLI destekler. Kurulum ve gelişmiş seçenekler için [sandbox dokümantasyonuna](docker/) bak.
+Claude Code ve Codex destekler. Kurulum ve gelişmiş seçenekler için [sandbox dokümantasyonuna](docker/) bak.
 
 
 ---
@@ -118,7 +118,7 @@ CloudCLI UI, CloudCLI Cloud'u güçlendiren açık kaynak arayüz katmanıdır. 
 | **İzolasyon** | Kendi host'unda çalışır | Hipervizör seviyesi sandbox (microVM) | Tam bulut izolasyonu |
 | **Makinenin açık kalması gerek** | Evet | Evet | Hayır |
 | **Mobil erişim** | Ağındaki herhangi bir tarayıcı | Ağındaki herhangi bir tarayıcı | Herhangi bir cihaz, native uygulama yolda |
-| **Desteklenen ajanlar** | Claude Code, Cursor CLI, Codex, Gemini CLI | Claude Code, Codex, Gemini CLI | Claude Code, Cursor CLI, Codex, Gemini CLI |
+| **Desteklenen ajanlar** | Claude Code, Cursor CLI, Codex, Antigravity | Claude Code, Codex | Claude Code, Cursor CLI, Codex, Gemini CLI |
 | **Dosya gezgini ve Git** | Evet | Evet | Evet |
 | **MCP yapılandırması** | `~/.claude` ile senkron | UI üzerinden yönetilir | UI üzerinden yönetilir |
 | **REST API** | Evet | Evet | Evet |
@@ -183,7 +183,7 @@ Pratikte bu ne demek:
 
 - **Tek oturum değil, tüm oturumların** — CloudCLI UI, `~/.claude` klasöründeki her oturumu otomatik keşfeder. Remote Control yalnızca tek aktif oturumu Claude mobil uygulamasına açar.
 - **Ayarların sana ait** — UI'da değiştirdiğin MCP sunucuları, araç izinleri ve proje yapılandırması doğrudan Claude Code yapılandırmana yazılır ve anında etkili olur; tersi de geçerli.
-- **Daha fazla ajanla çalışır** — Sadece Claude Code değil; Cursor CLI, Codex ve Gemini CLI de.
+- **Daha fazla ajanla çalışır** — Sadece Claude Code değil; Cursor CLI, Codex ve Antigravity de.
 - **Sadece sohbet penceresi değil, tam UI** — dosya gezgini, Git entegrasyonu, MCP yönetimi ve shell terminali hepsi yerleşik.
 - **CloudCLI Cloud bulutta çalışır** — laptop'unu kapat, ajan çalışmaya devam eder. Beklemen gereken terminal yok, uyanık tutman gereken makine yok.
 
@@ -233,7 +233,7 @@ CloudCLI UI — (https://cloudcli.ai).
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** — Anthropic'in resmi CLI'ı
 - **[Cursor CLI](https://docs.cursor.com/en/cli/overview)** — Cursor'un resmi CLI'ı
 - **[Codex](https://developers.openai.com/codex)** — OpenAI Codex
-- **[Gemini-CLI](https://geminicli.com/)** — Google Gemini CLI
+- **[Antigravity CLI](https://www.antigravity.google/docs/cli/)** - Google Antigravity CLI
 - **[React](https://react.dev/)** — Kullanıcı arayüzü kütüphanesi
 - **[Vite](https://vitejs.dev/)** — Hızlı derleme aracı ve geliştirme sunucusu
 - **[Tailwind CSS](https://tailwindcss.com/)** — Utility-first CSS framework

@@ -1,14 +1,16 @@
 import { spawn } from 'child_process';
 import crossSpawn from 'cross-spawn';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
-import { sessionsService } from './modules/providers/services/sessions.service.js';
-import { providerAuthService } from './modules/providers/services/provider-auth.service.js';
+import { providerAuthService, sessionsService } from './modules/providers/index.js';
+import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
 import { createNormalizedMessage } from './shared/utils.js';
 
 // Use cross-spawn on Windows for better command execution
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 
 let activeCursorProcesses = new Map(); // Track active processes by session ID
+// 被使用者中斷的行程：中斷的終止事件由 dispatcher 立即送出，行程結束時不再送 complete/error
+const abortedCursorProcesses = new WeakSet();
 
 const WORKSPACE_TRUST_PATTERNS = [
   /workspace trust required/i,
@@ -39,6 +41,12 @@ async function spawnCursor(command, options = {}, ws) {
       skipPermissions: false
     };
 
+    // Use cwd (actual project directory) instead of projectPath
+    const workingDir = cwd || projectPath || process.cwd();
+
+    // Handle attached images by saving to temp files and appending paths to prompt
+    const { modifiedCommand, tempImagePaths, tempDir } = await handleImages(command, options.images, workingDir);
+
     // Build Cursor CLI command
     const baseArgs = [];
 
@@ -48,9 +56,9 @@ async function spawnCursor(command, options = {}, ws) {
       baseArgs.push('--resume=' + sessionId);
     }
 
-    if (command && command.trim()) {
+    if (modifiedCommand && modifiedCommand.trim()) {
       // Provide a prompt (works for both new and resumed sessions)
-      baseArgs.push('-p', command);
+      baseArgs.push('-p', modifiedCommand);
 
       // Add model flag if specified (only meaningful for new sessions; harmless on resume)
       if (!sessionId && model) {
@@ -67,9 +75,6 @@ async function spawnCursor(command, options = {}, ws) {
       console.log('Using -f flag (skip permissions)');
     }
 
-    // Use cwd (actual project directory) instead of projectPath
-    const workingDir = cwd || projectPath || process.cwd();
-
     // Store process reference for potential abort
     const processKey = capturedSessionId || Date.now().toString();
 
@@ -78,6 +83,7 @@ async function spawnCursor(command, options = {}, ws) {
         return;
       }
       settled = true;
+      void cleanupTempFiles(tempImagePaths, tempDir);
       callback();
     };
 
@@ -130,6 +136,12 @@ async function spawnCursor(command, options = {}, ws) {
       });
 
       activeCursorProcesses.set(processKey, cursorProcess);
+      // 只刪自己的登記：中斷後使用者可能已在同一會話開了新一輪，舊行程收尾不能刪掉它
+      const releaseProcess = (key) => {
+        if (activeCursorProcesses.get(key) === cursorProcess) activeCursorProcesses.delete(key);
+      };
+      // result 已送出 complete 時，close 不再重送（每次執行只有一個終止事件）
+      let completeSent = false;
 
       const shouldSuppressForTrustRetry = (text) => {
         if (hasRetriedWithTrust || args.includes('--trust')) {
@@ -144,6 +156,8 @@ async function spawnCursor(command, options = {}, ws) {
       };
 
       const processCursorOutputLine = (line) => {
+        // 中斷後行程收尾前仍可能吐出 result，不能再送出終止事件
+        if (abortedCursorProcesses.has(cursorProcess)) return;
         if (!line || !line.trim()) {
           return;
         }
@@ -161,7 +175,7 @@ async function spawnCursor(command, options = {}, ws) {
 
                   // Update process key with captured session ID
                   if (processKey !== capturedSessionId) {
-                    activeCursorProcesses.delete(processKey);
+                    releaseProcess(processKey);
                     activeCursorProcesses.set(capturedSessionId, cursorProcess);
                   }
 
@@ -196,6 +210,7 @@ async function spawnCursor(command, options = {}, ws) {
             case 'result': {
               // Session complete — send stream end + lifecycle complete with result payload
               const resultText = typeof response.result === 'string' ? response.result : '';
+              completeSent = true;
               ws.send(createNormalizedMessage({
                 kind: 'complete',
                 exitCode: response.subtype === 'success' ? 0 : 1,
@@ -239,7 +254,7 @@ async function spawnCursor(command, options = {}, ws) {
         const stderrText = data.toString();
         console.error('Cursor CLI stderr:', stderrText);
 
-        if (shouldSuppressForTrustRetry(stderrText)) {
+        if (shouldSuppressForTrustRetry(stderrText) || abortedCursorProcesses.has(cursorProcess)) {
           return;
         }
 
@@ -249,7 +264,12 @@ async function spawnCursor(command, options = {}, ws) {
       // Handle process completion
       cursorProcess.on('close', async (code) => {
         const finalSessionId = capturedSessionId || sessionId || processKey;
-        activeCursorProcesses.delete(finalSessionId);
+        releaseProcess(finalSessionId);
+        // 必須在 trust 重試之前：被中斷的行程不能被重新啟動
+        if (abortedCursorProcesses.has(cursorProcess)) {
+          settleOnce(() => resolve());
+          return;
+        }
 
         // Flush any final unterminated stdout line before completion handling.
         if (stdoutLineBuffer.trim()) {
@@ -268,7 +288,9 @@ async function spawnCursor(command, options = {}, ws) {
           return;
         }
 
-        ws.send(createNormalizedMessage({ kind: 'complete', exitCode: code, isNewSession: !sessionId && !!command, sessionId: finalSessionId, provider: 'cursor' }));
+        if (!completeSent) {
+          ws.send(createNormalizedMessage({ kind: 'complete', exitCode: code, isNewSession: !sessionId && !!command, sessionId: finalSessionId, provider: 'cursor' }));
+        }
 
         if (code === 0) {
           notifyTerminalState({ code });
@@ -285,7 +307,11 @@ async function spawnCursor(command, options = {}, ws) {
 
         // Clean up process reference on error
         const finalSessionId = capturedSessionId || sessionId || processKey;
-        activeCursorProcesses.delete(finalSessionId);
+        releaseProcess(finalSessionId);
+        if (abortedCursorProcesses.has(cursorProcess)) {
+          settleOnce(() => resolve());
+          return;
+        }
 
         // Check if Cursor CLI is installed for a clearer error message
         const installed = await providerAuthService.isProviderInstalled('cursor');
@@ -311,6 +337,7 @@ function abortCursorSession(sessionId) {
   const process = activeCursorProcesses.get(sessionId);
   if (process) {
     console.log(`Aborting Cursor session: ${sessionId}`);
+    abortedCursorProcesses.add(process);
     process.kill('SIGTERM');
     activeCursorProcesses.delete(sessionId);
     return true;

@@ -47,7 +47,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
     switch (msg.kind) {
       case 'text': {
         const content = msg.content || '';
-        if (!content.trim()) continue;
+        if (!content.trim() && (!msg.images || msg.images.length === 0)) continue;
 
         if (msg.role === 'user') {
           // 后台任务通知：模型自发触发，不是用户发起的对话，直接丢弃，不展示也不进索引。
@@ -82,7 +82,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
 
       case 'tool_use': {
         const tr = msg.toolResult || (msg.toolId ? toolResultMap.get(msg.toolId) : null);
-        const isSubagentContainer = msg.toolName === 'Task';
+        const isSubagentContainer = msg.toolName === 'Task' || msg.toolName === 'Agent';
 
         // Build child tools from subagentTools
         const childTools: SubagentChildTool[] = [];
@@ -160,7 +160,16 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
         break;
 
       case 'task_notification':
-        // 同上：后台任务通知不是用户对话，丢弃。
+        // 給使用者的警告（審批被自動拒絕、版本未驗證、會話衝突等）要顯示；
+        // info 類的執行資訊與背景任務通知不是對話內容，丟棄。
+        if ((msg.status === 'warning' || msg.status === 'error') && msg.summary) {
+          converted.push({
+            type: 'warning',
+            content: msg.summary,
+            timestamp: msg.timestamp,
+            ...sharedMetadata,
+          });
+        }
         break;
 
       case 'stream_delta':

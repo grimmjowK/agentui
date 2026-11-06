@@ -36,7 +36,7 @@ A model appearing in a configuration file is not evidence it can run.
 | command approval accept | File absent before reply; command exit 0; file created; same turn completed |
 | command approval cancel | Item declined; file absent; turn interrupted |
 | turn/interrupt after item start | RPC success, turn/completed interrupted, process exited 0 |
-| additional permissions | Not yet exercised; disabled in the chat dispatcher |
+| additional permissions | Not yet exercised against real Codex; the chat runtime auto-declines (empty permissions, `scope: turn`) and shows a warning, so the turn continues under the original sandbox |
 | TUI bidirectional resume | TUI resumed original ID and showed prior history; sent TUI_ROUNDTRIP_OK; app-server resumed the same ID and thread/read contained both old and TUI messages |
 
 Sanitized actual messages and injected client decisions are in

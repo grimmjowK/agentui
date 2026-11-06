@@ -84,7 +84,7 @@
     "openInEditor": "エディタで開く"
   },
   "mainContent": {
-    "loading": "CloudCLI を読み込んでいます",
+    "loading": "EAO を読み込んでいます",
     "settingUpWorkspace": "ワークスペースを準備しています...",
     "chooseProject": "プロジェクトを選択",
     "selectProjectDescription": "サイドバーからプロジェクトを選択して、Claudeとコーディングを始めましょう。各プロジェクトにはチャットセッションとファイル履歴が含まれています。",
@@ -263,5 +263,11 @@
       "updateAvailable": "アップデートあり",
       "closeSidebar": "サイドバーを閉じる"
     }
+  },
+  "artifacts": {
+    "title": "成果物",
+    "toggle": "セッションの成果物を表示/非表示",
+    "close": "成果物パネルを閉じる",
+    "empty": "このセッションにはまだ成果物がありません。"
   }
 }

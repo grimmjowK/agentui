@@ -15,6 +15,19 @@ export default tseslint.config(
     ignores: ["dist/**", "node_modules/**", "public/**"],
   },
   {
+    // 對話流內不得依 provider 分支（openspec tool-call-rendering / design D14）
+    files: ["src/components/chat/tools/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "BinaryExpression[operator=/^[!=]==?$/]:matches([left.name='provider'], [left.property.name='provider'], [right.name='provider'], [right.property.name='provider'])",
+          message: "對話流內不得依 provider 分支：差異應在後端映射處理（見 src/components/chat/tools/README.md）。",
+        },
+      ],
+    },
+  },
+  {
     files: ["src/**/*.{ts,tsx,js,jsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     plugins: {
@@ -164,6 +177,7 @@ export default tseslint.config(
             "server/shared/codex-cli-path.ts",
             "server/shared/antigravity-cli-path.ts",
             "server/shared/antigravity-session-store.ts",
+            "server/shared/image-temp-files.ts",
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
         },
@@ -171,8 +185,13 @@ export default tseslint.config(
           type: "backend-legacy-runtime", // legacy runtime persistence modules used while providers migrate into server/modules
           pattern: [
             "server/projects.js",
-            "server/sessionManager.js",
             "server/utils/runtime-paths.js",
+            // provider runtime adapters (providers/list/*/*-runtime.provider.ts) wrap these root runtimes
+            "server/claude-sdk.js",
+            "server/cursor-cli.js",
+            "server/openai-codex.ts",
+            "server/services/notification-orchestrator.js",
+            "server/antigravity-cli.js",
           ], // provider history loading still resolves session data through these legacy runtime files
           mode: "file",
         },

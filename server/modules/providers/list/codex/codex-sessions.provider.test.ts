@@ -32,20 +32,18 @@ test('normalizeMessage normalizes tool_result with isError', () => {
   assert.equal(msg.content, 'curl: (56) 403 Forbidden');
 });
 
-test('normalizeMessage normalizes command_execution and sets isError on non-zero exit code', () => {
+test('normalizeMessage passes through codex-item-mapper output', () => {
   const [msg] = provider.normalizeMessage(
     {
-      type: 'item',
-      itemType: 'command_execution',
-      command: 'curl -L https://api.github.com/test',
-      status: 'failed',
-      exitCode: 56,
-      output: 'curl: (56) The requested URL returned error: 403',
+      type: 'mapped',
+      timestamp: '2026-11-01T00:00:00.000Z',
+      mapped: { kind: 'tool_use', toolId: 'call_1', toolName: 'Bash', toolInput: { command: 'ls' } },
     },
     's1'
   );
   assert.equal(msg.kind, 'tool_use');
   assert.equal(msg.toolName, 'Bash');
-  assert.equal(msg.toolResult?.isError, true);
-  assert.match(msg.toolResult?.content || '', /403/);
+  assert.equal(msg.toolId, 'call_1');
+  assert.equal(msg.provider, 'codex');
+  assert.equal(msg.sessionId, 's1');
 });

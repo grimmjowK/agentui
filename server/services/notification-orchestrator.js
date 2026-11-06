@@ -12,7 +12,6 @@ const PROVIDER_LABELS = {
   claude: 'Claude',
   cursor: 'Cursor',
   codex: 'Codex',
-  gemini: 'Gemini',
   system: 'System'
 };
 
@@ -175,7 +174,14 @@ function notifyUserIfEnabled({ userId, event }) {
     return;
   }
 
-  const preferences = notificationPreferencesDb.getPreferences(userId);
+  // 通知是盡力而為：讀偏好失敗（例如非整數 userId）不得打斷呼叫端的執行流程
+  let preferences;
+  try {
+    preferences = notificationPreferencesDb.getPreferences(userId);
+  } catch (error) {
+    console.warn('Notification preferences lookup failed:', error.message);
+    return;
+  }
   if (!shouldSendPush(preferences, event)) {
     return;
   }

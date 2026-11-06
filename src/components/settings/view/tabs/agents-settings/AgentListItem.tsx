@@ -28,10 +28,6 @@ const agentConfig: Record<AgentProvider, AgentConfig> = {
     name: 'Codex',
     color: 'gray',
   },
-  gemini: {
-    name: 'Gemini',
-    color: 'indigo',
-  },
   antigravity: {
     name: 'Antigravity',
     color: 'indigo',

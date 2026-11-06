@@ -1,4 +1,5 @@
 import React, { memo, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { Project } from '../../../types/app';
 import type { SubagentChildTool } from '../types/types';
@@ -36,13 +37,13 @@ interface ToolRendererProps {
 }
 
 function getToolCategory(toolName: string): string {
-  if (['Edit', 'Write', 'ApplyPatch', 'replace', 'write_file'].includes(toolName)) return 'edit';
-  if (['Grep', 'Glob', 'grep_search'].includes(toolName)) return 'search';
-  if (toolName === 'Bash' || toolName === 'run_shell_command') return 'bash';
-  if (['TodoWrite', 'TodoRead', 'write_todos'].includes(toolName)) return 'todo';
+  if (['Edit', 'Write', 'ApplyPatch'].includes(toolName)) return 'edit';
+  if (['Grep', 'Glob'].includes(toolName)) return 'search';
+  if (toolName === 'Bash') return 'bash';
+  if (['TodoWrite', 'TodoRead'].includes(toolName)) return 'todo';
   if (['TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'].includes(toolName)) return 'task';
-  if (toolName === 'Task' || toolName === 'invoke_agent') return 'agent';
-  if (toolName === 'exit_plan_mode' || toolName === 'ExitPlanMode' || toolName === 'enter_plan_mode') return 'plan';
+  if (toolName === 'Task' || toolName === 'Agent') return 'agent';
+  if (toolName === 'ExitPlanMode') return 'plan';
   if (toolName === 'AskUserQuestion') return 'question';
   return 'default';
 }
@@ -86,6 +87,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
   isSubagentContainer,
   subagentState
 }) => {
+  const { t } = useTranslation('chat');
   const config = getToolConfig(toolName);
   const displayConfig: any = mode === 'input' ? config.input : config.result;
 
@@ -106,10 +108,10 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
 
   const handleAction = useCallback(() => {
     if (displayConfig?.action === 'open-file' && onFileOpen) {
-      const value = displayConfig.getValue?.(parsedData) || '';
+      const value = displayConfig.getValue?.(parsedData, t) || '';
       onFileOpen(value);
     }
-  }, [displayConfig, parsedData, onFileOpen]);
+  }, [displayConfig, parsedData, onFileOpen, t]);
 
   // Route subagent containers to dedicated component (after hooks to satisfy Rules of Hooks)
   if (isSubagentContainer && subagentState) {
@@ -126,8 +128,8 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
   if (!displayConfig) return null;
 
   if (displayConfig.type === 'one-line') {
-    const value = displayConfig.getValue?.(parsedData) || '';
-    const secondary = displayConfig.getSecondary?.(parsedData);
+    const value = displayConfig.getValue?.(parsedData, t) || '';
+    const secondary = displayConfig.getSecondary?.(parsedData, t);
 
     return (
       <OneLineDisplay
@@ -151,7 +153,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
 
   if (displayConfig.type === 'plan') {
     const title = typeof displayConfig.title === 'function'
-      ? displayConfig.title(parsedData)
+      ? displayConfig.title(parsedData, t)
       : displayConfig.title || 'Plan';
 
     const contentProps = displayConfig.getContentProps?.(parsedData, {
@@ -178,7 +180,7 @@ export const ToolRenderer: React.FC<ToolRendererProps> = memo(({
 
   if (displayConfig.type === 'collapsible') {
     const title = typeof displayConfig.title === 'function'
-      ? displayConfig.title(parsedData)
+      ? displayConfig.title(parsedData, t)
       : displayConfig.title || 'Details';
 
     const defaultOpen = displayConfig.defaultOpen !== undefined

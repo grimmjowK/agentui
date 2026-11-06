@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 
 import type { AppTab, Project, ProjectSession } from '../../../types/app';
@@ -67,6 +68,8 @@ export type MainContentHeaderProps = {
   shouldShowTasksTab: boolean;
   isMobile: boolean;
   onMenuClick: () => void;
+  /** 標題列右側的額外按鈕（例如產物面板切換）。 */
+  extraActions?: ReactNode;
 };
 
 export type MainContentStateViewProps = {

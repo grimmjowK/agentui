@@ -84,7 +84,7 @@
     "openInEditor": "Open in Editor"
   },
   "mainContent": {
-    "loading": "Loading CloudCLI",
+    "loading": "Loading EAO",
     "settingUpWorkspace": "Setting up your workspace...",
     "chooseProject": "Choose Your Project",
     "selectProjectDescription": "Select a project from the sidebar to start coding with Claude. Each project contains your chat sessions and file history.",
@@ -270,5 +270,11 @@
       "updateAvailable": "Update available",
       "closeSidebar": "Close sidebar"
     }
+  },
+  "artifacts": {
+    "title": "Artifacts",
+    "toggle": "Show or hide session artifacts",
+    "close": "Close artifacts",
+    "empty": "This session has no artifacts yet."
   }
 }

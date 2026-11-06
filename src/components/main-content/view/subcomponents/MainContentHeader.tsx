@@ -12,6 +12,7 @@ export default function MainContentHeader({
   shouldShowTasksTab,
   isMobile,
   onMenuClick,
+  extraActions,
 }: MainContentHeaderProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -45,6 +46,8 @@ export default function MainContentHeader({
             shouldShowTasksTab={shouldShowTasksTab}
           />
         </div>
+
+        {extraActions}
 
         <div className="relative min-w-0 flex-shrink overflow-hidden sm:flex-shrink-0">
           {canScrollLeft && (

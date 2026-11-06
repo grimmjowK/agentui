@@ -14,13 +14,24 @@
 `services/` 负责业务逻辑，`tests/` 覆盖关键流程。
 
 ### `providers/` — LLM 多源适配中枢（含 `list/`、`shared/`、`services/`、`tests/`）
-统一适配 Claude / Cursor / Codex / Gemini 多个提供商。
-- 通过 `AbstractProvider` 基类和 `IProvider` 接口规范统一行为。
-- `list/` 下每个目录代表一个提供商实现（含 `auth`/`mcp`/`sessions`/`skills` 等能力）。
-- `shared/` 存放基类及 MCP / Skills 共享实现。
-- 与根目录 `claude-sdk.js`、`gemini-cli.js`、`cursor-cli.js`、`openai-codex.js` 等
-  CLI/SDK 集成层协作。
+统一适配 Claude / Cursor / Codex / Antigravity。provider 清单与能力（插话、图片、推理强度、产物）
+以 `shared/providers.ts` 的 `PROVIDER_IDS` / `PROVIDER_INFO` 为准，前后端共用。
+- 通过 `AbstractProvider` 基类和 `IProvider` 接口规范统一行为，facet 包括
+  `auth`/`mcp`/`skills`/`sessions`/`sessionSynchronizer`/`runtime`，详见 [providers/README.md](./providers/README.md)。
+- `list/<id>/<id>-runtime.provider.ts` 包装根目录执行层（`claude-sdk.js`、`cursor-cli.js`、
+  `openai-codex.ts`、`antigravity-cli.js`）。
+- `list/codex/codex-item-mapper.ts`、`list/antigravity/antigravity-tool-mapper.ts` 把各家事件映射为
+  Claude 工具形状，前端对话流不按 provider 分支。
+- `services/session-conversations-search.service.ts`：全文检索，提取交给各 facet 的
+  `extractSearchableMessages`；`session-synchronizer.service.ts`：各 provider 独立的扫描游标。
+
+### `codex-runtime/` — Codex app-server 连接
+`CodexAppServer`（JSON-RPC over stdio）、审批池 `codexApprovals`、线程占用锁 `codexOwnership`。
+`protocol/` 是 `npm run codex:gen-types` 生成的协议型别（只保留用到的方法），勿手改。
 
 ### `websocket/` — 实时通信网关（含 `services/`）
 创建单一 WebSocketServer，管理三条路由：`/ws`（聊天）、`/shell`（命令行）、
 `/plugin-ws`（插件代理）。`services/` 分别处理各路由及认证状态管理。
+聊天路由的消息：`chat-command`（启动/续接）、`chat-steer`（执行中插话）、`abort-session`、
+`check-session-status`、`get-active-sessions`、`get-pending-permissions`（带 `sessionId` 只查该会话，
+不带则跨会话汇总当前用户的待审批项）、`claude-permission-response` / `codex-permission-response`。

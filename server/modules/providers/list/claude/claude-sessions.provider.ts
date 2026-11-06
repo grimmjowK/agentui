@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import fsp from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 
@@ -7,6 +6,7 @@ import type { IProviderSessions } from '@/shared/interfaces.js';
 import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
+import { extractClaudeSearchableMessages } from '@/modules/providers/list/claude/claude-searchable-messages.js';
 
 const PROVIDER = 'claude';
 
@@ -114,8 +114,8 @@ async function getSessionMessages(
     }
 
     const projectDir = path.dirname(jsonLPath);
-    const files = await fsp.readdir(projectDir);
-    const agentFiles = files.filter((file) => file.endsWith('.jsonl') && file.startsWith('agent-'));
+    // 新版 Claude 把子 agent transcript 放在 <sessionId>/subagents/，舊版與主 transcript 同目錄。
+    const agentDirs = [path.join(projectDir, sessionId, 'subagents'), projectDir];
 
     const messages: AnyRecord[] = [];
     const agentToolsCache = new Map<string, AnyRecord[]>();
@@ -151,13 +151,14 @@ async function getSessionMessages(
 
     for (const agentId of agentIds) {
       const agentFileName = `agent-${agentId}.jsonl`;
-      if (!agentFiles.includes(agentFileName)) {
-        continue;
+      for (const dir of agentDirs) {
+        const agentFilePath = path.join(dir, agentFileName);
+        if (!fs.existsSync(agentFilePath)) {
+          continue;
+        }
+        agentToolsCache.set(agentId, await parseAgentTools(agentFilePath));
+        break;
       }
-
-      const agentFilePath = path.join(projectDir, agentFileName);
-      const tools = await parseAgentTools(agentFilePath);
-      agentToolsCache.set(agentId, tools);
     }
 
     for (const message of messages) {
@@ -395,6 +396,8 @@ function buildAttachmentMessageFields(attachment: AnyRecord): {
 }
 
 export class ClaudeSessionsProvider implements IProviderSessions {
+  extractSearchableMessages = extractClaudeSearchableMessages;
+
   /**
    * Normalizes one Claude JSONL entry or live SDK stream event into the shared
    * message shape consumed by REST and WebSocket clients.

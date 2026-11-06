@@ -5,7 +5,7 @@
  *   - 后端跑独立子进程（D2），以 SERVER_PORT=0 绑 127.0.0.1，通过 stdout 交接端口（D4）
  *   - 窗口在后端就绪前停在本地启动页（D8），就绪后导航到 http://127.0.0.1:<port>
  *   - 免登录走「持久化凭据 + 现有 /api/auth 接口」，绝不复用 IS_PLATFORM 免认证路径（D5）
- *   - GUI 启动时补全 PATH，否则 claude/codex/gemini/cursor 一律找不到（D7）
+ *   - GUI 启动时补全 PATH，否则 claude/codex/agy/cursor 一律找不到（D7）
  */
 
 import { app, BrowserWindow, shell, ipcMain, safeStorage, nativeTheme, screen, Menu, Notification } from 'electron';
@@ -137,9 +137,9 @@ function setStartupState(phase, message, detail = '') {
  * 这个文档内联在 main 进程里，不依赖 preload、不依赖磁盘文件。
  */
 function inlineFailureDocument(message) {
-  const html = `<!doctype html><meta charset="utf-8"><title>CloudCLI</title>
+  const html = `<!doctype html><meta charset="utf-8"><title>EAO</title>
 <body style="font:14px/1.6 -apple-system,system-ui,sans-serif;padding:48px;color:#e5e7eb;background:#111827">
-<h1 style="font-size:18px;margin:0 0 12px">CloudCLI 无法启动</h1>
+<h1 style="font-size:18px;margin:0 0 12px">EAO 无法启动</h1>
 <pre style="white-space:pre-wrap;color:#fca5a5">${String(message).replace(/[<&]/g, (ch) => (ch === '<' ? '&lt;' : '&amp;'))}</pre>
 <p style="color:#9ca3af">请退出应用后重新启动。若问题持续，请从终端运行 <code>npx cloudcli</code> 查看完整日志。</p>
 </body>`;
@@ -210,8 +210,6 @@ async function startBackend() {
     ELECTRON_RUN_AS_NODE: '1',
     HOST: '127.0.0.1',
     SERVER_PORT: '0',
-    // 后端默认 55 秒无人审批即拒绝；桌面端常在后台，放宽到与 Codex 一致的 10 分钟（用户显式设置优先）
-    CLAUDE_TOOL_APPROVAL_TIMEOUT_MS: env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS ?? '600000',
     NODE_ENV: app.isPackaged ? 'production' : env.NODE_ENV ?? 'development',
   });
 
@@ -599,7 +597,7 @@ ipcMain.on('cloudcli:attention', (event, payload) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || win.isFocused()) return;
   const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : '');
-  const title = text(payload?.title, 80) || 'CloudCLI';
+  const title = text(payload?.title, 80) || 'EAO';
   const body = text(payload?.body, 200);
   const sessionId = text(payload?.sessionId, 200) || null;
   const provider = text(payload?.provider, 40) || null;

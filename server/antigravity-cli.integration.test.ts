@@ -98,9 +98,9 @@ if (prompt === 'wait') {
     closeConnection();
     const projects = await getProjectsWithSessions({ skipSynchronization: true });
     const project = projects.find((entry) => entry.path === workspace)!;
-    assert.deepEqual(project.antigravitySessions.map((session) => session.id), ['native-session']);
+    assert.deepEqual(project.sessionsByProvider.antigravity!.map((session) => session.id), ['native-session']);
     const page = await getProjectSessionsPage(project.projectId, { limit: 1 });
-    assert.equal(page.antigravitySessions[0].id, 'native-session');
+    assert.equal(page.sessionsByProvider.antigravity![0].id, 'native-session');
     assert.equal((await provider.fetchHistory('native-session')).total, 4);
 
     const defaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
@@ -127,7 +127,8 @@ if (prompt === 'wait') {
     const oldLog = path.join(root, 'brain', 'old-native', 'transcript.jsonl');
     await mkdir(path.dirname(oldLog), { recursive: true });
     await writeFile(oldLog, JSON.stringify({ type: 'USER_INPUT', content: '<USER_REQUEST>Old</USER_REQUEST>', workspacePath: workspace }) + '\n');
-    scanStateDb.updateLastScannedAt(new Date(Date.now() + 60_000));
+    // 其他 provider 的游標前進到未來，不得影響 antigravity 自己的游標
+    scanStateDb.updateLastScannedAt(new Date(Date.now() + 60_000), 'claude');
     assert.equal(scanStateDb.getLastScannedAt('antigravity'), null);
     await sessionSynchronizerService.synchronizeSessions();
     assert.ok(sessionsDb.getSessionById('old-native'));
@@ -179,7 +180,7 @@ if (prompt === 'wait') {
 
     projectsDb.updateProjectIsArchivedById(project.projectId, true);
     const archived = await getArchivedProjectsWithSessions({ skipSynchronization: true });
-    assert.ok(archived.find((entry) => entry.projectId === project.projectId)?.antigravitySessions.some((session) => session.id === 'native-session'));
+    assert.ok(archived.find((entry) => entry.projectId === project.projectId)?.sessionsByProvider.antigravity!.some((session) => session.id === 'native-session'));
   } finally {
     for (const id of getActiveAntigravitySessions()) abortAntigravitySession(id);
     closeConnection();

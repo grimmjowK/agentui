@@ -1,7 +1,7 @@
 <div align="center">
   <img src="public/logo-mark.svg" alt="CloudCLI UI" width="64" height="64">
   <h1>Cloud CLI (aka Claude Code UI)</h1>
-  <p>A desktop and mobile UI for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>, <a href="https://developers.openai.com/codex">Codex</a>, and <a href="https://geminicli.com/">Gemini-CLI</a>.<br>Use it locally or remotely to view your active projects and sessions from everywhere.</p>
+  <p>A desktop and mobile UI for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://docs.cursor.com/en/cli/overview">Cursor CLI</a>, <a href="https://developers.openai.com/codex">Codex</a>, and <a href="https://www.antigravity.google/docs/cli/">Antigravity CLI</a>.<br>Use it locally or remotely to view your active projects and sessions from everywhere.</p>
 </div>
 
 <p align="center">
@@ -41,7 +41,7 @@
 <h3>CLI Selection</h3>
 <img src="public/screenshots/cli-selection.png" alt="CLI Selection" width="400">
 <br>
-<em>Select between Claude Code, Gemini, Cursor CLI and Codex</em>
+<em>Select between Claude Code, Antigravity, Cursor CLI and Codex</em>
 </td>
 </tr>
 </table>
@@ -101,7 +101,7 @@ Run agents in isolated sandboxes with hypervisor-level isolation. Starts Claude 
 npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project
 ```
 
-Supports Claude Code, Codex, and Gemini CLI. See the [sandbox docs](docker/) for setup and advanced options.
+Supports Claude Code and Codex. See the [sandbox docs](docker/) for setup and advanced options.
 
 
 ---
@@ -188,7 +188,7 @@ CloudCLI UI is the open source UI layer that powers CloudCLI Cloud. You can self
 | **Isolation** | Runs on your host | Hypervisor-level sandbox (microVM) | Full cloud isolation |
 | **Machine needs to stay on** | Yes | Yes | No |
 | **Mobile access** | Any browser on your network | Any browser on your network | Any device, native app coming |
-| **Agents supported** | Claude Code, Cursor CLI, Codex, Gemini CLI | Claude Code, Codex, Gemini CLI | Claude Code, Cursor CLI, Codex, Gemini CLI |
+| **Agents supported** | Claude Code, Cursor CLI, Codex, Antigravity | Claude Code, Codex | Claude Code, Cursor CLI, Codex, Gemini CLI |
 | **File explorer and Git** | Yes | Yes | Yes |
 | **MCP configuration** | Synced with `~/.claude` | Managed via UI | Managed via UI |
 | **REST API** | Yes | Yes | Yes |
@@ -253,7 +253,7 @@ Here's what that means in practice:
 
 - **All your sessions, not just one** — CloudCLI UI auto-discovers every session from your `~/.claude` folder. Remote Control only exposes the single active session to make it available in the Claude mobile app.
 - **Your settings are your settings** — MCP servers, tool permissions, and project config you change in CloudCLI UI are written directly to your Claude Code config and take effect immediately, and vice versa.
-- **Works with more agents** — Claude Code, Cursor CLI, Codex, and Gemini CLI, not just Claude Code.
+- **Works with more agents** — Claude Code, Cursor CLI, Codex, and Antigravity, not just Claude Code.
 - **Full UI, not just a chat window** — file explorer, Git integration, MCP management, and a shell terminal are all built in.
 - **CloudCLI Cloud runs in the cloud** — close your laptop, the agent keeps running. No terminal to babysit, no machine to keep awake.
 
@@ -303,7 +303,7 @@ This project is a modified version of CloudCLI UI (https://github.com/siteboon/c
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** - Anthropic's official CLI
 - **[Cursor CLI](https://docs.cursor.com/en/cli/overview)** - Cursor's official CLI
 - **[Codex](https://developers.openai.com/codex)** - OpenAI Codex
-- **[Gemini-CLI](https://geminicli.com/)** - Google Gemini CLI
+- **[Antigravity CLI](https://www.antigravity.google/docs/cli/)** - Google Antigravity CLI
 - **[React](https://react.dev/)** - User interface library
 - **[Vite](https://vitejs.dev/)** - Fast build tool and dev server
 - **[Tailwind CSS](https://tailwindcss.com/)** - Utility-first CSS framework

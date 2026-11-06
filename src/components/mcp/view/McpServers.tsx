@@ -1,8 +1,7 @@
-import { Edit3, ExternalLink, Globe, Lock, Plus, Server, Terminal, Trash2, Users, Zap } from 'lucide-react';
+import { Edit3, Globe, Plus, Server, Terminal, Trash2, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { McpProject, McpProvider, McpScope, ProviderMcpServer } from '../types';
-import { IS_PLATFORM } from '../../../constants/config';
 import { Badge, Button } from '../../../shared/view/ui';
 import {
   MCP_GLOBAL_SUPPORTED_SCOPES,
@@ -65,36 +64,6 @@ function ConfigLine({ label, children }: { label: string; children: string }) {
   );
 }
 
-function TeamMcpFeatureCard() {
-  return (
-    <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-5">
-      <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground">
-          <Users className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h4 className="text-sm font-medium text-foreground">Team MCP Configs</h4>
-            <Lock className="h-3 w-3 text-muted-foreground/60" />
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Share MCP server configurations across your team. Everyone stays in sync automatically.
-          </p>
-          <a
-            href="https://cloudcli.ai"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:underline"
-          >
-            Available with CloudCLI Pro
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function McpServers({ selectedProvider, currentProjects }: McpServersProps) {
   const { t } = useTranslation('settings');
   const {
@@ -122,9 +91,9 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
   });
   const globalButtonLabel = 'Add Global MCP Server';
   const providerButtonLabel = `Add ${providerName} MCP Server`;
-  const globalAddDescription = 'Add Global MCP Server writes one common stdio or HTTP server to Claude, Cursor, Codex, and Gemini.';
+  const globalAddDescription = 'Add Global MCP Server writes one common stdio or HTTP server to Claude, Cursor, Codex, and Antigravity.';
   const providerAddDescription = `${providerButtonLabel} only changes ${providerName}.`;
-  const globalModalDescription = 'Adds this MCP server to every provider: Claude, Cursor, Codex, and Gemini. '
+  const globalModalDescription = 'Adds this MCP server to every provider: Claude, Cursor, Codex, and Antigravity. '
     + 'Only stdio and HTTP transports are supported because the same config must work across all providers.';
 
   return (
@@ -249,7 +218,6 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
         </div>
       )}
 
-      {selectedProvider === 'claude' && !IS_PLATFORM && <TeamMcpFeatureCard />}
 
       <McpServerFormModal
         provider={selectedProvider}

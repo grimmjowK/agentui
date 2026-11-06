@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react';
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import type { MutableRefObject } from 'react';
 
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
-import type { PendingPermissionRequest, SessionNavigationOptions } from '../types/types';
+import type { SessionNavigationOptions } from '../types/types';
 import { saveSessionModel } from '../utils/chatStorage';
+import { isEventForSession } from '../../../utils/pendingApprovals';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
 
@@ -59,7 +60,6 @@ interface UseChatRealtimeHandlersArgs {
   setCanAbortSession: (canAbort: boolean) => void;
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
   setTokenBudget: (budget: Record<string, unknown> | null) => void;
-  setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
   pendingViewSessionRef: MutableRefObject<PendingViewSession | null>;
   streamTimerRef: MutableRefObject<number | null>;
   accumulatedStreamRef: MutableRefObject<string>;
@@ -68,6 +68,8 @@ interface UseChatRealtimeHandlersArgs {
   onSessionNotProcessing?: (sessionId?: string | null) => void;
   onNavigateToSession?: (sessionId: string, options?: SessionNavigationOptions) => void;
   onWebSocketReconnect?: () => void;
+  /** chat-steer 的結果，交給輸入區處理。 */
+  onSteerResult?: (result: { type: string; clientId?: string | null; reason?: string }) => void;
   sessionStore: SessionStore;
 }
 
@@ -85,7 +87,6 @@ export function useChatRealtimeHandlers({
   setCanAbortSession,
   setClaudeStatus,
   setTokenBudget,
-  setPendingPermissionRequests,
   pendingViewSessionRef,
   streamTimerRef,
   accumulatedStreamRef,
@@ -94,6 +95,7 @@ export function useChatRealtimeHandlers({
   onSessionNotProcessing,
   onNavigateToSession,
   onWebSocketReconnect,
+  onSteerResult,
   sessionStore,
 }: UseChatRealtimeHandlersArgs) {
   const paletteOps = usePaletteOps();
@@ -121,14 +123,10 @@ export function useChatRealtimeHandlers({
           onWebSocketReconnect?.();
           return;
 
-        case 'pending-permissions-response': {
-          const permSessionId = msg.sessionId;
-          const isCurrentPermSession =
-            permSessionId === currentSessionId || (selectedSession && permSessionId === selectedSession.id);
-          if (permSessionId && !isCurrentPermSession) return;
-          setPendingPermissionRequests(msg.data || []);
+        case 'steer-accepted':
+        case 'steer-rejected':
+          onSteerResult?.(msg);
           return;
-        }
 
         case 'session-status': {
           const statusSessionId = msg.sessionId;
@@ -177,6 +175,10 @@ export function useChatRealtimeHandlers({
     /* ---------------------------------------------------------------- */
 
     const sid = msg.sessionId || activeViewSessionId;
+    // 載入中、可中斷與狀態文字只跟著目前會話走；背景會話的事件只更新全域待審批池（design D16）
+    const viewSessionIds = [activeViewSessionId, pendingViewSessionRef.current?.sessionId];
+    const isCurrentSession = isEventForSession(msg.sessionId, viewSessionIds)
+      || (Boolean(msg.actualSessionId) && isEventForSession(msg.actualSessionId, viewSessionIds));
 
     // --- Streaming: buffer for performance ---
     if (msg.kind === 'stream_delta') {
@@ -207,7 +209,7 @@ export function useChatRealtimeHandlers({
         if (accumulatedStreamRef.current) {
           sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
         }
-        sessionStore.finalizeStreaming(sid);
+        sessionStore.finalizeStreaming(sid, msg.messageId);
       }
       accumulatedStreamRef.current = '';
       return;
@@ -247,9 +249,6 @@ export function useChatRealtimeHandlers({
             pendingViewSessionRef.current.sessionId = newSessionId;
           }
           setCurrentSessionId(newSessionId);
-          setPendingPermissionRequests((prev) =>
-            prev.map((r) => (r.sessionId ? r : { ...r, sessionId: newSessionId })),
-          );
           onNavigateToSession?.(newSessionId);
         }
         break;
@@ -267,10 +266,11 @@ export function useChatRealtimeHandlers({
         }
         accumulatedStreamRef.current = '';
 
-        setIsLoading(false);
-        setCanAbortSession(false);
-        setClaudeStatus(null);
-        setPendingPermissionRequests([]);
+        if (isCurrentSession) {
+          setIsLoading(false);
+          setCanAbortSession(false);
+          setClaudeStatus(null);
+        }
         onSessionInactive?.(sid);
         onSessionNotProcessing?.(sid);
 
@@ -329,11 +329,19 @@ export function useChatRealtimeHandlers({
             sessionStorage.removeItem('pendingSessionId');
           }
 
+          if (completedSuccessfully) {
+            void sessionStore.refreshFromServer(actualSessionId, { provider });
+          }
+
           if (isVisibleSession) {
             onNavigateToSession?.(actualSessionId, { replace: true });
             setTimeout(() => { void paletteOps.refreshProjects(); }, 500);
           }
           break;
+        }
+
+        if (completedSuccessfully && (actualSessionId || sid)) {
+          void sessionStore.refreshFromServer((actualSessionId || sid)!, { provider });
         }
 
         // Clear pending session
@@ -350,9 +358,11 @@ export function useChatRealtimeHandlers({
       }
 
       case 'error': {
-        setIsLoading(false);
-        setCanAbortSession(false);
-        setClaudeStatus(null);
+        if (isCurrentSession) {
+          setIsLoading(false);
+          setCanAbortSession(false);
+          setClaudeStatus(null);
+        }
         onSessionInactive?.(sid);
         onSessionNotProcessing?.(sid);
 
@@ -368,29 +378,11 @@ export function useChatRealtimeHandlers({
       }
 
       case 'permission_request': {
-        if (!msg.requestId) break;
-        setPendingPermissionRequests((prev) => {
-          if (prev.some((r: PendingPermissionRequest) => r.requestId === msg.requestId)) return prev;
-          return [...prev, {
-            requestId: msg.requestId,
-            provider: msg.provider,
-            toolName: msg.toolName || 'UnknownTool',
-            input: msg.input,
-            context: msg.context,
-            sessionId: sid || null,
-            receivedAt: new Date(),
-          }];
-        });
+        // 池由 PendingApprovalsProvider 更新
+        if (!msg.requestId || !isCurrentSession) break;
         setIsLoading(true);
         setCanAbortSession(true);
         setClaudeStatus({ text: 'Waiting for permission', tokens: 0, can_interrupt: true });
-        break;
-      }
-
-      case 'permission_cancelled': {
-        if (msg.requestId) {
-          setPendingPermissionRequests((prev) => prev.filter((r: PendingPermissionRequest) => r.requestId !== msg.requestId));
-        }
         break;
       }
 
@@ -424,7 +416,6 @@ export function useChatRealtimeHandlers({
     setCanAbortSession,
     setClaudeStatus,
     setTokenBudget,
-    setPendingPermissionRequests,
     pendingViewSessionRef,
     streamTimerRef,
     accumulatedStreamRef,
@@ -433,6 +424,7 @@ export function useChatRealtimeHandlers({
     onSessionNotProcessing,
     onNavigateToSession,
     onWebSocketReconnect,
+    onSteerResult,
     sessionStore,
     paletteOps,
   ]);

@@ -86,3 +86,28 @@ test('session model is stored independently of the sessions row and upserted', a
     assert.equal(sessionsDb.getSessionModel('session-new'), 'anthropic/gpt-6-astra-hc-yd');
   });
 });
+
+test('啟動遷移刪除 gemini 索引列，殘留的 gemini 收藏在讀取時被略過', async () => {
+  const { getConnection } = await import('@/modules/database/connection.js');
+  const { runMigrations } = await import('@/modules/database/migrations.js');
+  const { getProjectsWithSessions } = await import('@/modules/projects/index.js');
+
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createSession('claude-1', 'claude', '/workspace/retired', 'Claude');
+    sessionsDb.createSession('gemini-1', 'gemini', '/workspace/retired', 'Gemini');
+    sessionsDb.updateSessionIsStarred('gemini-1', true);
+
+    runMigrations(getConnection());
+    assert.equal(sessionsDb.getSessionById('gemini-1'), null);
+    assert.ok(sessionsDb.getSessionById('claude-1'));
+
+    // 舊版程式在遷移後又寫入（或手動殘留）的 gemini 收藏：讀取不得崩潰，且不出現在任何 provider 分組
+    sessionsDb.createSession('gemini-2', 'gemini', '/workspace/retired', 'Gemini again');
+    sessionsDb.updateSessionIsStarred('gemini-2', true);
+    const projects = await getProjectsWithSessions({ skipSynchronization: true });
+    const project = projects.find((p) => p.fullPath === '/workspace/retired');
+    assert.ok(project);
+    assert.deepEqual(project.sessionsByProvider.claude!.map((s) => s.id), ['claude-1']);
+    assert.equal(JSON.stringify(projects).includes('gemini-2'), false);
+  });
+});
