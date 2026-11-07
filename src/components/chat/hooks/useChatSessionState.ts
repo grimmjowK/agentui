@@ -26,7 +26,6 @@ interface UseChatSessionStateArgs {
   externalMessageUpdate?: number;
   newSessionTrigger?: number;
   processingSessions?: Set<string>;
-  resetStreamingState: () => void;
   pendingViewSessionRef: MutableRefObject<PendingViewSession | null>;
   sessionStore: SessionStore;
 }
@@ -103,7 +102,6 @@ export function useChatSessionState({
   externalMessageUpdate,
   newSessionTrigger,
   processingSessions,
-  resetStreamingState,
   pendingViewSessionRef,
   sessionStore,
 }: UseChatSessionStateArgs) {
@@ -172,7 +170,6 @@ export function useChatSessionState({
      * - No dependence on route/tab/session-object identity changes.
      * - No coupling to unrelated external update signals.
      */
-    resetStreamingState();
     pendingViewSessionRef.current = null;
     setClaudeStatus(null);
     setCanAbortSession(false);
@@ -184,7 +181,7 @@ export function useChatSessionState({
     messagesOffsetRef.current = 0;
     setHasMoreMessages(false);
     setTotalMessages(0);
-    
+
     setTokenBudget(null);
     setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
     setAllMessagesLoaded(false);
@@ -207,7 +204,7 @@ export function useChatSessionState({
       clearTimeout(loadAllFinishedTimerRef.current);
       loadAllFinishedTimerRef.current = null;
     }
-  }, [newSessionTrigger, pendingViewSessionRef, resetStreamingState]);
+  }, [newSessionTrigger, pendingViewSessionRef]);
 
   /* ---------------------------------------------------------------- */
   /*  Derive chatMessages from the store                              */
@@ -407,7 +404,6 @@ export function useChatSessionState({
   // Main session loading effect — store-based
   useEffect(() => {
     if (!selectedSession || !selectedProject) {
-      resetStreamingState();
       pendingViewSessionRef.current = null;
       setClaudeStatus(null);
       setCanAbortSession(false);
@@ -433,7 +429,6 @@ export function useChatSessionState({
 
     const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSession.id;
     if (sessionChanged) {
-      resetStreamingState();
       pendingViewSessionRef.current = null;
       setClaudeStatus(null);
       setCanAbortSession(false);
@@ -488,7 +483,6 @@ export function useChatSessionState({
     });
   }, [
     pendingViewSessionRef,
-    resetStreamingState,
     selectedProject,
     selectedSession?.id,
     sendMessage,

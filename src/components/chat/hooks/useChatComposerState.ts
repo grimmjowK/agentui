@@ -150,7 +150,12 @@ export function useChatComposerState({
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
   const { t } = useTranslation('chat');
   // 執行中插話（design D9）：等待後端回覆期間不能再送第二則
-  const pendingSteerRef = useRef<{ clientId: string; text: string } | null>(null);
+  const pendingSteerRef = useRef<{
+    clientId: string;
+    text: string;
+    sessionId: string;
+    provider: LLMProvider;
+  } | null>(null);
   const [isSteerPending, setIsSteerPending] = useState(false);
   const steerSessionId = currentSessionId || selectedSession?.id || null;
   const canSteer = isLoading && PROVIDER_INFO[provider].capabilities.midTurnSteer && Boolean(steerSessionId);
@@ -562,7 +567,7 @@ export function useChatComposerState({
       if (canSteer && !pendingCommand && steerSessionId) {
         if (!currentInput.trim() || pendingSteerRef.current) return;
         const clientId = crypto.randomUUID();
-        pendingSteerRef.current = { clientId, text: currentInput };
+        pendingSteerRef.current = { clientId, text: currentInput, sessionId: steerSessionId, provider };
         setIsSteerPending(true);
         const sent = sendMessage({ type: 'chat-steer', provider, sessionId: steerSessionId, text: currentInput, clientId });
         if (!sent) {
@@ -1043,6 +1048,11 @@ export function useChatComposerState({
       setIsSteerPending(false);
 
       if (result.type !== 'steer-accepted') {
+        if (result.reason === 'not_running') {
+          // 以後端狀態校正殘留的 Processing；保留輸入，讓使用者可重新送出新一輪。
+          // 使用送出時的 session/provider，避免等待回覆期間切換會話後查錯對象。
+          sendMessage({ type: 'check-session-status', sessionId: pending.sessionId, provider: pending.provider });
+        }
         addMessage({ type: 'error', content: t('steer.rejected', { reason: result.reason ?? 'rejected' }), timestamp: new Date() });
         return;
       }
@@ -1057,7 +1067,7 @@ export function useChatComposerState({
       }
       setTimeout(() => scrollToBottom(), 100);
     },
-    [addMessage, scrollToBottom, t],
+    [addMessage, scrollToBottom, sendMessage, t],
   );
 
   // 這一輪結束後就不會再有回覆，放掉等待狀態

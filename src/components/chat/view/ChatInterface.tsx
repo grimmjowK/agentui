@@ -50,17 +50,7 @@ function ChatInterface({
   const { t } = useTranslation('chat');
 
   const sessionStore = useSessionStore();
-  const streamTimerRef = useRef<number | null>(null);
-  const accumulatedStreamRef = useRef('');
   const pendingViewSessionRef = useRef<PendingViewSession | null>(null);
-
-  const resetStreamingState = useCallback(() => {
-    if (streamTimerRef.current) {
-      clearTimeout(streamTimerRef.current);
-      streamTimerRef.current = null;
-    }
-    accumulatedStreamRef.current = '';
-  }, []);
 
   const {
     provider,
@@ -118,7 +108,6 @@ function ChatInterface({
     externalMessageUpdate,
     newSessionTrigger,
     processingSessions,
-    resetStreamingState,
     pendingViewSessionRef,
     sessionStore,
   });
@@ -244,8 +233,6 @@ function ChatInterface({
     setClaudeStatus,
     setTokenBudget,
     pendingViewSessionRef,
-    streamTimerRef,
-    accumulatedStreamRef,
     onSessionInactive,
     onSessionProcessing,
     onSessionNotProcessing,
@@ -274,12 +261,6 @@ function ChatInterface({
       document.removeEventListener('keydown', handleGlobalEscape, { capture: true });
     };
   }, [canAbortSession, handleAbortSession, isLoading]);
-
-  useEffect(() => {
-    return () => {
-      resetStreamingState();
-    };
-  }, [resetStreamingState]);
 
   // Safety net: if isLoading stays true for too long without any WebSocket
   // activity, re-check session status. This catches missed `complete` events.
