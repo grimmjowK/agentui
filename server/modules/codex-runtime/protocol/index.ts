@@ -10,6 +10,8 @@ import type { InitializeParams } from './InitializeParams.js';
 import type { InitializeResponse } from './InitializeResponse.js';
 import type { ItemCompletedNotification } from './v2/ItemCompletedNotification.js';
 import type { ItemStartedNotification } from './v2/ItemStartedNotification.js';
+import type { McpServerElicitationRequestParams } from './v2/McpServerElicitationRequestParams.js';
+import type { McpServerElicitationRequestResponse } from './v2/McpServerElicitationRequestResponse.js';
 import type { ModelListParams } from './v2/ModelListParams.js';
 import type { ModelListResponse } from './v2/ModelListResponse.js';
 import type { PermissionsRequestApprovalParams } from './v2/PermissionsRequestApprovalParams.js';
@@ -33,7 +35,7 @@ import type { TurnStartedNotification } from './v2/TurnStartedNotification.js';
 import type { TurnSteerParams } from './v2/TurnSteerParams.js';
 import type { TurnSteerResponse } from './v2/TurnSteerResponse.js';
 
-export type { AgentMessageDeltaNotification, CommandExecutionRequestApprovalParams, CommandExecutionRequestApprovalResponse, ErrorNotification, FileChangeRequestApprovalParams, FileChangeRequestApprovalResponse, InitializeParams, InitializeResponse, ItemCompletedNotification, ItemStartedNotification, ModelListParams, ModelListResponse, PermissionsRequestApprovalParams, PermissionsRequestApprovalResponse, RequestId, ThreadItem, ThreadReadParams, ThreadReadResponse, ThreadResumeParams, ThreadResumeResponse, ThreadStartParams, ThreadStartResponse, ThreadTokenUsageUpdatedNotification, TurnCompletedNotification, TurnInterruptParams, TurnInterruptResponse, TurnPlanUpdatedNotification, TurnStartParams, TurnStartResponse, TurnStartedNotification, TurnSteerParams, TurnSteerResponse };
+export type { AgentMessageDeltaNotification, CommandExecutionRequestApprovalParams, CommandExecutionRequestApprovalResponse, ErrorNotification, FileChangeRequestApprovalParams, FileChangeRequestApprovalResponse, InitializeParams, InitializeResponse, ItemCompletedNotification, ItemStartedNotification, McpServerElicitationRequestParams, McpServerElicitationRequestResponse, ModelListParams, ModelListResponse, PermissionsRequestApprovalParams, PermissionsRequestApprovalResponse, RequestId, ThreadItem, ThreadReadParams, ThreadReadResponse, ThreadResumeParams, ThreadResumeResponse, ThreadStartParams, ThreadStartResponse, ThreadTokenUsageUpdatedNotification, TurnCompletedNotification, TurnInterruptParams, TurnInterruptResponse, TurnPlanUpdatedNotification, TurnStartParams, TurnStartResponse, TurnStartedNotification, TurnSteerParams, TurnSteerResponse };
 
 /** 介接層送出的請求：method → 參數與回應。 */
 export type ClientRequestMap = {
@@ -63,6 +65,7 @@ export type ServerNotification =
 
 /** 介接層回應的伺服器請求：method → 參數與回應。 */
 export type ServerRequestMap = {
+  'mcpServer/elicitation/request': { params: McpServerElicitationRequestParams; result: McpServerElicitationRequestResponse };
   'item/commandExecution/requestApproval': { params: CommandExecutionRequestApprovalParams; result: CommandExecutionRequestApprovalResponse };
   'item/fileChange/requestApproval': { params: FileChangeRequestApprovalParams; result: FileChangeRequestApprovalResponse };
   'item/permissions/requestApproval': { params: PermissionsRequestApprovalParams; result: PermissionsRequestApprovalResponse };

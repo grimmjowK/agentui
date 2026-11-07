@@ -1,5 +1,24 @@
 # Codex runtime protocol verification
 
+## MCP elicitation support (2026-11-06)
+
+The adapter handles `mcpServer/elicitation/request` using the generated 0.163.0
+schema, including nullable `turnId`. Requests remain bound to the authenticated
+user and thread and use the existing pending-request/reconnection lifecycle.
+Replies use `{ action, content, _meta: null }`; decline, cancel, expiry and run
+cleanup carry no content. Expiry and cleanup use `cancel`.
+
+The UI renders primitive form fields, titled/untitled choices and multiselects.
+`openai/form` and `openaiForm` are accepted too; complex schemas fall back to an
+editable JSON object with the schema shown. Shared validation covers required
+fields, types, enums, unions and common size/range constraints, not every JSON
+Schema extension. URL requests expose only HTTP(S) links and require an explicit
+user response after visiting the page; links are never opened automatically.
+
+Validation: approval lifecycle unit tests and a fake app-server integration test
+exercise a null-turn elicitation through `queryCodex` to successful completion.
+Live `cua_repl`/Chrome interaction remains a manual acceptance test.
+
 > 本文档记录两批工作：
 > 1. `unify-codex-runtime-and-approvals` 变更在 0.155-alpha 上的初始协议实测（下方"Tested runtime"
 >    起至"Application adapter smoke test"）。

@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import type { MessageKind } from '@/shared/types.js';
 
+import { isRecord, validateElicitationContent } from '../../../shared/elicitation.js';
+
 import type { ServerRequest } from './protocol/index.js';
 
 type Notification = { kind: MessageKind } & Record<string, any>;
@@ -30,11 +32,12 @@ export class CodexApprovals {
     const expiresAt = Date.now() + (options.timeoutMs ?? 600000);
     const method = options.request.method!;
     const isPermissions = method === 'item/permissions/requestApproval';
+    const isElicitation = method === 'mcpServer/elicitation/request';
     // 舊版（0.155）在參數中提供 availableDecisions；0.163 的協議已無此欄位，走下方預設集合
     const advertised = (options.request.params as { availableDecisions?: unknown } | undefined)?.availableDecisions;
     // 仅支持简单枚举决定；对象型决定（acceptWithExecpolicyAmendment、applyNetworkPolicyAmendment，
     // 见 docs/codex-runtime-protocol.md 0.163.0 记录）需要额外 UI 展示策略修正内容，暂不支持而过滤掉。
-    let decisions = isPermissions ? ['accept', 'decline']
+    let decisions = isElicitation ? ['accept', 'decline', 'cancel'] : isPermissions ? ['accept', 'decline']
       : Array.isArray(advertised) ? advertised.filter((d) => ['accept', 'acceptForSession', 'decline', 'cancel'].includes(d))
         : ['accept', 'decline', 'cancel'];
     // 过滤后为空（请求只提供了不支持的对象型决定）时，回退为仅拒绝，避免产出无可选项的审批卡片。
@@ -50,7 +53,7 @@ export class CodexApprovals {
       context: { provider: 'codex', decisions, expiresAt, scope: isPermissions ? 'turn' : 'operation' },
     };
     const timer = setTimeout(() => {
-      try { this.finish(requestId, 'decline', 'expired'); } catch { /* Runtime disconnected. */ }
+      try { this.finish(requestId, isElicitation ? 'cancel' : 'decline', 'expired'); } catch { /* Runtime disconnected. */ }
     }, expiresAt - Date.now());
     timer.unref();
     this.pending.set(requestId, { ...options, message, timer });
@@ -61,12 +64,20 @@ export class CodexApprovals {
   decide(requestId: string, userId: string | number | null, threadId: string, decision: unknown) {
     const entry = this.pending.get(requestId);
     if (!entry || userId === null || String(entry.userId) !== String(userId) || entry.threadId !== threadId) return false;
+    if (entry.request.method === 'mcpServer/elicitation/request') {
+      if (!isRecord(decision) || !['accept', 'decline', 'cancel'].includes(String(decision.action))) return false;
+      const params = entry.request.params;
+      if (decision.action === 'accept' && params.mode !== 'url'
+        && validateElicitationContent(params.requestedSchema, decision.content)) return false;
+      this.finish(requestId, String(decision.action), 'resolved', params.mode === 'url' ? null : decision.content);
+      return true;
+    }
     if (!entry.message.context.decisions.includes(decision)) return false;
     this.finish(requestId, String(decision), 'resolved');
     return true;
   }
 
-  private finish(requestId: string, decision: string, reason: string) {
+  private finish(requestId: string, decision: string, reason: string, content: unknown = null) {
     const entry = this.pending.get(requestId);
     if (!entry) return;
     this.pending.delete(requestId);
@@ -74,7 +85,9 @@ export class CodexApprovals {
     if (decision === 'decline' && !entry.message.context.decisions.includes('decline')
       && entry.message.context.decisions.includes('cancel')) decision = 'cancel';
     try {
-      entry.reply(entry.request.method === 'item/permissions/requestApproval'
+      entry.reply(entry.request.method === 'mcpServer/elicitation/request'
+        ? { action: decision, content: decision === 'accept' ? content : null, _meta: null }
+        : entry.request.method === 'item/permissions/requestApproval'
         ? { permissions: decision === 'accept' ? entry.request.params?.permissions ?? {} : {}, scope: 'turn' }
         : { decision });
     } finally {
@@ -85,7 +98,7 @@ export class CodexApprovals {
   clear(instanceId: string) {
     for (const [id, entry] of this.pending) {
       if (entry.instanceId === instanceId) {
-        try { this.finish(id, 'decline', 'cancelled'); } catch { /* Disconnected runtime. */ }
+        try { this.finish(id, entry.request.method === 'mcpServer/elicitation/request' ? 'cancel' : 'decline', 'cancelled'); } catch { /* Disconnected runtime. */ }
       }
     }
   }
