@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 
 import { usePaletteOps } from '../../../contexts/PaletteOpsContext';
 import type { SessionNavigationOptions } from '../types/types';
+import { createSessionStreamBuffer } from '../utils/sessionStreamBuffer';
 import { saveSessionModel } from '../utils/chatStorage';
 import { isEventForSession } from '../../../utils/pendingApprovals';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
@@ -61,8 +62,6 @@ interface UseChatRealtimeHandlersArgs {
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
   setTokenBudget: (budget: Record<string, unknown> | null) => void;
   pendingViewSessionRef: MutableRefObject<PendingViewSession | null>;
-  streamTimerRef: MutableRefObject<number | null>;
-  accumulatedStreamRef: MutableRefObject<string>;
   onSessionInactive?: (sessionId?: string | null) => void;
   onSessionProcessing?: (sessionId?: string | null) => void;
   onSessionNotProcessing?: (sessionId?: string | null) => void;
@@ -88,8 +87,6 @@ export function useChatRealtimeHandlers({
   setClaudeStatus,
   setTokenBudget,
   pendingViewSessionRef,
-  streamTimerRef,
-  accumulatedStreamRef,
   onSessionInactive,
   onSessionProcessing,
   onSessionNotProcessing,
@@ -99,6 +96,12 @@ export function useChatRealtimeHandlers({
   sessionStore,
 }: UseChatRealtimeHandlersArgs) {
   const paletteOps = usePaletteOps();
+  const { updateStreaming, finalizeStreaming } = sessionStore;
+  const streams = useMemo(
+    () => createSessionStreamBuffer({ updateStreaming, finalizeStreaming }),
+    [updateStreaming, finalizeStreaming],
+  );
+  useEffect(() => () => streams.dispose(), [streams]);
   const lastProcessedMessageRef = useRef<LatestChatMessage | null>(null);
 
   useEffect(() => {
@@ -180,38 +183,14 @@ export function useChatRealtimeHandlers({
     const isCurrentSession = isEventForSession(msg.sessionId, viewSessionIds)
       || (Boolean(msg.actualSessionId) && isEventForSession(msg.actualSessionId, viewSessionIds));
 
-    // --- Streaming: buffer for performance ---
+    // 前景與背景會話都累積到各自的串流訊息，不把單個 delta 加入列表。
     if (msg.kind === 'stream_delta') {
-      const text = msg.content || '';
-      if (!text) return;
-      accumulatedStreamRef.current += text;
-      if (!streamTimerRef.current) {
-        streamTimerRef.current = window.setTimeout(() => {
-          streamTimerRef.current = null;
-          if (sid) {
-            sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
-          }
-        }, 100);
-      }
-      // Also route to store for non-active sessions
-      if (sid && sid !== activeViewSessionId) {
-        sessionStore.appendRealtime(sid, msg as NormalizedMessage);
-      }
+      if (sid && msg.content) streams.append(sid, msg.content, msg.provider || provider);
       return;
     }
 
     if (msg.kind === 'stream_end') {
-      if (streamTimerRef.current) {
-        clearTimeout(streamTimerRef.current);
-        streamTimerRef.current = null;
-      }
-      if (sid) {
-        if (accumulatedStreamRef.current) {
-          sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
-        }
-        sessionStore.finalizeStreaming(sid, msg.messageId);
-      }
-      accumulatedStreamRef.current = '';
+      if (sid) streams.finish(sid, msg.messageId);
       return;
     }
 
@@ -255,16 +234,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'complete': {
-        // Flush any remaining streaming state
-        if (streamTimerRef.current) {
-          clearTimeout(streamTimerRef.current);
-          streamTimerRef.current = null;
-        }
-        if (sid && accumulatedStreamRef.current) {
-          sessionStore.updateStreaming(sid, accumulatedStreamRef.current, provider);
-          sessionStore.finalizeStreaming(sid);
-        }
-        accumulatedStreamRef.current = '';
+        if (sid) streams.finish(sid);
 
         if (isCurrentSession) {
           setIsLoading(false);
@@ -358,6 +328,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'error': {
+        if (sid) streams.finish(sid);
         if (isCurrentSession) {
           setIsLoading(false);
           setCanAbortSession(false);
@@ -408,6 +379,7 @@ export function useChatRealtimeHandlers({
     }
   }, [
     latestMessage,
+    streams,
     provider,
     selectedSession,
     currentSessionId,
@@ -417,8 +389,6 @@ export function useChatRealtimeHandlers({
     setClaudeStatus,
     setTokenBudget,
     pendingViewSessionRef,
-    streamTimerRef,
-    accumulatedStreamRef,
     onSessionInactive,
     onSessionProcessing,
     onSessionNotProcessing,
