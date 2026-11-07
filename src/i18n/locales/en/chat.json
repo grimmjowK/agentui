@@ -135,7 +135,30 @@
       "submitted": "Submitted, waiting for response.",
       "cancel": "Cancel",
       "done": "Done",
-      "submit": "Submit"
+      "submit": "Submit",
+      "validation": {
+        "const": "Value does not match the requirement.",
+        "enum": "Select one of the provided options.",
+        "union": "Value does not match the allowed alternatives.",
+        "type": "Incorrect value type.",
+        "object": "Enter a JSON object.",
+        "string": "Enter text.",
+        "email": "Enter an email address.",
+        "uri": "Enter a full URL.",
+        "number": "Enter a valid number.",
+        "boolean": "Select yes or no.",
+        "null": "Must be null.",
+        "array": "Enter an array.",
+        "required": "Missing {{field}}.",
+        "additionalProperty": "Unsupported field {{field}}.",
+        "minLength": "Use at least {{limit}} characters.",
+        "maxLength": "Use at most {{limit}} characters.",
+        "minimum": "Minimum value is {{limit}}.",
+        "maximum": "Maximum value is {{limit}}.",
+        "minItems": "Select at least {{limit}} items.",
+        "maxItems": "Select at most {{limit}} items.",
+        "atPath": "{{path}}: {{message}}"
+      }
     }
   },
   "input": {

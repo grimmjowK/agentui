@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
+
+import { createInstance } from 'i18next';
 
 import { elicitationUrl, validateElicitationContent } from '../../../shared/elicitation.js';
 
@@ -8,6 +11,30 @@ import type { ServerRequest } from './protocol/index.js';
 
 /** 測試只給出與行為相關的欄位，其餘協議欄位省略。 */
 const wire = (request: unknown) => request as ServerRequest;
+
+test('required strings may be empty unless minLength disallows it', () => {
+  const schema = { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] };
+  assert.equal(validateElicitationContent(schema, { value: '' }), null);
+  assert.deepEqual(validateElicitationContent(schema, {}), { code: 'required', path: '$', params: { field: 'value' } });
+  assert.deepEqual(validateElicitationContent({ ...schema, properties: { value: { type: 'string', minLength: 1 } } }, { value: '' }),
+    { code: 'minLength', path: '$.value', params: { limit: 1 } });
+});
+
+test('validation errors render in the selected language with field and constraint details', async () => {
+  const i18n = createInstance();
+  const readLocale = (locale: string) => JSON.parse(fs.readFileSync(new URL(`../../../src/i18n/locales/${locale}/chat.json`, import.meta.url), 'utf8'));
+  await i18n.init({ lng: 'en', defaultNS: 'chat', resources: {
+    en: { chat: readLocale('en') }, 'zh-CN': { chat: readLocale('zh-CN') },
+  } });
+  const error = validateElicitationContent({ type: 'object', properties: { count: { type: 'number', minimum: 1 } } }, { count: 0 });
+  assert.ok(error);
+  const render = () => i18n.t('codex.elicitation.validation.atPath', {
+    path: error.path, message: i18n.t(`codex.elicitation.validation.${error.code}`, error.params),
+  });
+  assert.equal(render(), '$.count: Minimum value is 1.');
+  await i18n.changeLanguage('zh-CN');
+  assert.equal(render(), '$.count：最小值为 1。');
+});
 
 test('elicitation validates form input, binds owner/thread, replays and consumes the response once', () => {
   const approvals = new CodexApprovals();

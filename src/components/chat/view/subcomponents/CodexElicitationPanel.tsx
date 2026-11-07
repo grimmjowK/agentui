@@ -40,7 +40,11 @@ export default function CodexElicitationPanel({ request, expired, onDecision }: 
       try { content = simple ? values : JSON.parse(json); }
       catch { setError(t('codex.elicitation.invalidJson', 'Enter valid JSON.')); return; }
       const validationError = validateElicitationContent(schema, content);
-      if (validationError) { setError(validationError); return; }
+      if (validationError) {
+        const message = t(`codex.elicitation.validation.${validationError.code}`, validationError.params);
+        setError(t('codex.elicitation.validation.atPath', { path: validationError.path, message }));
+        return;
+      }
     }
     setError(null);
     setSubmitted(true);
@@ -82,7 +86,7 @@ export default function CodexElicitationPanel({ request, expired, onDecision }: 
                   <input className={controlClass} disabled={disabled} value={String(values[key] ?? '')}
                     type={['number', 'integer'].includes(field.type) ? 'number' : 'text'}
                     step={field.type === 'integer' ? 1 : 'any'}
-                    onChange={(event) => setValue(key, field.type === 'string' ? event.target.value || undefined
+                    onChange={(event) => setValue(key, field.type === 'string' ? event.target.value
                       : event.target.value === '' ? undefined : Number(event.target.value))} />
                 )}
               </label>

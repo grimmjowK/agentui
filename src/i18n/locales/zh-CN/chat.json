@@ -135,7 +135,30 @@
       "submitted": "已提交，等待响应。",
       "cancel": "取消",
       "done": "已完成",
-      "submit": "确认提交"
+      "submit": "确认提交",
+      "validation": {
+        "const": "值不符合要求。",
+        "enum": "请选择提供的选项。",
+        "union": "值不符合选项要求。",
+        "type": "类型不符。",
+        "object": "请输入 JSON 对象。",
+        "string": "请输入文字。",
+        "email": "请输入电子邮件地址。",
+        "uri": "请输入完整网址。",
+        "number": "请输入有效数字。",
+        "boolean": "请选择是或否。",
+        "null": "必须为 null。",
+        "array": "请输入数组。",
+        "required": "缺少 {{field}}。",
+        "additionalProperty": "不支持字段 {{field}}。",
+        "minLength": "至少输入 {{limit}} 个字符。",
+        "maxLength": "最多输入 {{limit}} 个字符。",
+        "minimum": "最小值为 {{limit}}。",
+        "maximum": "最大值为 {{limit}}。",
+        "minItems": "至少选择 {{limit}} 项。",
+        "maxItems": "最多选择 {{limit}} 项。",
+        "atPath": "{{path}}：{{message}}"
+      }
     }
   },
   "input": {
