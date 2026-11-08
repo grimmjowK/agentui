@@ -1,5 +1,91 @@
+import type { Database, Statement } from 'better-sqlite3';
+
 import { getConnection } from '@/modules/database/connection.js';
 import type { NormalizedMessage } from '@/shared/types.js';
+
+type CachedStatements = {
+  writeRow: Statement;
+  maxSeq: Statement;
+  getRow: Statement;
+  getRawPayload: Statement;
+  findById: Statement;
+  listBySession: Statement;
+  deleteBySession: Statement;
+  selectIdsBySession: Statement;
+  negateSeqBySession: Statement;
+  updateSeqById: Statement;
+  listSizes: Statement;
+};
+
+let cachedDb: Database | null = null;
+let cachedStmts: CachedStatements | null = null;
+
+function stmts(): CachedStatements {
+  const db = getConnection();
+  if (cachedDb === db && cachedStmts) {
+    return cachedStmts;
+  }
+  cachedDb = db;
+  cachedStmts = {
+    writeRow: db.prepare(
+      `INSERT INTO session_messages
+         (session_id, id, seq, provider_ids, payload, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, id) DO UPDATE SET
+         provider_ids = excluded.provider_ids,
+         payload = excluded.payload,
+         source = excluded.source,
+         updated_at = excluded.updated_at`,
+    ),
+    maxSeq: db.prepare(
+      'SELECT COALESCE(MAX(seq), 0) AS max_seq FROM session_messages WHERE session_id = ?',
+    ),
+    getRow: db.prepare(
+      `SELECT session_id, id, seq, provider_ids, payload, source, created_at, updated_at
+       FROM session_messages
+       WHERE session_id = ? AND id = ?`,
+    ),
+    getRawPayload: db.prepare(
+      'SELECT payload FROM session_messages WHERE session_id = ? AND id = ?',
+    ),
+    findById: db.prepare(
+      `SELECT session_id, id, seq, provider_ids, payload, source, created_at, updated_at
+       FROM session_messages
+       WHERE id = ?
+       LIMIT 2`,
+    ),
+    listBySession: db.prepare(
+      `SELECT session_id, id, seq, provider_ids, payload, source, created_at, updated_at
+       FROM session_messages
+       WHERE session_id = ?
+       ORDER BY seq ASC`,
+    ),
+    deleteBySession: db.prepare(
+      'DELETE FROM session_messages WHERE session_id = ?',
+    ),
+    selectIdsBySession: db.prepare(
+      'SELECT id FROM session_messages WHERE session_id = ? ORDER BY seq ASC, id ASC',
+    ),
+    negateSeqBySession: db.prepare(
+      'UPDATE session_messages SET seq = -seq WHERE session_id = ?',
+    ),
+    updateSeqById: db.prepare(
+      'UPDATE session_messages SET seq = ? WHERE session_id = ? AND id = ?',
+    ),
+    listSizes: db.prepare(
+      `SELECT
+         sm.session_id AS sessionId,
+         SUM(length(sm.payload)) AS bytes,
+         MAX(sm.updated_at) AS updatedAt,
+         COALESCE(s.isStarred, 0) AS starred
+       FROM session_messages sm
+       LEFT JOIN sessions s ON s.session_id = sm.session_id
+       GROUP BY sm.session_id
+       ORDER BY updatedAt ASC`,
+    ),
+  };
+  return cachedStmts;
+}
 
 export type SessionMessageSource = 'live' | 'import';
 
@@ -105,27 +191,35 @@ function mergeDefined(
   return merged;
 }
 
+function extractAuditUserId(rawPayload: string | undefined): string | number | null {
+  if (!rawPayload) return null;
+  try {
+    const value = JSON.parse(rawPayload)._logUserId;
+    return typeof value === 'string' || typeof value === 'number' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function getExistingAuditUserId(sessionId: string, id: string): string | number | null {
+  const row = stmts().getRawPayload.get(sessionId, id) as { payload: string } | undefined;
+  return extractAuditUserId(row?.payload);
+}
+
 function writeRow(
   message: NormalizedMessage,
   providerIds: string[],
   source: SessionMessageSource,
   auditUserId?: string | number | null,
 ): void {
-  const db = getConnection();
   const timestamp = now();
-  const payload = auditUserId === undefined || auditUserId === null
+  const resolvedAuditUserId = auditUserId !== undefined
+    ? auditUserId
+    : getExistingAuditUserId(message.sessionId, message.id);
+  const payload = resolvedAuditUserId === undefined || resolvedAuditUserId === null
     ? message
-    : { ...message, _logUserId: auditUserId };
-  db.prepare(
-    `INSERT INTO session_messages
-       (session_id, id, seq, provider_ids, payload, source, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(session_id, id) DO UPDATE SET
-       provider_ids = excluded.provider_ids,
-       payload = excluded.payload,
-       source = excluded.source,
-       updated_at = excluded.updated_at`,
-  ).run(
+    : { ...message, _logUserId: resolvedAuditUserId };
+  stmts().writeRow.run(
     message.sessionId,
     message.id,
     message.seq,
@@ -138,20 +232,12 @@ function writeRow(
 }
 
 function nextAppendSeq(sessionId: string): number {
-  const db = getConnection();
-  const row = db.prepare(
-    'SELECT COALESCE(MAX(seq), 0) AS max_seq FROM session_messages WHERE session_id = ?',
-  ).get(sessionId) as { max_seq: number };
+  const row = stmts().maxSeq.get(sessionId) as { max_seq: number };
   return Math.floor(Number(row.max_seq) || 0) + 1;
 }
 
 function getRow(sessionId: string, id: string): SessionMessageRow | null {
-  const db = getConnection();
-  const row = db.prepare(
-    `SELECT session_id, id, seq, provider_ids, payload, source, created_at, updated_at
-     FROM session_messages
-     WHERE session_id = ? AND id = ?`,
-  ).get(sessionId, id) as SessionMessageDatabaseRow | undefined;
+  const row = stmts().getRow.get(sessionId, id) as SessionMessageDatabaseRow | undefined;
   return row ? rowToMessage(row) : null;
 }
 
@@ -212,22 +298,13 @@ export const sessionMessagesDb = {
 
     const db = getConnection();
     return db.transaction(() => {
-      const sameId = db.prepare(
-        `SELECT session_id, id, seq, provider_ids, payload, source, created_at, updated_at
-         FROM session_messages
-         WHERE id = ?
-         LIMIT 2`,
-      ).all(message.id) as SessionMessageDatabaseRow[];
+      const sameId = stmts().findById.all(message.id) as SessionMessageDatabaseRow[];
 
       const existing = sameId.map(rowToMessage).find((entry): entry is SessionMessageRow => Boolean(entry));
       if (existing) {
-        const auditUserId = (() => {
-          try {
-            return JSON.parse((sameId.find((row) => row.session_id === sessionId)?.payload) || '{}')._logUserId;
-          } catch {
-            return null;
-          }
-        })();
+        const auditUserId = extractAuditUserId(
+          sameId.find((row) => row.session_id === sessionId)?.payload,
+        );
         const sameUser = userId === null
           || auditUserId === null
           || String(auditUserId) === String(userId);
@@ -255,23 +332,19 @@ export const sessionMessagesDb = {
   foldToolResult(
     sessionId: string,
     toolResult: NormalizedMessage,
+    transformMerged?: (merged: NormalizedMessage) => NormalizedMessage,
   ): NormalizedMessage | null {
     if (!toolResult.toolId) return null;
     const db = getConnection();
     return db.transaction(() => {
-      const rows = db.prepare(
-        `SELECT session_id, id, seq, provider_ids, payload, source, created_at, updated_at
-         FROM session_messages
-         WHERE session_id = ?
-         ORDER BY seq ASC`,
-      ).all(sessionId) as SessionMessageDatabaseRow[];
+      const rows = stmts().listBySession.all(sessionId) as SessionMessageDatabaseRow[];
       for (const dbRow of rows) {
         const row = rowToMessage(dbRow);
         if (
           row?.payload.kind === 'tool_use'
           && row.payload.toolId === toolResult.toolId
         ) {
-          const merged: NormalizedMessage = {
+          const rawMerged: NormalizedMessage = {
             ...row.payload,
             toolResult: {
               content: toolResult.content,
@@ -283,6 +356,7 @@ export const sessionMessagesDb = {
               : {}),
             seq: row.seq,
           };
+          const merged = transformMerged ? { ...transformMerged(rawMerged), seq: row.seq } : rawMerged;
           writeRow(merged, row.providerIds, row.source);
           return merged;
         }
@@ -366,14 +440,28 @@ export const sessionMessagesDb = {
 
   getById: getRow,
 
-  list(sessionId: string, options: SessionMessageListOptions = {}): SessionMessagePage {
+  replaceSessionMessages(
+    sessionId: string,
+    messages: NormalizedMessage[],
+    source: SessionMessageSource = 'import',
+  ): void {
     const db = getConnection();
-    const rows = (db.prepare(
-      `SELECT session_id, id, seq, provider_ids, payload, source, created_at, updated_at
-       FROM session_messages
-       WHERE session_id = ?
-       ORDER BY seq ASC`,
-    ).all(sessionId) as SessionMessageDatabaseRow[])
+    db.transaction(() => {
+      stmts().deleteBySession.run(sessionId);
+      messages.forEach((message, index) => {
+        const stored: NormalizedMessage = {
+          ...message,
+          id: message.id,
+          sessionId,
+          seq: index + 1,
+        };
+        writeRow(stored, stored.providerIds ?? [], source, null);
+      });
+    })();
+  },
+
+  list(sessionId: string, options: SessionMessageListOptions = {}): SessionMessagePage {
+    const rows = (stmts().listBySession.all(sessionId) as SessionMessageDatabaseRow[])
       .map(rowToMessage)
       .filter((row): row is SessionMessageRow => Boolean(row));
 
@@ -412,9 +500,7 @@ export const sessionMessagesDb = {
   },
 
   deleteBySession(sessionId: string): number {
-    return getConnection().prepare(
-      'DELETE FROM session_messages WHERE session_id = ?',
-    ).run(sessionId).changes;
+    return stmts().deleteBySession.run(sessionId).changes;
   },
 
   deleteBySessions(sessionIds: string[]): number {
@@ -428,17 +514,11 @@ export const sessionMessagesDb = {
   renumber(sessionId: string): void {
     const db = getConnection();
     db.transaction(() => {
-      const rows = db.prepare(
-        'SELECT id FROM session_messages WHERE session_id = ? ORDER BY seq ASC, id ASC',
-      ).all(sessionId) as Array<{ id: string }>;
+      const s = stmts();
+      const rows = s.selectIdsBySession.all(sessionId) as Array<{ id: string }>;
       if (rows.length === 0) return;
-      db.prepare(
-        'UPDATE session_messages SET seq = -seq WHERE session_id = ?',
-      ).run(sessionId);
-      const update = db.prepare(
-        'UPDATE session_messages SET seq = ? WHERE session_id = ? AND id = ?',
-      );
-      rows.forEach((row, index) => update.run(index + 1, sessionId, row.id));
+      s.negateSeqBySession.run(sessionId);
+      rows.forEach((row, index) => s.updateSeqById.run(index + 1, sessionId, row.id));
     })();
   },
 
@@ -448,17 +528,7 @@ export const sessionMessagesDb = {
     updatedAt: number;
     starred: boolean;
   }> {
-    const rows = getConnection().prepare(
-      `SELECT
-         sm.session_id AS sessionId,
-         SUM(length(sm.payload)) AS bytes,
-         MAX(sm.updated_at) AS updatedAt,
-         COALESCE(s.isStarred, 0) AS starred
-       FROM session_messages sm
-       LEFT JOIN sessions s ON s.session_id = sm.session_id
-       GROUP BY sm.session_id
-       ORDER BY updatedAt ASC`,
-    ).all() as Array<{
+    const rows = stmts().listSizes.all() as Array<{
       sessionId: string;
       bytes: number;
       updatedAt: number;

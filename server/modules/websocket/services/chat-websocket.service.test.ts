@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
-import { closeConnection, initializeDatabase } from '@/modules/database/index.js';
+import { closeConnection, initializeDatabase, sessionMessagesDb } from '@/modules/database/index.js';
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
+import { isSessionLogActive } from '@/modules/websocket/services/logging-writer.service.js';
 import type { IProviderRuntime } from '@/shared/interfaces.js';
 import type { LLMProvider } from '@/shared/types.js';
 
@@ -174,3 +175,45 @@ test('get-pending-permissions 不帶 sessionId 時跨 provider 匯總，帶 sess
   assert.equal(ws.sent[1].sessionId, 's1');
   assert.deepEqual(calls, [['claude', 7, undefined], ['codex', 7, undefined], ['claude', 7, 's1'], ['codex', 7, 's1']]);
 });
+
+test('abort-session、check-session-status 與 recordUserMessage 衝突不會洩漏 activeWriters', async () => {
+  // 1. abort-session with emitsTerminal: true when no active writer exists
+  const { send: sendAbort } = connect({
+    codex: fakeRuntime({ abort: async () => ({ ok: true, emitsTerminal: true }) }),
+  });
+  await sendAbort({ type: 'abort-session', provider: 'codex', sessionId: 'leak-abort-1' });
+  assert.equal(isSessionLogActive('leak-abort-1'), false);
+
+  // 2. check-session-status when reconnect returns true but no active writer was registered from chat-command
+  const { send: sendStatus } = connect({
+    cursor: fakeRuntime({ reconnect: () => true }),
+  });
+  await sendStatus({ type: 'check-session-status', provider: 'cursor', sessionId: 'leak-status-1' });
+  assert.equal(isSessionLogActive('leak-status-1'), false);
+
+  // 3. chat-command where clientId conflicts with another user's message
+  sessionMessagesDb.insertUserIfAbsent(
+    'leak-conflict-1',
+    {
+      id: `user:${CLIENT_ID_1}`,
+      sessionId: 'leak-conflict-1',
+      timestamp: new Date().toISOString(),
+      provider: 'codex',
+      kind: 'text',
+      role: 'user',
+      content: 'other user msg',
+    },
+    999,
+  );
+  const { ws: conflictWs, send: sendConflict } = connect({ codex: fakeRuntime() });
+  await sendConflict({
+    type: 'chat-command',
+    provider: 'codex',
+    command: 'hi',
+    clientId: CLIENT_ID_1,
+    options: { sessionId: 'leak-conflict-1' },
+  });
+  assert.equal(conflictWs.sent.at(-1)?.type, 'error');
+  assert.equal(isSessionLogActive('leak-conflict-1'), false);
+});
+

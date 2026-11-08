@@ -71,6 +71,6 @@
 
 ## 6. 收尾
 
-- [ ] 6.1 驗收穩定後預設開啟旗標，觀察一段時間後移除旗標與舊合併程式碼；同時移除讀取 API 的 `offset` 參數（**BREAKING**，design D12）
+- [ ] 6.1 預設開啟旗標（已完成，支援 `SESSION_MESSAGE_LOG_ENABLED=0` 回滾），觀察一段時間後移除旗標與舊合併程式碼；同時移除讀取 API 的 `offset` 參數（**BREAKING**，design D12）
 - [x] 6.2 更新 `server/modules/MODULES.md`、`src/SRC.md` 與 `server/modules/providers/README.md`，說明日誌為訊息唯一來源、provider 歷史只用於匯入與補齊
 - [x] 6.3 執行 `npm run typecheck`、`npm run lint`、`npm test`、`npm run build` 全部通過

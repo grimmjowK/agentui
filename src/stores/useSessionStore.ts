@@ -11,6 +11,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { authenticatedFetch } from '../utils/api';
 import type { LLMProvider } from '../types/app';
+import {
+  applyLogMessage as applySharedLogMessage,
+  buildLogMerged as buildSharedLogMerged,
+  clearLogStreaming as clearSharedLogStreaming,
+  compareBySeq,
+  replaceWithFetched as replaceSharedWithFetched,
+  upsertLogMessage,
+} from '../../shared/sessionMessageLogMerge';
 
 // ─── NormalizedMessage (mirrors server/adapters/types.js) ────────────────────
 
@@ -392,107 +400,27 @@ const STALE_THRESHOLD_MS = 30_000;
 
 const MAX_REALTIME_MESSAGES = 500;
 
-function compareBySeq(left: NormalizedMessage, right: NormalizedMessage): number {
-  const leftSeq = typeof left.seq === 'number' ? left.seq : Number.POSITIVE_INFINITY;
-  const rightSeq = typeof right.seq === 'number' ? right.seq : Number.POSITIVE_INFINITY;
-  if (leftSeq !== rightSeq) return leftSeq - rightSeq;
-  return left.id.localeCompare(right.id);
-}
-
-function upsertMessage(
-  messages: NormalizedMessage[],
-  incoming: NormalizedMessage,
-): NormalizedMessage[] {
-  const next = [...messages];
-  const index = next.findIndex((message) => message.id === incoming.id);
-  const previous = index >= 0 ? next[index] : undefined;
-  const merged = previous ? { ...previous, ...incoming } : incoming;
-  if (previous?.images?.length && incoming.role === 'user' && incoming.kind === 'text') {
-    merged.images = incoming.images?.length ? incoming.images : previous.images;
-  }
-  if (index >= 0) next[index] = merged;
-  else next.push(merged);
-  return next.sort(compareBySeq);
+function upsertMessage(messages: NormalizedMessage[], incoming: NormalizedMessage): NormalizedMessage[] {
+  return upsertLogMessage<NormalizedMessage>(messages, incoming);
 }
 
 function buildLogMerged(slot: SessionSlot): NormalizedMessage[] {
-  const persistent = [...slot.serverMessages].sort(compareBySeq);
-  const transient = slot.realtimeMessages.filter((message) => typeof message.seq !== 'number');
-  const persistentIds = new Set(persistent.map((message) => message.id));
-  return [
-    ...persistent,
-    ...transient.filter((message) => !persistentIds.has(message.id)),
-  ];
+  return buildSharedLogMerged<NormalizedMessage>(slot);
 }
 
-/**
- * Applies one realtime durable row to a session slot. Durable rows are upserted
- * into the single sequence-ordered collection; optimistic/stream rows remain at
- * the tail until the server assigns them a sequence.
- */
 export function applyLogMessage(slot: SessionSlot, message: NormalizedMessage): SessionSlot {
-  if (typeof message.seq !== 'number') {
-    const nextRealtime = upsertMessage(slot.realtimeMessages, message);
-    slot.realtimeMessages = nextRealtime.length > MAX_REALTIME_MESSAGES
-      ? nextRealtime.slice(-MAX_REALTIME_MESSAGES)
-      : nextRealtime;
-    slot.merged = buildLogMerged(slot);
-    return slot;
-  }
-
-  const previous = [...slot.serverMessages, ...slot.realtimeMessages]
-    .find((entry) => entry.id === message.id);
-  const incomingHasImageData = message.images?.some((image) => Boolean(image.data));
-  const withLocalImages = previous?.images?.length
-    && message.role === 'user'
-    && message.kind === 'text'
-    && !incomingHasImageData
-    ? { ...message, images: previous.images }
-    : message;
-  slot.serverMessages = upsertMessage(slot.serverMessages, withLocalImages);
-  slot.realtimeMessages = slot.realtimeMessages.filter((entry) => (
-    entry.id !== message.id
-    && !(message.kind === 'text' && entry.id === `__streaming_${message.sessionId}`)
-  ));
-  slot.merged = buildLogMerged(slot);
-  return slot;
+  return applySharedLogMessage<NormalizedMessage, SessionSlot>(slot, message);
 }
 
-/**
- * Replaces all durable rows from a fetch while retaining optimistic messages
- * and the current streaming placeholder at the tail.
- */
+export function clearLogStreaming(slot: SessionSlot, sessionId: string): SessionSlot {
+  return clearSharedLogStreaming<NormalizedMessage, SessionSlot>(slot, sessionId);
+}
+
 export function replaceWithFetched(
   slot: SessionSlot,
   messages: NormalizedMessage[],
 ): SessionSlot {
-  const incoming = messages
-    .filter((message) => typeof message.seq === 'number')
-    .sort(compareBySeq);
-  const incomingIds = new Set(incoming.map((message) => message.id));
-  const previous = new Map(
-    [...slot.serverMessages, ...slot.realtimeMessages].map((message) => [message.id, message]),
-  );
-  slot.serverMessages = incoming.map((message) => {
-    const local = previous.get(message.id);
-    const incomingHasImageData = message.images?.some((image) => Boolean(image.data));
-    if (local?.images?.length && message.role === 'user' && !incomingHasImageData) {
-      return { ...message, images: local.images };
-    }
-    return message;
-  });
-  slot.realtimeMessages = slot.realtimeMessages.filter((message) => (
-    !incomingIds.has(message.id)
-    && (
-      typeof message.seq !== 'number'
-      && (
-        message.kind === 'stream_delta'
-        || (message.kind === 'text' && message.role === 'user')
-      )
-    )
-  ));
-  slot.merged = buildLogMerged(slot);
-  return slot;
+  return replaceSharedWithFetched<NormalizedMessage, SessionSlot>(slot, messages);
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
@@ -819,6 +747,11 @@ export function useSessionStore() {
     const slot = getSlot(resolvedSessionId);
     try {
       const params = new URLSearchParams();
+      if (logModeRef.current && slot.hasMore) {
+        const refreshLimit = Math.max(slot.serverMessages.length, 20);
+        params.append('limit', String(refreshLimit));
+        params.append('offset', '0');
+      }
 
       const qs = params.toString();
       const url = `/api/providers/sessions/${encodeURIComponent(resolvedSessionId)}/messages${qs ? `?${qs}` : ''}`;
@@ -942,10 +875,21 @@ export function useSessionStore() {
    * 有 messageId（後端 stream_end 帶來、與歷史同一則訊息的 id）就沿用，
    * 隨後同 id 的 text 會覆蓋它，歷史拉取時也能按 id 去重；沒有才產生本地 id。
    */
-  const finalizeStreaming = useCallback((sessionId: string, messageId?: string) => {
+  const finalizeStreaming = useCallback((
+    sessionId: string,
+    messageId?: string,
+    options?: { clearIfUnmatched?: boolean },
+  ) => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const slot = storeRef.current.get(resolvedSessionId);
     if (!slot) return;
+    if (logModeRef.current && options?.clearIfUnmatched) {
+      clearLogStreaming(slot, resolvedSessionId);
+      slot._lastServerRef = slot.serverMessages;
+      slot._lastRealtimeRef = slot.realtimeMessages;
+      notify(resolvedSessionId);
+      return;
+    }
     const streamId = `__streaming_${resolvedSessionId}`;
     const idx = slot.realtimeMessages.findIndex(m => m.id === streamId);
     if (idx >= 0) {

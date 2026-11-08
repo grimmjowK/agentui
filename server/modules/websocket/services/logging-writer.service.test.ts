@@ -224,3 +224,115 @@ test('oversized messages are truncated below the storage limit', async () => {
     writer.finish();
   });
 });
+
+test('new session failure before session_created forwards error and complete without persisting', async () => {
+  await withDatabase(() => {
+    const inner = new FakeWriter();
+    // Simulate a WebSocketWriter that previously served another session on the same connection
+    inner.setSessionId('previous-session-on-same-ws');
+
+    const writer = new LoggingWriter(inner, { provider: 'codex' });
+    writer.recordUserMessage({
+      clientId: '11111111-1111-4111-8111-111111111111',
+      content: 'hello',
+      provider: 'codex',
+    });
+    writer.send({
+      kind: 'error',
+      provider: 'codex',
+      sessionId: 'temp-antigravity-id',
+      content: 'startup failed',
+    });
+    writer.send({
+      kind: 'complete',
+      provider: 'codex',
+      exitCode: 1,
+      success: false,
+    });
+    writer.finish();
+
+    // Error and complete must be forwarded to inner writer even without session_created
+    assert.deepEqual(inner.sent.map((m) => m.kind), ['text', 'error', 'complete']);
+    assert.equal(inner.sent[1].content, 'startup failed');
+    // Neither the previous session nor the temporary id should have received any DB rows
+    assert.equal(sessionMessagesDb.list('previous-session-on-same-ws').rows.length, 0);
+    assert.equal(sessionMessagesDb.list('temp-antigravity-id').rows.length, 0);
+  });
+});
+
+test('new session on reused WebSocketWriter queues messages until session_created even if setSessionId is called first', async () => {
+  await withDatabase(() => {
+    const inner = new FakeWriter();
+    inner.setSessionId('previous-session-on-same-ws');
+
+    const writer = new LoggingWriter(inner, { provider: 'claude' });
+    writer.recordUserMessage({
+      clientId: '22222222-2222-4222-8222-222222222222',
+      content: 'first turn',
+      provider: 'claude',
+    });
+    // Runtime sets sessionId before sending session_created
+    writer.setSessionId('new-claude-session');
+    writer.send({
+      id: 'warn-1',
+      kind: 'task_notification',
+      provider: 'claude',
+      sessionId: 'new-claude-session',
+      status: 'warning',
+      summary: 'before session_created',
+    });
+    // Nothing should be sent before session_created
+    assert.equal(inner.sent.length, 0);
+
+    writer.send({
+      kind: 'session_created',
+      provider: 'claude',
+      sessionId: 'new-claude-session',
+      newSessionId: 'new-claude-session',
+    });
+
+    assert.deepEqual(inner.sent.map((m) => m.kind), ['session_created', 'text', 'task_notification']);
+    assert.deepEqual(
+      sessionMessagesDb.list('new-claude-session').messages.map((m) => [m.kind, m.seq]),
+      [['text', 1], ['task_notification', 2]],
+    );
+    writer.finish();
+  });
+});
+
+test('foldToolResult truncates merged payload and multi-field large payload stays within 512KB', async () => {
+  await withDatabase(() => {
+    const inner = new FakeWriter();
+    const writer = new LoggingWriter(inner, {
+      initialSessionId: 'session-large-tool',
+      provider: 'claude',
+    });
+    writer.send({
+      id: 'call_huge',
+      kind: 'tool_use',
+      provider: 'claude',
+      sessionId: 'session-large-tool',
+      toolId: 'call_huge',
+      toolName: 'Read',
+      toolInput: { data: 'a'.repeat(250 * 1024) },
+      subagentTools: [{ data: 'b'.repeat(250 * 1024) }],
+    });
+    writer.send({
+      id: 'call_huge:result',
+      kind: 'tool_result',
+      provider: 'claude',
+      sessionId: 'session-large-tool',
+      toolId: 'call_huge',
+      content: 'c'.repeat(400 * 1024),
+      toolUseResult: { raw: 'd'.repeat(250 * 1024) },
+      isError: false,
+    });
+
+    const stored = sessionMessagesDb.getById('session-large-tool', 'call_huge')?.payload;
+    assert.equal(stored?.truncated, true);
+    const bytes = Buffer.byteLength(JSON.stringify(stored), 'utf8');
+    assert.ok(bytes <= 512 * 1024, `expected <= 524288 bytes, got ${bytes}`);
+    writer.finish();
+  });
+});
+

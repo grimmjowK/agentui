@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   applyLogMessage,
+  clearLogStreaming,
   replaceWithFetched,
   type NormalizedMessage,
   type SessionSlot,
@@ -98,3 +99,72 @@ test('replaceWithFetched replaces durable rows and keeps the streaming tail', ()
     'user:22222222-2222-4222-8222-222222222222',
   ]);
 });
+
+test('user steer message with seq does not clear assistant streaming placeholder', () => {
+  const slot = emptySlot();
+  slot.realtimeMessages = [
+    message({ id: '__streaming_session-1', sessionId: 'session-1', kind: 'stream_delta', content: 'assistant typing...' }),
+  ];
+
+  applyLogMessage(slot, message({
+    id: 'user:33333333-3333-4333-8333-333333333333',
+    sessionId: 'session-1',
+    seq: 5,
+    kind: 'text',
+    role: 'user',
+    content: 'steer instruction',
+  }));
+
+  assert.equal(slot.realtimeMessages.some((entry) => entry.id === '__streaming_session-1'), true);
+  assert.deepEqual(slot.merged.map((entry) => entry.id), [
+    'user:33333333-3333-4333-8333-333333333333',
+    '__streaming_session-1',
+  ]);
+});
+
+test('late optimistic user message without seq merges local image data into already-acked serverMessage', () => {
+  const slot = emptySlot();
+  const userId = 'user:44444444-4444-4444-8444-444444444444';
+  // Server ack arrives first (e.g. new session flush immediately after session_created) without base64 data
+  applyLogMessage(slot, message({
+    id: userId,
+    seq: 1,
+    kind: 'text',
+    role: 'user',
+    content: '',
+    images: [{ name: 'photo.png', mimeType: 'image/png', byteLength: 3 } as never],
+  }));
+
+  // React effect flushes pendingUserMessage afterwards (no seq, has base64 data)
+  applyLogMessage(slot, message({
+    id: userId,
+    kind: 'text',
+    role: 'user',
+    content: '',
+    images: [{ name: 'photo.png', data: 'data:image/png;base64,xyz' }],
+  }));
+
+  assert.equal(slot.merged.length, 1);
+  assert.equal(slot.merged[0].id, userId);
+  assert.equal(slot.merged[0].seq, 1);
+  assert.equal(slot.merged[0].images?.[0]?.data, 'data:image/png;base64,xyz');
+});
+
+test('clearLogStreaming removes residual streaming placeholder on complete or error', () => {
+  const slot = emptySlot();
+  slot.realtimeMessages = [
+    message({ id: '__streaming_session-1', sessionId: 'session-1', kind: 'stream_delta', content: 'aborted stream' }),
+    message({ id: 'user:55555555-5555-4555-8555-555555555555', sessionId: 'session-1', kind: 'text', role: 'user', content: 'next' }),
+  ];
+  slot.merged = [...slot.realtimeMessages];
+
+  clearLogStreaming(slot, 'session-1');
+
+  assert.deepEqual(slot.realtimeMessages.map((entry) => entry.id), [
+    'user:55555555-5555-4555-8555-555555555555',
+  ]);
+  assert.deepEqual(slot.merged.map((entry) => entry.id), [
+    'user:55555555-5555-4555-8555-555555555555',
+  ]);
+});
+

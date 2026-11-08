@@ -968,13 +968,13 @@ router.post('/', validateExternalApiKey, async (req, res) => {
       userId: req.user.id,
       provider,
     });
-    loggingWriter.recordUserMessage({
-      clientId: crypto.randomUUID(),
-      content: message.trim(),
-      provider,
-      sessionId: sessionId || null,
-    });
     try {
+      loggingWriter.recordUserMessage({
+        clientId: crypto.randomUUID(),
+        content: message.trim(),
+        provider,
+        sessionId: sessionId || null,
+      });
       await providerRegistry.resolveProvider(provider).runtime.start(message.trim(), {
         projectPath: finalProjectPath,
         cwd: finalProjectPath,

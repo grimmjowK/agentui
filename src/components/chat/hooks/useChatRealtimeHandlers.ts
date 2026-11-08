@@ -234,7 +234,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'complete': {
-        if (sid) streams.finish(sid);
+        if (sid) streams.finish(sid, undefined, { clearIfUnmatched: true });
 
         if (isCurrentSession) {
           setIsLoading(false);
@@ -307,7 +307,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'error': {
-        if (sid) streams.finish(sid);
+        if (sid) streams.finish(sid, undefined, { clearIfUnmatched: true });
         if (isCurrentSession) {
           setIsLoading(false);
           setCanAbortSession(false);

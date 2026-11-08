@@ -158,18 +158,18 @@ export function handleChatConnection(
           userId: writer.userId,
           provider: id,
         });
-        loggingWriter.recordUserMessage({
-          clientId,
-          content: data.command ?? '',
-          images: data.options?.images,
-          provider: id,
-          sessionId: requestedSessionId,
-        });
-        // Codex hands the session over from the terminal itself (codex-session-handoff).
-        if (id !== 'codex') {
-          warnOnConcurrentShellSession(requestedSessionId, id, loggingWriter);
-        }
         try {
+          loggingWriter.recordUserMessage({
+            clientId,
+            content: data.command ?? '',
+            images: data.options?.images,
+            provider: id,
+            sessionId: requestedSessionId,
+          });
+          // Codex hands the session over from the terminal itself (codex-session-handoff).
+          if (id !== 'codex') {
+            warnOnConcurrentShellSession(requestedSessionId, id, loggingWriter);
+          }
           await runtime.start(data.command ?? '', data.options ?? {}, loggingWriter);
         } finally {
           loggingWriter.finish();
@@ -180,26 +180,31 @@ export function handleChatConnection(
       if (messageType === 'abort-session') {
         const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
-        const loggingWriter = getLoggingWriterForSession(sessionId)
+        const registered = getLoggingWriterForSession(sessionId);
+        const loggingWriter = registered
           ?? new LoggingWriter(writer, {
             initialSessionId: sessionId,
             userId: writer.userId,
             provider: id,
           });
-        const { ok, emitsTerminal } = await runtime.abort(sessionId, loggingWriter);
-        // 每次中斷只有一個終止事件：emitsTerminal 的 runtime（Codex、Antigravity）自己送；
-        // 其他 runtime（Claude、Cursor）由這裡立即送出，底層在中斷後會略過自己的 complete/error。
-        if (ok && emitsTerminal) return;
-        sendToClient(loggingWriter,
-          createNormalizedMessage({
-            kind: 'complete',
-            exitCode: ok ? 0 : 1,
-            aborted: true,
-            success: ok,
-            sessionId,
-            provider: id,
-          })
-        );
+        try {
+          const { ok, emitsTerminal } = await runtime.abort(sessionId, loggingWriter);
+          // 每次中斷只有一個終止事件：emitsTerminal 的 runtime（Codex、Antigravity）自己送；
+          // 其他 runtime（Claude、Cursor）由這裡立即送出，底層在中斷後會略過自己的 complete/error。
+          if (ok && emitsTerminal) return;
+          sendToClient(loggingWriter,
+            createNormalizedMessage({
+              kind: 'complete',
+              exitCode: ok ? 0 : 1,
+              aborted: true,
+              success: ok,
+              sessionId,
+              provider: id,
+            })
+          );
+        } finally {
+          if (!registered) loggingWriter.finish();
+        }
         return;
       }
 
@@ -222,13 +227,16 @@ export function handleChatConnection(
               userId: writer.userId,
               provider: id,
             });
-          loggingWriter.recordUserMessage({
-            clientId,
-            content: text,
-            provider: id,
-            sessionId,
-          });
-          if (!registeredWriter) loggingWriter.finish();
+          try {
+            loggingWriter.recordUserMessage({
+              clientId,
+              content: text,
+              provider: id,
+              sessionId,
+            });
+          } finally {
+            if (!registeredWriter) loggingWriter.finish();
+          }
         }
         // clientId 原樣回傳，前端據此對應是哪一次送出
         sendToClient(writer, {
@@ -269,19 +277,25 @@ export function handleChatConnection(
         const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
         const registered = getLoggingWriterForSession(sessionId);
-        const loggingWriter = registered ?? new LoggingWriter(writer, {
-          initialSessionId: sessionId,
-          userId: writer.userId,
-          provider: id,
-        });
-        if (registered) loggingWriter.updateWebSocket(writer.ws);
-        loggingWriter.replayAfterSeq(
-          typeof data.afterSeq === 'number' && Number.isFinite(data.afterSeq)
-            ? data.afterSeq
-            : null,
-        );
-        const isProcessing = runtime.reconnect(sessionId, loggingWriter);
-        if (!isProcessing) loggingWriter.finish();
+        const afterSeq = typeof data.afterSeq === 'number' && Number.isFinite(data.afterSeq)
+          ? data.afterSeq
+          : null;
+        if (registered) {
+          registered.updateWebSocket(writer.ws);
+          registered.replayAfterSeq(afterSeq);
+        } else if (sessionId) {
+          const tempWriter = new LoggingWriter(writer, {
+            initialSessionId: sessionId,
+            userId: writer.userId,
+            provider: id,
+          });
+          try {
+            tempWriter.replayAfterSeq(afterSeq);
+          } finally {
+            tempWriter.finish();
+          }
+        }
+        const isProcessing = runtime.reconnect(sessionId, registered ?? writer);
         writer.send({
           type: 'session-status',
           sessionId,

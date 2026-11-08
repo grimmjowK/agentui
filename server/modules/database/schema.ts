@@ -139,6 +139,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_messages_session_seq
     ON session_messages(session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_session_messages_session_updated
     ON session_messages(session_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_session_messages_id
+    ON session_messages(id);
 `;
 
 export const INIT_SCHEMA_SQL = `

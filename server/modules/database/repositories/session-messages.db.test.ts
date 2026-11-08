@@ -161,3 +161,49 @@ test('insertBetween renumbers when floating-point space is exhausted', async () 
     );
   });
 });
+
+test('insertUserIfAbsent remains idempotent after updateProviderIds or when _logUserId was absent', async () => {
+  await withDatabase(() => {
+    const userId = 'user:44444444-4444-4444-8444-444444444444';
+    const inserted = sessionMessagesDb.insertUserIfAbsent(
+      'session-1',
+      message({ id: userId, role: 'user', content: 'first' }),
+      7,
+    );
+    assert.equal(inserted.status, 'inserted');
+
+    // Simulate reconciler pairing updating providerIds on the user row
+    sessionMessagesDb.updateProviderIds('session-1', userId, ['provider-u1']);
+
+    // Retry from the same user must return 'existing', not 'conflict'
+    const retryAfterPairing = sessionMessagesDb.insertUserIfAbsent(
+      'session-1',
+      message({ id: userId, role: 'user', content: 'first' }),
+      7,
+    );
+    assert.equal(retryAfterPairing.status, 'existing');
+
+    // Retry from a different user must still be rejected as 'conflict'
+    const conflictOtherUser = sessionMessagesDb.insertUserIfAbsent(
+      'session-1',
+      message({ id: userId, role: 'user', content: 'hijack' }),
+      99,
+    );
+    assert.equal(conflictOtherUser.status, 'conflict');
+
+    // Imported user message (no _logUserId) in same session should not conflict when userId is passed
+    const importedUserId = 'user:55555555-5555-4555-8555-555555555555';
+    sessionMessagesDb.append(
+      'session-1',
+      message({ id: importedUserId, role: 'user', content: 'imported' }),
+      'import',
+    );
+    const retryImported = sessionMessagesDb.insertUserIfAbsent(
+      'session-1',
+      message({ id: importedUserId, role: 'user', content: 'imported' }),
+      7,
+    );
+    assert.equal(retryImported.status, 'existing');
+  });
+});
+

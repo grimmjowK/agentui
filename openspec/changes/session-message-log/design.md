@@ -279,7 +279,7 @@ store 的狀態轉移抽成純函式（`applyLogMessage`、`replaceWithFetched`�
 - [寫入延遲加在送出路徑上] → better-sqlite3 同步寫入，單則微秒級；`stream_delta` 不寫入，高頻路徑不受影響。以 WAL 模式避免讀寫互鎖。
 - [既有會話第一次讀取時大量匯入] → 匯入在讀取時進行、與檔案 mtime 快取搭配；只在第一次付出成本。大型會話的首次讀取可能變慢，需量測。
 - [終端機與 UI 交替寫同一會話時中段插入過多，`seq` 精度耗盡] → REAL 中點插入在同一間隙約可分 50 次；超過時對該會話整體重新編號（離線、單一交易）。
-- [遷移期間兩套讀取路徑並存] → 以設定旗標切換（見 Migration Plan），驗收通過前預設維持舊路徑。
+- [遷移期間兩套讀取路徑並存] → 以設定旗標 `SESSION_MESSAGE_LOG_ENABLED` 控制（預設開啟，設為 `0`/`false`/`off` 可立即回退至舊路徑）。
 - [runtime 依 writer 標記決定送字串，繞過日誌] → `LoggingWriter` 固定宣告 `isWebSocketWriter`，收到字串時先解析；驗收以真實 runtime 驅動（D2）。
 - [客戶端以 `clientId` 覆寫既有訊息] → 驗證 UUID、伺服器加 `user:` 前綴、使用者訊息只 insert-if-absent（D6）。
 - [圖片縮圖重新整理後消失] → 前端在記憶體保留本地 `images`，重新整理後與現況相同；持久化另案（D6）。

@@ -302,3 +302,110 @@ test('interruption markers pair within their anchor segment and do not shift lat
     ]);
   });
 });
+
+test('imported session log detects /rewind divergence when a previously imported stable anchor disappears', async () => {
+  await withDatabase(() => {
+    // Initial full import of 2 turns
+    const initialHistory = [
+      message({ id: 'u1', role: 'user', content: 'turn 1' }),
+      message({ id: 'a1', providerIds: ['a1'], content: 'reply 1' }),
+      message({ id: 'u2', role: 'user', content: 'turn 2' }),
+      message({ id: 'a2', providerIds: ['a2'], content: 'reply 2' }),
+    ];
+    const imported = reconcileSessionMessageLog({
+      sessionId: 'session-rewind-import',
+      provider: 'claude',
+      history: initialHistory,
+      active: false,
+    });
+    assert.deepEqual(imported.map((entry) => entry.id), ['u1', 'a1', 'u2', 'a2']);
+
+    // Now user runs /rewind in CLI, truncating turn 2 from history
+    const rewoundHistory = [
+      message({ id: 'u1', role: 'user', content: 'turn 1' }),
+      message({ id: 'a1', providerIds: ['a1'], content: 'reply 1' }),
+    ];
+    const afterRewind = reconcileSessionMessageLog({
+      sessionId: 'session-rewind-import',
+      provider: 'claude',
+      history: rewoundHistory,
+      active: false,
+    });
+    assert.deepEqual(afterRewind.map((entry) => entry.id), ['u1', 'a1']);
+  });
+});
+
+test('Claude subagent live messages (parentToolUseId) do not falsely trigger divergence rebuild', async () => {
+  await withDatabase(() => {
+    append('session-subagent', message({
+      id: 'user:11111111-1111-4111-8111-111111111111',
+      role: 'user',
+      content: 'run subagent',
+    }), 'claude');
+    append('session-subagent', message({
+      id: 'task-tool-1',
+      providerIds: ['task-tool-1'],
+      kind: 'tool_use',
+      role: undefined,
+      toolId: 'task-tool-1',
+      toolName: 'Task',
+    }), 'claude');
+    // Live subagent tool_use emitted with parentToolUseId during streaming
+    append('session-subagent', message({
+      id: 'subagent-tool-1',
+      providerIds: ['subagent-tool-1'],
+      kind: 'tool_use',
+      role: undefined,
+      toolId: 'subagent-tool-1',
+      toolName: 'Bash',
+      parentToolUseId: 'task-tool-1',
+    }), 'claude');
+    // Live-only warning that must survive reconciliation if no real divergence happened
+    append('session-subagent', message({
+      id: 'warn-live-1',
+      kind: 'task_notification',
+      role: undefined,
+      status: 'warning',
+      summary: 'concurrent shell warning',
+    }), 'claude');
+    append('session-subagent', message({
+      id: 'assistant-final',
+      providerIds: ['assistant-final'],
+      content: 'all done',
+    }), 'claude');
+
+    // In Claude history JSONL, subagent tools are nested in subagentTools on the parent Task tool_use, not top-level
+    const history = [
+      message({ id: 'u-hist-1', role: 'user', content: 'run subagent', provider: 'claude' }),
+      message({
+        id: 'task-tool-1',
+        providerIds: ['task-tool-1'],
+        kind: 'tool_use',
+        role: undefined,
+        toolId: 'task-tool-1',
+        toolName: 'Task',
+        provider: 'claude',
+        subagentTools: [
+          {
+            id: 'subagent-tool-1',
+            toolId: 'subagent-tool-1',
+            toolName: 'Bash',
+          },
+        ],
+      }),
+      message({ id: 'assistant-final', providerIds: ['assistant-final'], content: 'all done', provider: 'claude' }),
+    ];
+
+    const result = reconcileSessionMessageLog({
+      sessionId: 'session-subagent',
+      provider: 'claude',
+      history,
+      active: false,
+    });
+
+    // Must NOT wipe the journal; warn-live-1 and user:clientId must be preserved!
+    assert.ok(result.some((entry) => entry.id === 'warn-live-1'), 'live warning must not be wiped');
+    assert.ok(result.some((entry) => entry.id === 'user:11111111-1111-4111-8111-111111111111'), 'user clientId must not be wiped');
+  });
+});
+

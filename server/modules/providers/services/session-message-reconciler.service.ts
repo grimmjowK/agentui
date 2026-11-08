@@ -19,6 +19,9 @@ function isStableAnchor(message: NormalizedMessage): boolean {
   if (message.isInterrupted || message.isCompactBoundary || isUserMessage(message)) {
     return false;
   }
+  if (typeof message.parentToolUseId === 'string' && message.parentToolUseId.length > 0) {
+    return false;
+  }
   return (message.kind === 'text' && message.role === 'assistant')
     || message.kind === 'tool_use'
     || message.kind === 'thinking';
@@ -26,6 +29,29 @@ function isStableAnchor(message: NormalizedMessage): boolean {
 
 function providerIds(message: NormalizedMessage): string[] {
   return [...new Set([message.id, ...(message.providerIds ?? [])])];
+}
+
+function rowStableIds(row: SessionMessageRow): string[] {
+  return [...new Set([row.id, ...(row.providerIds ?? []), ...providerIds(row.payload)])];
+}
+
+function collectHistoricalIds(history: NormalizedMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const message of history) {
+    for (const id of providerIds(message)) {
+      ids.add(id);
+    }
+    if (Array.isArray(message.subagentTools)) {
+      for (const sub of message.subagentTools) {
+        if (sub && typeof sub === 'object') {
+          const record = sub as Record<string, unknown>;
+          if (typeof record.id === 'string' && record.id) ids.add(record.id);
+          if (typeof record.toolId === 'string' && record.toolId) ids.add(record.toolId);
+        }
+      }
+    }
+  }
+  return ids;
 }
 
 function matches(row: SessionMessageRow, message: NormalizedMessage): boolean {
@@ -72,13 +98,15 @@ function overlayFullHistory(
 }
 
 function fullImport(sessionId: string, history: NormalizedMessage[]): void {
-  for (const message of history) {
-    sessionMessagesDb.append(sessionId, {
+  sessionMessagesDb.replaceSessionMessages(
+    sessionId,
+    history.map((message) => ({
       ...message,
       sessionId,
       providerIds: providerIds(message),
-    }, 'import');
-  }
+    })),
+    'import',
+  );
 }
 
 export function supportsMessageLogReconciliation(provider: LLMProvider): boolean {
@@ -88,15 +116,10 @@ export function supportsMessageLogReconciliation(provider: LLMProvider): boolean
 export function rebuildSessionMessageLog(
   sessionId: string,
   history: NormalizedMessage[],
-  provider: LLMProvider,
+  _provider: LLMProvider,
 ): NormalizedMessage[] {
   const fullHistory = uniqueHistory(history);
-  sessionMessagesDb.deleteBySession(sessionId);
-  if (supportsMessageLogReconciliation(provider)) {
-    fullImport(sessionId, fullHistory);
-  } else {
-    fullImport(sessionId, fullHistory);
-  }
+  fullImport(sessionId, fullHistory);
   return sessionMessagesDb.list(sessionId).messages;
 }
 
@@ -120,20 +143,23 @@ export function reconcileSessionMessageLog(input: {
     return overlayFullHistory(journal, history);
   }
 
-  const historicalIds = new Set(history.flatMap(providerIds));
+  const historicalIds = collectHistoricalIds(history);
   const diverged = !active
     && history.length > 0
-    && journal.some((row) => (
-      row.source === 'live'
-      && isStableAnchor(row.payload)
-      && providerIds(row.payload).some((id) => !historicalIds.has(id))
-    ));
+    && journal.some((row) => {
+      if (isStableAnchor(row.payload)) {
+        return rowStableIds(row).some((id) => !historicalIds.has(id));
+      }
+      if (row.providerIds.length > 0) {
+        return row.providerIds.some((id) => !historicalIds.has(id));
+      }
+      return false;
+    });
   if (diverged) {
     console.warn('[session-message-log] provider history diverged; rebuilding', {
       sessionId,
       provider,
     });
-    sessionMessagesDb.deleteBySession(sessionId);
     fullImport(sessionId, history);
     return sessionMessagesDb.list(sessionId).messages;
   }

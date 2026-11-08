@@ -79,36 +79,59 @@ export function truncateMessagePayload(input: NormalizedMessage): NormalizedMess
     return input;
   }
 
-  const message: NormalizedMessage = {
+  let message: NormalizedMessage = {
     ...input,
     truncated: true,
   };
-  const perFieldLimit = Math.floor(MAX_PAYLOAD_BYTES * 0.35);
-  if (typeof message.content === 'string') {
-    message.content = truncateString(message.content, perFieldLimit);
-  }
-  if (typeof message.displayText === 'string') {
-    message.displayText = truncateString(message.displayText, perFieldLimit / 2);
-  }
-  if (typeof message.text === 'string') {
-    message.text = truncateString(message.text, perFieldLimit / 2);
-  }
-  if (message.toolResult && typeof message.toolResult.content === 'string') {
-    message.toolResult = {
-      ...message.toolResult,
-      content: truncateString(message.toolResult.content, perFieldLimit),
+
+  for (const factor of [0.35, 0.15, 0.05]) {
+    const perFieldLimit = Math.floor(MAX_PAYLOAD_BYTES * factor);
+    const candidate: NormalizedMessage = {
+      ...message,
+      truncated: true,
     };
-  }
-  for (const key of ['toolInput', 'input', 'context', 'toolUseResult', 'subagentTools']) {
-    if (message[key] === undefined) continue;
-    const serialized = typeof message[key] === 'string'
-      ? message[key] as string
-      : JSON.stringify(message[key]);
-    if (Buffer.byteLength(serialized, 'utf8') > perFieldLimit) {
-      (message as Record<string, unknown>)[key] = {
-        truncated: true,
-        preview: truncateString(serialized, perFieldLimit),
-      };
+    if (typeof candidate.content === 'string') {
+      candidate.content = truncateString(candidate.content, perFieldLimit);
+    }
+    if (typeof candidate.displayText === 'string') {
+      candidate.displayText = truncateString(candidate.displayText, Math.floor(perFieldLimit / 2));
+    }
+    if (typeof candidate.text === 'string') {
+      candidate.text = truncateString(candidate.text, Math.floor(perFieldLimit / 2));
+    }
+    if (candidate.toolResult) {
+      const nextToolResult: AnyRecord = { ...candidate.toolResult };
+      if (typeof nextToolResult.content === 'string') {
+        nextToolResult.content = truncateString(nextToolResult.content, perFieldLimit);
+      }
+      if (nextToolResult.toolUseResult !== undefined) {
+        const serializedResult = typeof nextToolResult.toolUseResult === 'string'
+          ? nextToolResult.toolUseResult
+          : JSON.stringify(nextToolResult.toolUseResult);
+        if (Buffer.byteLength(serializedResult, 'utf8') > perFieldLimit) {
+          nextToolResult.toolUseResult = {
+            truncated: true,
+            preview: truncateString(serializedResult, perFieldLimit),
+          };
+        }
+      }
+      candidate.toolResult = nextToolResult as NormalizedMessage['toolResult'];
+    }
+    for (const key of ['toolInput', 'input', 'context', 'toolUseResult', 'subagentTools']) {
+      if (candidate[key] === undefined) continue;
+      const serialized = typeof candidate[key] === 'string'
+        ? candidate[key] as string
+        : JSON.stringify(candidate[key]);
+      if (Buffer.byteLength(serialized, 'utf8') > perFieldLimit) {
+        (candidate as Record<string, unknown>)[key] = {
+          truncated: true,
+          preview: truncateString(serialized, perFieldLimit),
+        };
+      }
+    }
+    message = candidate;
+    if (Buffer.byteLength(JSON.stringify(message), 'utf8') <= MAX_PAYLOAD_BYTES) {
+      return message;
     }
   }
   return message;
@@ -140,6 +163,7 @@ export class LoggingWriter {
   private readonly pendingIds = new Set<string>();
   private inner: LoggingWriterInner;
   private currentSessionId: string | null;
+  private readonly hadInitialSessionId: boolean;
   private writerUserId: string | number | null;
   private provider: LLMProvider;
   private sessionCreatedForwarded = false;
@@ -149,6 +173,7 @@ export class LoggingWriter {
   constructor(inner: LoggingWriterInner, options: LoggingWriterOptions = {}) {
     this.inner = inner;
     this.currentSessionId = options.initialSessionId || null;
+    this.hadInitialSessionId = Boolean(this.currentSessionId);
     this.writerUserId = options.userId ?? inner.userId ?? null;
     this.provider = options.provider ?? 'claude';
     if (this.currentSessionId) {
@@ -232,7 +257,14 @@ export class LoggingWriter {
     }
 
     if (message.kind === 'complete') {
-      if (this.currentSessionId) this.flushPending();
+      if (this.currentSessionId && (this.hadInitialSessionId || this.sessionCreatedForwarded)) {
+        this.flushPending();
+      } else if (this.pending.length > 0) {
+        for (const pendingMsg of this.pending.splice(0)) {
+          this.inner.send(pendingMsg);
+        }
+        this.pendingIds.clear();
+      }
       if (message.aborted === true) this.sendInterruptedMarker(message);
       if (message.aborted === true || message.success === true) {
         this.streamingText = '';
@@ -248,7 +280,7 @@ export class LoggingWriter {
     }
 
     const normalized = this.prepareMessage(message);
-    if (!this.currentSessionId || !this.sessionCreatedForwarded && !this.inner.getSessionId?.()) {
+    if (!this.currentSessionId || (!this.hadInitialSessionId && !this.sessionCreatedForwarded)) {
       this.queuePending(normalized);
       return;
     }
@@ -315,12 +347,15 @@ export class LoggingWriter {
   }
 
   finish(): void {
-    if (this.currentSessionId) {
+    if (this.currentSessionId && (this.hadInitialSessionId || this.sessionCreatedForwarded)) {
       if (this.pending.length > 0) this.flushPending();
       if (activeWriters.get(this.currentSessionId) === this) {
         activeWriters.delete(this.currentSessionId);
       }
     } else {
+      if (this.currentSessionId && activeWriters.get(this.currentSessionId) === this) {
+        activeWriters.delete(this.currentSessionId);
+      }
       for (const message of this.pending.splice(0)) {
         this.inner.send(message);
       }
@@ -382,7 +417,11 @@ export class LoggingWriter {
     };
 
     if (normalized.kind === 'tool_result' && normalized.toolId) {
-      const folded = sessionMessagesDb.foldToolResult(this.currentSessionId, normalized);
+      const folded = sessionMessagesDb.foldToolResult(
+        this.currentSessionId,
+        truncateMessagePayload(normalized),
+        truncateMessagePayload,
+      );
       if (folded) {
         this.inner.send(folded);
         return;
@@ -451,7 +490,11 @@ export function sendToClient(writer: ProviderRuntimeWriter, message: unknown): v
   if (isRecord(message) && isPersistentMessage(message) && typeof message.sessionId === 'string') {
     const normalized = mergeRuntimeMessage(message, message.sessionId, message.provider);
     const result = normalized.kind === 'tool_result' && normalized.toolId
-      ? sessionMessagesDb.foldToolResult(normalized.sessionId, normalized)
+      ? sessionMessagesDb.foldToolResult(
+        normalized.sessionId,
+        truncateMessagePayload(normalized),
+        truncateMessagePayload,
+      )
       : sessionMessagesDb.upsertById(normalized.sessionId, truncateMessagePayload(normalized), 'live').message;
     writer.send(result || truncateMessagePayload(normalized));
     return;
