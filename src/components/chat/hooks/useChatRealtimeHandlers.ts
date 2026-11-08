@@ -244,27 +244,6 @@ export function useChatRealtimeHandlers({
         onSessionInactive?.(sid);
         onSessionNotProcessing?.(sid);
 
-        // Handle aborted case
-        if (msg.aborted) {
-          if (sid) {
-            const currentMessages = sessionStore.getMessages(sid);
-            const lastMsg = currentMessages[currentMessages.length - 1];
-            if (!lastMsg?.isInterrupted) {
-              sessionStore.appendRealtime(sid, {
-                id: `interrupted_${Date.now()}`,
-                sessionId: sid,
-                timestamp: new Date().toISOString(),
-                provider,
-                kind: 'text',
-                role: 'user',
-                isInterrupted: true,
-                content: '<turn_aborted>',
-              });
-            }
-          }
-          break;
-        }
-
         const actualSessionId =
           typeof msg.actualSessionId === 'string' && msg.actualSessionId.trim().length > 0
             ? msg.actualSessionId

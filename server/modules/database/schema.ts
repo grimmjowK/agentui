@@ -122,6 +122,25 @@ CREATE TABLE IF NOT EXISTS session_models (
 );
 `;
 
+export const SESSION_MESSAGES_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS session_messages (
+    session_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    seq REAL NOT NULL,
+    provider_ids TEXT NOT NULL DEFAULT '[]',
+    payload TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('live', 'import')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (session_id, id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_messages_session_seq
+    ON session_messages(session_id, seq);
+CREATE INDEX IF NOT EXISTS idx_session_messages_session_updated
+    ON session_messages(session_id, updated_at);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -163,4 +182,6 @@ ${LAST_SCANNED_AT_SQL}
 ${APP_CONFIG_TABLE_SCHEMA_SQL}
 
 ${SESSION_MODELS_TABLE_SCHEMA_SQL}
+
+${SESSION_MESSAGES_TABLE_SCHEMA_SQL}
 `;

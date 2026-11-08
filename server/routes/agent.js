@@ -6,6 +6,7 @@ import { promises as fs } from 'fs';
 import crypto from 'crypto';
 import { userDb, apiKeysDb, githubTokensDb, projectsDb } from '../modules/database/index.js';
 import { providerRegistry } from '../modules/providers/index.js';
+import { LoggingWriter } from '../modules/websocket/services/logging-writer.service.js';
 import { Octokit } from '@octokit/rest';
 import { CODEX_MODELS, ANTIGRAVITY_MODELS } from '../../shared/modelConstants.js';
 import { IS_PLATFORM } from '../constants/config.js';
@@ -540,6 +541,18 @@ class ResponseCollector {
         continue;
       }
 
+      if (msg && msg.kind === 'text' && msg.role === 'assistant' && typeof msg.content === 'string') {
+        assistantMessages.push({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: msg.content }],
+            ...(msg.usage ? { usage: msg.usage } : {}),
+          },
+        });
+        continue;
+      }
+
       // Handle JSON strings
       if (typeof msg === 'string') {
         try {
@@ -588,6 +601,14 @@ class ResponseCollector {
           totalCacheRead += usage.cache_read_input_tokens || 0;
           totalCacheCreation += usage.cache_creation_input_tokens || 0;
         }
+      }
+
+      if (data && data.kind === 'text' && data.role === 'assistant' && data.usage) {
+        const usage = data.usage;
+        totalInput += usage.input_tokens || 0;
+        totalOutput += usage.output_tokens || 0;
+        totalCacheRead += usage.cache_read_input_tokens || 0;
+        totalCacheCreation += usage.cache_creation_input_tokens || 0;
       }
     }
 
@@ -942,14 +963,29 @@ router.post('/', validateExternalApiKey, async (req, res) => {
     // wait for interactive approval: Claude/Codex/Antigravity read permissionMode,
     // Cursor reads skipPermissions.
     console.log(`🤖 Starting ${provider} session`);
-    await providerRegistry.resolveProvider(provider).runtime.start(message.trim(), {
-      projectPath: finalProjectPath,
-      cwd: finalProjectPath,
+    const loggingWriter = new LoggingWriter(writer, {
+      initialSessionId: sessionId || null,
+      userId: req.user.id,
+      provider,
+    });
+    loggingWriter.recordUserMessage({
+      clientId: crypto.randomUUID(),
+      content: message.trim(),
+      provider,
       sessionId: sessionId || null,
-      model: model || DEFAULT_MODELS[provider],
-      permissionMode: 'bypassPermissions',
-      skipPermissions: true,
-    }, writer);
+    });
+    try {
+      await providerRegistry.resolveProvider(provider).runtime.start(message.trim(), {
+        projectPath: finalProjectPath,
+        cwd: finalProjectPath,
+        sessionId: sessionId || null,
+        model: model || DEFAULT_MODELS[provider],
+        permissionMode: 'bypassPermissions',
+        skipPermissions: true,
+      }, loggingWriter);
+    } finally {
+      loggingWriter.finish();
+    }
 
     // Handle GitHub branch and PR creation after successful agent completion
     let branchInfo = null;

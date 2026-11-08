@@ -38,17 +38,11 @@ function send(writer, message) {
   }
 }
 
-function createReconnectableWriter(writer) {
-  const pending = [];
+export function createReconnectableWriter(writer) {
   return {
     isWebSocketWriter: true,
     userId: writer?.userId,
     send(message) {
-      if (typeof writer?.ws?.readyState === 'number' && writer.ws.readyState !== 1) {
-        pending.push(message);
-        if (pending.length > 1000) pending.shift();
-        return;
-      }
       writer?.send(message);
     },
     setSessionId(sessionId) { writer?.setSessionId?.(sessionId); },
@@ -56,7 +50,6 @@ function createReconnectableWriter(writer) {
       if (this.userId !== nextWriter?.userId || !nextWriter?.ws) return false;
       if (typeof writer?.updateWebSocket === 'function') writer.updateWebSocket(nextWriter.ws);
       else writer = nextWriter;
-      for (const message of pending.splice(0)) this.send(message);
       return true;
     },
   };

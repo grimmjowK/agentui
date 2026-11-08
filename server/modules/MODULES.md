@@ -9,6 +9,10 @@
 管理 SQLite 连接单例、初始化和迁移。通过 repositories 类暴露用户、会话、项目、
 凭证等多张数据表的 CRUD 接口。
 
+`session_messages` 是聊天内容的持久化事实来源。`session-message-log` 的
+`LoggingWriter` 在送出持久性聊天事件前写入该表并附加会话内 `seq`；provider
+历史档只在读取时用于補齐或导入旧会话，不再直接决定前端顺序。
+
 ### `projects/` — 项目生命周期管理（含 `services/`、`tests/`）
 处理项目创建、克隆、删除、星标、显示名称生成、TaskMaster 检测与会话关联。
 `services/` 负责业务逻辑，`tests/` 覆盖关键流程。
@@ -35,3 +39,7 @@
 聊天路由的消息：`chat-command`（启动/续接）、`chat-steer`（执行中插话）、`abort-session`、
 `check-session-status`、`get-active-sessions`、`get-pending-permissions`（带 `sessionId` 只查该会话，
 不带则跨会话汇总当前用户的待审批项）、`claude-permission-response` / `codex-permission-response`。
+
+聊天 WebSocket 与 `/api/agent` 的 writer 都会包在 `LoggingWriter` 中。重连时
+按 `seq` 补回日誌，并补送尚未定稿的串流段落。`session-message-log-cleanup`
+每天按保留期限与总大小清理整个会话的日誌，收藏与执行中会话不清理。

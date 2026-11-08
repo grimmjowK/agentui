@@ -214,7 +214,15 @@ export const sessionsDb = {
   deleteSessionsByProjectPath(projectPath: string): void {
     const db = getConnection();
     const normalizedProjectPath = normalizeProjectPath(projectPath);
-    db.prepare(`DELETE FROM sessions WHERE project_path = ?`).run(normalizedProjectPath);
+    db.transaction(() => {
+      db.prepare(
+        `DELETE FROM session_messages
+         WHERE session_id IN (
+           SELECT session_id FROM sessions WHERE project_path = ?
+         )`,
+      ).run(normalizedProjectPath);
+      db.prepare(`DELETE FROM sessions WHERE project_path = ?`).run(normalizedProjectPath);
+    })();
   },
 
   getSessionName(sessionId: string, provider: string): string | null {
@@ -254,6 +262,9 @@ export const sessionsDb = {
 
   deleteSessionById(sessionId: string): boolean {
     const db = getConnection();
-    return db.prepare('DELETE FROM sessions WHERE session_id = ?').run(sessionId).changes > 0;
+    return db.transaction(() => {
+      db.prepare('DELETE FROM session_messages WHERE session_id = ?').run(sessionId);
+      return db.prepare('DELETE FROM sessions WHERE session_id = ?').run(sessionId).changes > 0;
+    })();
   },
 };

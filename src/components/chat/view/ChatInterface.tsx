@@ -68,6 +68,7 @@ function ChatInterface({
   const {
     chatMessages,
     addMessage,
+    removeMessage,
     clearMessages,
     rewindMessages,
     isLoading,
@@ -188,6 +189,7 @@ function ChatInterface({
     pendingViewSessionRef,
     scrollToBottom,
     addMessage,
+    removeMessage,
     clearMessages,
     rewindMessages,
     setIsLoading,
@@ -205,8 +207,14 @@ function ChatInterface({
     if (!selectedProject || !selectedSession) return;
     const providerVal = (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
     const sessionProvider = selectedSession.__provider || providerVal;
+    const afterSeq = sessionStore.getMessages(selectedSession.id).reduce<number | null>(
+      (maximum, message) => typeof message.seq === 'number'
+        ? Math.max(maximum ?? message.seq, message.seq)
+        : maximum,
+      null,
+    );
     if (sessionProvider === 'antigravity') {
-      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: sessionProvider });
+      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: sessionProvider, afterSeq });
     }
     await sessionStore.refreshFromServer(selectedSession.id, {
       provider: sessionProvider as LLMProvider,
@@ -218,7 +226,7 @@ function ChatInterface({
       setIsLoading(false);
       setCanAbortSession(false);
       onSessionNotProcessing?.(selectedSession.id);
-      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: sessionProvider });
+      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: sessionProvider, afterSeq });
     }
   }, [selectedProject, selectedSession, sessionStore, setIsLoading, setCanAbortSession, onSessionNotProcessing, sendMessage]);
 
@@ -268,10 +276,16 @@ function ChatInterface({
     if (!isLoading || !selectedSession || !selectedProject) return;
     const timer = setTimeout(() => {
       const providerVal = (selectedSession.__provider || localStorage.getItem('selected-provider')) || 'claude';
-      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: providerVal });
+      const afterSeq = sessionStore.getMessages(selectedSession.id).reduce<number | null>(
+        (maximum, message) => typeof message.seq === 'number'
+          ? Math.max(maximum ?? message.seq, message.seq)
+          : maximum,
+        null,
+      );
+      sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: providerVal, afterSeq });
     }, 30_000);
     return () => clearTimeout(timer);
-  }, [isLoading, latestMessage, selectedSession, selectedProject, sendMessage]);
+  }, [isLoading, latestMessage, selectedSession, selectedProject, sendMessage, sessionStore]);
 
   // 全域池含所有會話的項目，這裡只渲染目前會話的（尚未取得 id 的新會話請求也算目前會話）
   const viewSessionId = selectedSession?.id || currentSessionId || null;

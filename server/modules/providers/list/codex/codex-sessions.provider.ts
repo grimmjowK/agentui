@@ -7,6 +7,7 @@ import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 import { mapRolloutEntry, type MappedMessage } from '@/modules/providers/list/codex/codex-item-mapper.js';
 import { extractCodexSearchableMessages } from '@/modules/providers/list/codex/codex-searchable-messages.js';
+import { isInternalUserText, isInterruptedUserText } from '@/modules/providers/shared/session-message-pairing.js';
 
 const PROVIDER = 'codex';
 
@@ -21,30 +22,12 @@ type CodexHistoryResult =
       tokenUsage?: unknown;
     };
 
-const CODEX_INTERNAL_USER_PREFIXES = [
-  '<recommended_plugins>',
-  '<environment_context>',
-  '<environments_instructions>',
-  '<permissions instructions>',
-  '<collaboration_mode>',
-  '<skills_instructions>',
-  '<user_instructions>',
-  '<current_time_reminder>',
-  '<context_window>',
-  '<context_window_guidance>',
-  '<persistent_mode>',
-  '<subagent_notification>',
-  '# AGENTS.md instructions for ',
-] as const;
-
 export function isCodexInterruptedText(text: string): boolean {
-  const trimmed = text.trimStart();
-  return trimmed.startsWith('<turn_aborted>') || trimmed.startsWith('Conversation interrupted');
+  return isInterruptedUserText(text);
 }
 
 function isInternalCodexUserText(text: string): boolean {
-  const trimmed = text.trimStart();
-  return CODEX_INTERNAL_USER_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+  return isInternalUserText(text);
 }
 
 function isVisibleCodexUserMessage(payload: AnyRecord | null | undefined): boolean {
@@ -125,6 +108,7 @@ async function getCodexSessionMessages(
     const messages: AnyRecord[] = [];
     const splitToolIds = new Map<string, string[]>();
     let tokenUsage: AnyRecord | null = null;
+    let lineIndex = 0;
     const fileStream = fsSync.createReadStream(sessionFilePath);
     const rl = readline.createInterface({
       input: fileStream,
@@ -138,6 +122,7 @@ async function getCodexSessionMessages(
 
       try {
         const entry = JSON.parse(line) as AnyRecord;
+        const historyId = `codex_${sessionId}_${lineIndex}`;
 
         if (entry.type === 'event_msg' && entry.payload?.type === 'token_count' && entry.payload?.info) {
           const info = entry.payload.info as AnyRecord;
@@ -155,6 +140,9 @@ async function getCodexSessionMessages(
           const isInterrupted = isCodexInterruptedText(rawMsg);
           messages.push({
             type: 'user',
+            uuid: historyId,
+            providerIds: [historyId],
+            historyUserFormat: 'event',
             timestamp: entry.timestamp,
             message: {
               role: 'user',
@@ -167,15 +155,41 @@ async function getCodexSessionMessages(
         if (entry.type === 'response_item' && isVisibleCodexUserMessage(entry.payload as AnyRecord)) {
           const rawContent = extractCodexTextContent(entry.payload.content, { excludeInternal: false });
           const isInterrupted = isCodexInterruptedText(rawContent);
-          messages.push({
-            type: 'user',
-            timestamp: entry.timestamp,
-            message: {
-              role: 'user',
-              content: isInterrupted ? rawContent : extractCodexTextContent(entry.payload.content, { excludeInternal: true }),
-            },
-            ...(isInterrupted ? { isInterrupted: true } : {}),
-          });
+          const visibleContent = isInterrupted
+            ? rawContent
+            : extractCodexTextContent(entry.payload.content, { excludeInternal: true });
+          let matchingEvent: AnyRecord | undefined;
+          for (let index = messages.length - 1; index >= 0; index--) {
+            const candidate = messages[index];
+            if (candidate.type === 'assistant' || candidate.type === 'mapped') {
+              break;
+            }
+            if (
+              candidate.type === 'user'
+              && candidate.historyUserFormat === 'event'
+              && String(candidate.message?.content ?? '') === visibleContent
+            ) {
+              matchingEvent = candidate;
+              break;
+            }
+          }
+
+          if (matchingEvent) {
+            matchingEvent.uuid = historyId;
+            matchingEvent.providerIds = [...(matchingEvent.providerIds || []), historyId];
+          } else {
+            messages.push({
+              type: 'user',
+              uuid: historyId,
+              providerIds: [historyId],
+              timestamp: entry.timestamp,
+              message: {
+                role: 'user',
+                content: visibleContent,
+              },
+              ...(isInterrupted ? { isInterrupted: true } : {}),
+            });
+          }
         }
 
         if (
@@ -187,6 +201,8 @@ async function getCodexSessionMessages(
           if (isCodexInterruptedText(rawContent)) {
             messages.push({
               type: 'user',
+              uuid: historyId,
+              providerIds: [historyId],
               timestamp: entry.timestamp,
               message: {
                 role: 'user',
@@ -200,7 +216,9 @@ async function getCodexSessionMessages(
               messages.push({
                 type: 'assistant',
                 // payload.id 即 app-server 即時事件的 item.id（id 契約）
-                uuid: typeof entry.payload.id === 'string' ? entry.payload.id : undefined,
+                uuid: typeof entry.payload.id === 'string' && entry.payload.id
+                  ? entry.payload.id
+                  : historyId,
                 timestamp: entry.timestamp,
                 message: {
                   role: 'assistant',
@@ -211,12 +229,13 @@ async function getCodexSessionMessages(
           }
         }
 
-        for (const mapped of mapRolloutEntry(entry, splitToolIds)) {
+        for (const mapped of mapRolloutEntry(entry, splitToolIds, { sessionId, lineIndex })) {
           messages.push({ type: 'mapped', timestamp: entry.timestamp, mapped });
         }
       } catch {
         // Skip malformed lines.
       }
+      lineIndex += 1;
     }
 
     messages.sort(
@@ -259,6 +278,7 @@ export class CodexSessionsProvider implements IProviderSessions {
   private normalizeHistoryEntry(raw: AnyRecord, sessionId: string | null): NormalizedMessage[] {
     const ts = raw.timestamp || new Date().toISOString();
     const baseId = raw.uuid || generateMessageId('codex');
+    const providerIds = Array.isArray(raw.providerIds) ? raw.providerIds : undefined;
 
     if (raw.type === 'mapped') {
       const mapped = raw.mapped as MappedMessage;
@@ -266,10 +286,14 @@ export class CodexSessionsProvider implements IProviderSessions {
         ...mapped,
         kind: mapped.kind as NormalizedMessage['kind'],
         // tool_use 以 toolId（rollout call_id，等於即時 item.id）為 id，與即時訊息對齊
-        id: mapped.id || (mapped.kind === 'tool_use' && typeof mapped.toolId === 'string' && mapped.toolId) || baseId,
+        id: mapped.id
+          || (mapped.kind === 'tool_use' && typeof mapped.toolId === 'string' && mapped.toolId)
+          || (mapped.kind === 'tool_result' && typeof mapped.toolId === 'string' && `${mapped.toolId}:result`)
+          || baseId,
         sessionId,
         timestamp: ts,
         provider: PROVIDER,
+        ...(providerIds ? { providerIds } : {}),
       })];
     }
 
@@ -287,6 +311,7 @@ export class CodexSessionsProvider implements IProviderSessions {
         provider: PROVIDER,
         kind: 'thinking',
         content: thinkingContent,
+        ...(providerIds ? { providerIds } : {}),
       })];
     }
 
@@ -312,6 +337,7 @@ export class CodexSessionsProvider implements IProviderSessions {
         role: 'user',
         content,
         ...(isInterrupted ? { isInterrupted: true } : {}),
+        ...(providerIds ? { providerIds } : {}),
       })];
     }
 
@@ -335,6 +361,7 @@ export class CodexSessionsProvider implements IProviderSessions {
         kind: 'text',
         role: 'assistant',
         content,
+        ...(providerIds ? { providerIds } : {}),
       })];
     }
 

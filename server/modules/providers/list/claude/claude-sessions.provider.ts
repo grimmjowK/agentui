@@ -7,6 +7,7 @@ import type { AnyRecord, FetchHistoryOptions, FetchHistoryResult, NormalizedMess
 import { createNormalizedMessage, generateMessageId, readObjectRecord } from '@/shared/utils.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
 import { extractClaudeSearchableMessages } from '@/modules/providers/list/claude/claude-searchable-messages.js';
+import { isInternalUserText, isInterruptedUserText } from '@/modules/providers/shared/session-message-pairing.js';
 
 const PROVIDER = 'claude';
 
@@ -213,13 +214,8 @@ async function getSessionMessages(
  *   (`<local-command-stdout>...`) should be remapped into normal chat messages
  *   instead of being discarded as internal content
  */
-const INTERNAL_CONTENT_PREFIXES = [
-  '<system-reminder>',
-  'Caveat:',
-] as const;
-
 function isInternalContent(content: string): boolean {
-  return INTERNAL_CONTENT_PREFIXES.some((prefix) => content.startsWith(prefix));
+  return isInternalUserText(content);
 }
 
 /**
@@ -229,7 +225,7 @@ function isInternalContent(content: string): boolean {
  * Surface it as a normal user message flagged `isInterrupted` instead.
  */
 function isInterruptedContent(content: string): boolean {
-  return content.startsWith('[Request interrupted');
+  return isInterruptedUserText(content);
 }
 
 function isTaskNotificationContent(content: string): boolean {

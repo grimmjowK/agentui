@@ -7,6 +7,7 @@ import test from 'node:test';
 import { closeConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
 import { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
+import { sessionMessagesDb } from '@/modules/database/repositories/session-messages.db.js';
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -84,6 +85,36 @@ test('session model is stored independently of the sessions row and upserted', a
     // 同步器之後建立 sessions 列，不影響已記錄的模型
     sessionsDb.createSession('session-new', 'claude', '/workspace/demo-project');
     assert.equal(sessionsDb.getSessionModel('session-new'), 'anthropic/gpt-6-astra-hc-yd');
+  });
+});
+
+test('hard-deleting a project removes all of its session messages without orphans', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createSession('project-session-1', 'claude', '/workspace/to-delete');
+    sessionsDb.createSession('project-session-2', 'codex', '/workspace/to-delete');
+    sessionMessagesDb.append('project-session-1', {
+      id: 'm1',
+      sessionId: 'project-session-1',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      provider: 'claude',
+      kind: 'text',
+      role: 'assistant',
+      content: 'one',
+    });
+    sessionMessagesDb.append('project-session-2', {
+      id: 'm2',
+      sessionId: 'project-session-2',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      provider: 'codex',
+      kind: 'text',
+      role: 'assistant',
+      content: 'two',
+    });
+
+    sessionsDb.deleteSessionsByProjectPath('/workspace/to-delete');
+
+    assert.equal(sessionMessagesDb.list('project-session-1').total, 0);
+    assert.equal(sessionMessagesDb.list('project-session-2').total, 0);
   });
 });
 

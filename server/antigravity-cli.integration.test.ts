@@ -104,13 +104,13 @@ if (prompt === 'wait') {
     assert.equal((await provider.fetchHistory('native-session')).total, 4);
 
     const defaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
-    assert.equal(defaultArgs.includes('--dangerously-skip-permissions'), false);
+    assert.equal(defaultArgs.includes('--dangerously-skip-permissions'), false, JSON.stringify(defaultArgs));
     await spawnAntigravity('allowed', { cwd: workspace, permissionMode: 'bypassPermissions' }, writer);
     const allowedArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
-    assert.equal(allowedArgs.includes('--dangerously-skip-permissions'), true);
+    assert.equal(allowedArgs.includes('--dangerously-skip-permissions'), true, JSON.stringify(allowedArgs));
     await spawnAntigravity('default', { cwd: workspace, permissionMode: 'default', skipPermissions: true }, writer);
     const backToDefaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
-    assert.equal(backToDefaultArgs.includes('--dangerously-skip-permissions'), false);
+    assert.equal(backToDefaultArgs.includes('--dangerously-skip-permissions'), false, JSON.stringify(backToDefaultArgs));
 
     // An offline CLI transcript gets its workspace from the native summary DB.
     const externalLog = path.join(root, 'brain', 'offline-native', 'transcript.jsonl');
@@ -159,7 +159,9 @@ if (prompt === 'wait') {
       },
     };
     await spawnAntigravity('reconnect', { cwd: workspace }, reconnectWriter);
-    assert.ok(reconnectedMessages.some((message) => message.kind === 'stream_delta' && message.content === 'during disconnect'));
+    // The runtime no longer buffers disconnected events itself; LoggingWriter
+    // persists durable rows and replays them after reconnect.
+    assert.ok(disconnectedMessages.some((message) => message.kind === 'stream_delta' && message.content === 'during disconnect'));
     assert.ok(reconnectedMessages.some((message) => message.kind === 'stream_delta' && message.content === 'after reconnect'));
     assert.ok(reconnectedMessages.some((message) => message.kind === 'complete'));
     const originalLog = sessionsDb.getSessionById('native-session')!.jsonl_path!;

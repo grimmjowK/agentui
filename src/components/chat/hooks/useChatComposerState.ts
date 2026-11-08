@@ -56,6 +56,7 @@ interface UseChatComposerStateArgs {
   pendingViewSessionRef: { current: PendingViewSession | null };
   scrollToBottom: () => void;
   addMessage: (msg: ChatMessage) => void;
+  removeMessage: (msg: ChatMessage) => void;
   clearMessages: () => void;
   rewindMessages: (count: number) => void;
   setIsLoading: (loading: boolean) => void;
@@ -126,6 +127,7 @@ export function useChatComposerState({
   pendingViewSessionRef,
   scrollToBottom,
   addMessage,
+  removeMessage,
   clearMessages,
   rewindMessages,
   setIsLoading,
@@ -569,10 +571,17 @@ export function useChatComposerState({
         const clientId = crypto.randomUUID();
         pendingSteerRef.current = { clientId, text: currentInput, sessionId: steerSessionId, provider };
         setIsSteerPending(true);
+        addMessage({
+          id: `user:${clientId}`,
+          type: 'user',
+          content: currentInput,
+          timestamp: new Date(),
+        });
         const sent = sendMessage({ type: 'chat-steer', provider, sessionId: steerSessionId, text: currentInput, clientId });
         if (!sent) {
           pendingSteerRef.current = null;
           setIsSteerPending(false);
+          removeMessage({ id: `user:${clientId}`, type: 'user', content: currentInput, timestamp: new Date() });
           addMessage({ type: 'error', content: t('steer.rejected', { reason: 'disconnected' }), timestamp: new Date() });
         }
         return;
@@ -642,8 +651,10 @@ export function useChatComposerState({
 
       const effectiveSessionId =
         currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
+      const clientId = crypto.randomUUID();
 
       const userMessage: ChatMessage = {
+        id: `user:${clientId}`,
         type: 'user',
         content: displayTextOverrideRef.current ?? currentInput,
         images: uploadedImages as any,
@@ -726,6 +737,7 @@ export function useChatComposerState({
         provider,
         command: messageContent,
         sessionId: effectiveSessionId,
+        clientId,
         options: {
           cwd: resolvedProjectPath,
           projectPath: resolvedProjectPath,
@@ -783,6 +795,7 @@ export function useChatComposerState({
       sendMessage,
       setCanAbortSession,
       addMessage,
+      removeMessage,
       setClaudeStatus,
       setIsLoading,
       setIsUserScrolledUp,
@@ -1048,6 +1061,12 @@ export function useChatComposerState({
       setIsSteerPending(false);
 
       if (result.type !== 'steer-accepted') {
+        removeMessage({
+          id: `user:${pending.clientId}`,
+          type: 'user',
+          content: pending.text,
+          timestamp: new Date(),
+        });
         if (result.reason === 'not_running') {
           // 以後端狀態校正殘留的 Processing；保留輸入，讓使用者可重新送出新一輪。
           // 使用送出時的 session/provider，避免等待回覆期間切換會話後查錯對象。
@@ -1057,7 +1076,6 @@ export function useChatComposerState({
         return;
       }
 
-      addMessage({ type: 'user', content: pending.text, timestamp: new Date() });
       // 等待期間若使用者已改寫輸入，就不覆蓋
       if (inputValueRef.current === pending.text) {
         setInput('');
@@ -1067,16 +1085,22 @@ export function useChatComposerState({
       }
       setTimeout(() => scrollToBottom(), 100);
     },
-    [addMessage, scrollToBottom, sendMessage, t],
+    [addMessage, removeMessage, scrollToBottom, sendMessage, t],
   );
 
   // 這一輪結束後就不會再有回覆，放掉等待狀態
   useEffect(() => {
     if (!isLoading && pendingSteerRef.current) {
+      removeMessage({
+        id: `user:${pendingSteerRef.current.clientId}`,
+        type: 'user',
+        content: pendingSteerRef.current.text,
+        timestamp: new Date(),
+      });
       pendingSteerRef.current = null;
       setIsSteerPending(false);
     }
-  }, [isLoading]);
+  }, [isLoading, removeMessage]);
 
   return {
     input,

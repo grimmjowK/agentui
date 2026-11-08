@@ -377,3 +377,10 @@ alongside the implementation.
 - Assuming one provider's MCP config file format works for the others.
 
 
+For chat messages, the single source of truth is `session_messages`.
+`LoggingWriter` assigns the display `seq` before forwarding live messages.
+Provider transcript files are used only to import missing sessions and to
+supplement fields (for example the full Antigravity tool input) during the
+server-side reconciliation step. Cursor currently has no stable live/history id
+contract, so a non-empty Cursor log is never reconciled against its history.
+
