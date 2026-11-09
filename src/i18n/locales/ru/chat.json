@@ -36,6 +36,7 @@
     "readTodo": "Прочитать список задач",
     "searchResults": "результаты",
     "waitingOutput": "Ожидание вывода терминала",
+    "commandOutput": "Вывод команды",
     "runCode": "Выполнить код",
     "changeDeleted": "удалён"
   },

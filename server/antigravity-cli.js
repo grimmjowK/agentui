@@ -74,6 +74,8 @@ export class AntigravityResponseHandler {
     this.streamStep = null;
     this.segmentText = '';
     this.hasStreamedAny = false;
+    this.lastStepCompletedAgentResponse = false;
+    this.ignoredResultError = null;
     this.sessionCreatedEmitted = false;
   }
 
@@ -137,6 +139,7 @@ export class AntigravityResponseHandler {
       if (/^API error \(attempt \d+\):/i.test(line)) {
         if (!this.aborted) {
           this.error = line;
+          this.lastStepCompletedAgentResponse = false;
         }
         return;
       }
@@ -159,6 +162,7 @@ export class AntigravityResponseHandler {
 
     // B. Native agy stream-json format: step_update event
     if (event.event === 'step_update' && event.step_update) {
+      this.ignoredResultError = null;
       const step = event.step_update;
       this.adoptSessionId(step.conversation_id);
 
@@ -173,9 +177,13 @@ export class AntigravityResponseHandler {
         this.appendStream(step.text_delta, stepIndex);
       }
       if (step.step_type === 'agent_response') {
-        if (step.state === 'DONE') this.endStream();
+        const isDone = step.state === 'DONE';
+        if (isDone) this.endStream();
+        this.lastStepCompletedAgentResponse = isDone && this.hasStreamedAny;
         return;
       }
+
+      this.lastStepCompletedAgentResponse = false;
 
       // Tool use / result：與歷史解析共用 antigravity-tool-mapper
       const mapped = mapAgyStepUpdate(step);
@@ -196,6 +204,15 @@ export class AntigravityResponseHandler {
 
       if (res.status === 'ERROR') {
         if (this.aborted) return;
+        // agy --conversation 續接含有歷史錯誤步驟的會話時，printmode 在 stream-json 下因
+        // initialStepIndex=0 與 streamJSONEmitter.HasResponse()=false 的競態，會把舊輪次的
+        // 錯誤塞進本輪結尾的 result.error。若本輪最後一步已是正常 DONE 的 agent_response，忽略該陳舊錯誤。
+        if (this.lastStepCompletedAgentResponse) {
+          this.ignoredResultError = typeof res.error === 'string' ? res.error : null;
+          this.clearTransientError();
+          this.endStream();
+          return;
+        }
         this.error = res.error || 'Antigravity execution failed';
         this.errorEmitted = true;
         send(this.writer, {
@@ -280,6 +297,7 @@ export class AntigravityResponseHandler {
       if (this.aborted) return;
       const errMsg = typeof event.error === 'string' ? event.error : (event.error?.message || event.message || 'Unknown error');
       this.error = errMsg;
+      this.lastStepCompletedAgentResponse = false;
     }
   }
 
@@ -460,7 +478,12 @@ export async function spawnAntigravity(message, options = {}, ws) {
       if (childProcess.aborted) {
         send(liveWriter, { sessionId: handler.sessionId, kind: 'complete', aborted: true, success: true, exitCode: 0 });
         resolve();
-      } else if (code === 0 && !handler.error) {
+      } else if (!handler.error && (code === 0 || (
+        code === 1 && handler.lastStepCompletedAgentResponse && handler.ignoredResultError
+        // CLI 的同一個歷史 result.error 也可能寫入 stderr 並導致 exit 1。
+        // 只消除已辨識的同一個錯誤；其他退出碼、signal 或不同 stderr 仍視為失敗。
+        && (!stderrOutput.trim() || stderrOutput.trim() === handler.ignoredResultError.trim())
+      ))) {
         // headless 模式無法詢問審批，CLI 會自動拒絕需要權限的工具，結果仍是 SUCCESS、
         // 說明只寫在 stderr。轉成警告讓頁面看得到，否則使用者只會看到空回覆。
         const deniedNotice = findPermissionDeniedNotice(stderrOutput);

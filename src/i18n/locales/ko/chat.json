@@ -36,6 +36,7 @@
     "readTodo": "Todo 리스트 읽기",
     "searchResults": "결과",
     "waitingOutput": "터미널 출력 대기 중",
+    "commandOutput": "명령어 출력",
     "runCode": "코드 실행",
     "changeDeleted": "삭제됨"
   },

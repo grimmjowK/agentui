@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import type {
   ChatMessage,
@@ -13,8 +14,10 @@ import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import type { Project } from '../../../../types/app';
 import { ToolRenderer, shouldHideToolResult } from '../../tools';
 import { Reasoning, ReasoningTrigger, ReasoningContent } from '../../../../shared/view/ui';
+
 import { Markdown } from './Markdown';
 import MessageCopyControl from './MessageCopyControl';
+import { ErrorDetails } from './ErrorDetails';
 
 // 跳转锚点 id 前缀，供 UserMessageIndex 用相同的 message key 拼出目标 id 并
 // 调用 scrollIntoView + 临时加 CSS 高亮类。
@@ -273,21 +276,13 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                   message.toolResult.isError ? (
                     // 权限已授予（本次点击或此前已放行）后，错误框整体从对话中移除
                     permissionSuggestion && (permissionSuggestion.isAllowed || permissionGrantState === 'granted') ? null : (
-                    // Error results - red error box with content
+                    // Keep the failure summary visible; detailed output is collapsed.
                     <div
                       id={`tool-result-${message.toolId}`}
-                      className="relative mt-2 scroll-mt-4 rounded border border-red-200/60 bg-red-50/50 p-3 dark:border-red-800/40 dark:bg-red-950/10"
+                      className="relative mt-2 scroll-mt-4 rounded border border-gray-200/60 p-3 dark:border-gray-700/60"
                     >
-                      <div className="relative mb-2 flex items-center gap-1.5">
-                        <svg className="h-4 w-4 text-red-500 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                        <span className="text-xs font-medium text-red-700 dark:text-red-300">{t('messageTypes.error')}</span>
-                      </div>
-                      <div className="relative text-sm text-red-900 dark:text-red-100">
-                        <Markdown className="prose prose-sm prose-red max-w-none dark:prose-invert">
-                          {String(message.toolResult.content || '')}
-                        </Markdown>
+                      <div className="relative text-sm">
+                        <ErrorDetails content={String(message.toolResult.content || '')} label={t('messageTypes.error')} />
                         {/* 授权后整个错误框会走上面的 null 分支消失，这里只需处理"未授权/授权失败"两种可见态 */}
                         {permissionSuggestion && (
                           <div className="mt-4 border-t border-red-200/60 pt-3 dark:border-red-800/60">
@@ -429,6 +424,8 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
                   </div>
                 </div>
               </div>
+            ) : message.type === 'error' ? (
+              <ErrorDetails content={formattedMessageContent} label={t('messageTypes.error')} />
             ) : message.isThinking ? (
               /* Thinking messages — Reasoning component (ai-elements pattern) */
               <Reasoning defaultOpen={false}>
