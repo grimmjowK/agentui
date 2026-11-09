@@ -10,6 +10,7 @@ agy 1.5.0 的 `agy acp` 實測結果（2026-11-05，本機 `/tmp/agy-acp/probe*.
 - 工具需要審批時，agent 發出 `session/request_permission { sessionId, toolCall, options: [{optionId:'allow', kind:'allow_once'}, {optionId:'deny', kind:'reject_once'}] }`，客戶端回覆 `{ outcome: { outcome: 'selected', optionId } }` 後才繼續。
 - `session/resume` 續接舊會話且**不重播歷史**；`session/load` 會把整段歷史以 `session/update` 重播一次。
 - `session/set_mode { sessionId, modeId }` 可用。
+- 執行中再送一個 `session/prompt`（2026-11-09，agy 1.5.3 實測）：第一個 `session/prompt` 立刻以 `end_turn` 返回，進行中的工具**不會**被中斷，跑完後 agent 在下一次呼叫模型時併入第二則，最後只產生一則同時遵循兩個要求的回覆，第二個 `session/prompt` 在這時才返回。
 - ACP 建立的會話寫入同一個 `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl`，現有 synchronizer 會索引它；歷史讀取、全文檢索、Session Artifacts 都不需要修改。
 
 前一個 change 已有：全域待審批池（`PendingApprovalsContext`）、側邊欄收件匣、`IProviderRuntime.getPendingApprovals(userId, sessionId?)`、Codex 的審批卡片（依 `context.decisions` 顯示選項、`context.expiresAt` 顯示期限）。
@@ -23,7 +24,6 @@ agy 1.5.0 的 `agy acp` 實測結果（2026-11-05，本機 `/tmp/agy-acp/probe*.
 - 失敗（未登入、行程意外退出、協議錯誤）時頁面有明確錯誤，不會停在「處理中」。
 
 **Non-Goals:**
-- 執行中插話（ACP 沒有對應能力，`midTurnSteer` 維持 `false`）。
 - ACP 客戶端的 `fs` / `terminal` 能力：`clientCapabilities` 全部為 `false`，檔案讀寫與指令執行仍由 CLI 自己處理。
 - 把 Codex 的審批回覆改走新的通用訊息（見 D4，列為後續）。
 - 長駐、跨多輪重用的 ACP 行程。
@@ -32,7 +32,7 @@ agy 1.5.0 的 `agy acp` 實測結果（2026-11-05，本機 `/tmp/agy-acp/probe*.
 
 ### D1. 每一輪啟動一個 `agy acp` 行程，而不是每個會話一條長駐連線
 
-流程：spawn `agy acp` → `initialize` → 新會話用 `session/new`，續接用 `session/resume` → 依權限模式 `session/set_mode` → `session/prompt` → 收到 `stopReason` 後關閉 stdin 並結束行程。
+流程：spawn `agy acp` → `initialize` → 新會話用 `session/new`，續接用 `session/resume` → 依權限模式 `session/set_mode` → `session/prompt` → 所有 `session/prompt` 都返回後（見 D8）關閉 stdin 並結束行程。
 
 - **為何不長駐**：長駐需要閒置回收、多個瀏覽器分頁共用連線、行程意外退出後重連，複雜度明顯較高。每輪啟動的成本與現在的 headless 相同（現在本來就是每輪 spawn），審批只發生在一輪之內，不需要跨輪連線。
 - **代價**：每輪續接時 CLI 仍會在 transcript 寫入「伺服器重啟、子 agent 已停止」的系統訊息；歷史讀取已略過這類步驟（commit `1c06034f`）。
@@ -82,6 +82,15 @@ ACP 沒有可生成的型別，所以以**實測錄製的 fixture**（`docs/fixt
 - 模型：以 ACP 能力設定（`session/set_model` 或 `configOptions`，任務 1.x 實測決定）；若都不可用，啟動時傳 `--model`。
 - 登入：`initialize` 或 `session/new` 回傳需要驗證的錯誤時，送出明確訊息（請先在終端執行 `agy` 完成登入），不在頁面內實作 OAuth 流程。
 
+### D8. 執行中插話：同一條連線再送 `session/prompt`
+
+- `runtime.steer(sessionId, userId, text)`：這一輪的 ACP 連線存在、尚未進入收尾，且呼叫者是發起者時，送出 `session/prompt { sessionId, prompt: [{ type: 'text', text }] }`，不等它返回就回覆 `{ ok: true }`；否則回覆 `not_running` / `not_owner` / `empty`。
+- **這一輪何時結束**：計算尚未返回的 `session/prompt` 數量，**全部返回**後才送 `complete` 並結束行程。因為第一個 prompt 會在插話送出時提前以 `end_turn` 返回，如果照 D1 原本的寫法「收到 `stopReason` 就結束」，會把插話那一段截掉。
+- 收尾開始後（數量歸零、準備關閉）到行程結束之間收到的插話，一律回覆 `not_running`，由前端保留在佇列。
+- 中斷時，所有未返回的 prompt 都會以 `cancelled` 返回，沿用 D5。
+- `stopReason` 取最後一個返回的 prompt；任一個以錯誤返回，就照錯誤路徑處理。
+- **為何不用 print 模式的 `--input-format stream-json`**：實測它把每一行當成獨立的一輪依序執行，插話要等目前這一輪結束才生效；結構體裡沒有投遞方式欄位，`control_request` 回覆 "not supported yet"。
+
 ## Risks / Trade-offs
 
 - [ACP 一定要有人回覆審批，否則這一輪會一直等] → 10 分鐘逾時自動拒絕；中斷與行程結束時一律清除；全域收件匣讓使用者在其他會話也看得到待審批項目。
@@ -89,6 +98,8 @@ ACP 沒有可生成的型別，所以以**實測錄製的 fixture**（`docs/fixt
 - [每輪啟動行程的延遲] → 與現況相同，不惡化；若之後成為問題，再評估長駐連線。
 - [前端審批卡片改為依 `context.decisions` 分流，會碰到 Codex 已驗證的顯示路徑] → 改動限於判斷條件；驗收時重跑 Codex 審批（允許、拒絕各一次）。
 - [`bypassPermissions` 由客戶端代答，比 CLI 原生旗標多一層] → 只在使用者明確同意時啟用；若 CLI 旗標可用就改用旗標。
+- [插話的併入行為不在 ACP 規格內，屬於 agy 的實作細節，升級可能改變] → 以錄製的 fixture 固定「第一個 prompt 提前返回、最終只有一則回覆」的形狀並寫測試；驗收時實測一次。
+- [插話恰好在第一個 prompt 返回、行程準備關閉時送出] → 收尾開始後的插話回覆 `not_running`，前端把訊息留在佇列，不會遺失。
 
 ## Migration Plan
 
@@ -102,3 +113,5 @@ ACP 沒有可生成的型別，所以以**實測錄製的 fixture**（`docs/fixt
 - 模型設定方式（`session/set_model`、`configOptions` 或 `--model`）。
 - `agy acp` 是否接受 `--dangerously-skip-permissions`。
 - 被拒絕後，模型是繼續回覆還是結束這一輪；頁面需要的「被拒結果」以實測為準（至少工具卡片顯示為錯誤）。
+- 插話落在審批等待中（工具尚未執行）時的行為：是等審批後併入，還是有其他效果，以任務 1.1 錄製確認。
+- research.md 中 agy acp 的已知問題（skills 不出現、`authenticate` 逾時、串流卡住）在 1.5.3 是否仍存在。

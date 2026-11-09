@@ -69,3 +69,14 @@
 #### Scenario: 行程意外退出
 - **WHEN** 這一輪執行中 `agy acp` 行程意外結束
 - **THEN** 頁面顯示錯誤，待審批項目被清除，這一輪結束
+
+### Requirement: 執行中插話
+Antigravity 的一輪執行中，發起者送出插話時，系統 SHALL 在同一條 ACP 連線上送出新的 `session/prompt`，由 agy 併入目前這一輪；系統 MUST NOT 中斷正在執行的工具，且 MUST 等所有 `session/prompt` 都返回後才結束這一輪並送出一次 `complete`。這一輪已進入收尾或已結束時，插話 MUST 被拒絕並回覆 `not_running`；非發起者的插話 MUST 回覆 `not_owner`。
+
+#### Scenario: 工具執行中插話
+- **WHEN** Antigravity 正在執行 `sleep 8`，使用者插話「結尾加上 PINEAPPLE」
+- **THEN** 工具照常跑完，最終只產生一則回覆且結尾為 PINEAPPLE，頁面只收到一次 `complete`
+
+#### Scenario: 收尾後的插話被拒
+- **WHEN** 這一輪的所有 `session/prompt` 都已返回、行程正在結束時，使用者送出插話
+- **THEN** 系統回覆 `steer-rejected`（`not_running`），訊息不會遺失（由前端保留）
