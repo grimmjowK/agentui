@@ -262,3 +262,14 @@ test('current-turn error after an earlier agent_response step is still emitted',
   ]);
 });
 
+test('AntigravityResponseHandler 記錄最後一段助理回覆供標題生成使用', () => {
+  const handler = new AntigravityResponseHandler('sid', { isWebSocketWriter: true, send: () => {} });
+  handler.appendStream('先思考一下', 0);
+  handler.endStream();
+  assert.equal(handler.lastAssistantText, '先思考一下');
+
+  handler.appendStream('最終回覆內容', 1);
+  handler.endStream();
+  assert.equal(handler.lastAssistantText, '最終回覆內容');
+});
+

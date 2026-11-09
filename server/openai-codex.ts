@@ -9,7 +9,7 @@ import { mapPlanUpdate, mapThreadItem, notifySessionsChanged } from './modules/p
 import { terminateShellSessionsBySessionId } from './modules/websocket/index.js';
 import { getCodexRuntimeInfo } from './shared/codex-cli-path.js';
 import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
-import { createNormalizedMessage, normalizeSessionName } from './shared/utils.js';
+import { createNormalizedMessage, extractTitleFromModelReply } from './shared/utils.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import type { ProviderRuntimeWriter } from './shared/interfaces.js';
 import type { NormalizedMessage } from './shared/types.js';
@@ -75,16 +75,7 @@ const TITLE_SCHEMA = {
 };
 
 /** 從 Codex 回覆中容錯解析標題：優先 JSON.parse，失敗退回正則提取或純文字清理。 */
-export function extractTitleFromCodexReply(text: string): string {
-  let rawTitle: string | undefined;
-  try {
-    rawTitle = (JSON.parse(text) as { title?: string }).title;
-  } catch {
-    const match = text.match(/"title"\s*:\s*"([^"]+)"/);
-    rawTitle = match ? match[1] : text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
-  }
-  return normalizeSessionName(rawTitle, '');
-}
+export const extractTitleFromCodexReply = extractTitleFromModelReply;
 
 /**
  * SDK/app-server 起的會話不會像 Codex Desktop 那樣寫 thread_name，這裡補上：
