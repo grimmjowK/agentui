@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -7,7 +7,14 @@ import test from 'node:test';
 
 import Database from 'better-sqlite3';
 
-import { spawnAntigravity, abortAntigravitySession, getActiveAntigravitySessions, isAntigravitySessionActive, reconnectAntigravitySession } from './antigravity-cli.js';
+import {
+  spawnAntigravity,
+  abortAntigravitySession,
+  generateAntigravityTitle,
+  getActiveAntigravitySessions,
+  isAntigravitySessionActive,
+  reconnectAntigravitySession,
+} from './antigravity-cli.js';
 import { closeConnection } from './modules/database/connection.js';
 import { initializeDatabase } from './modules/database/init-db.js';
 import { sessionsDb, projectsDb, scanStateDb } from './modules/database/index.js';
@@ -16,15 +23,31 @@ import { AntigravitySessionSynchronizer } from './modules/providers/list/antigra
 import { AntigravitySessionsProvider } from './modules/providers/list/antigravity/antigravity-sessions.provider.js';
 import { getProjectsWithSessions, getProjectSessionsPage, getArchivedProjectsWithSessions } from './modules/projects/services/projects-with-sessions-fetch.service.js';
 
+async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('Timed out waiting for condition');
+}
+
 test('Antigravity native IDs survive runs, refresh, pagination and cancellation', { timeout: 20000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agy-continuity-'));
-  const previous = { DATABASE_PATH: process.env.DATABASE_PATH, ANTIGRAVITY_HOME: process.env.ANTIGRAVITY_HOME, ANTIGRAVITY_CLI_PATH: process.env.ANTIGRAVITY_CLI_PATH };
+  const previous = {
+    DATABASE_PATH: process.env.DATABASE_PATH,
+    ANTIGRAVITY_HOME: process.env.ANTIGRAVITY_HOME,
+    ANTIGRAVITY_CLI_PATH: process.env.ANTIGRAVITY_CLI_PATH,
+    AGY_TITLE_CAPTURE: process.env.AGY_TITLE_CAPTURE,
+  };
   const workspace = path.join(root, 'workspace');
   const executable = path.join(root, 'agy');
+  const titleCapturePath = path.join(root, 'title-capture.json');
   closeConnection();
   process.env.DATABASE_PATH = path.join(root, 'app.db');
   process.env.ANTIGRAVITY_HOME = root;
   process.env.ANTIGRAVITY_CLI_PATH = executable;
+  process.env.AGY_TITLE_CAPTURE = titleCapturePath;
   try {
     await mkdir(workspace);
     await writeFile(process.env.DATABASE_PATH!, '');
@@ -33,7 +56,19 @@ test('Antigravity native IDs survive runs, refresh, pagination and cancellation'
 const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
-const prompt = args[args.indexOf('--prompt') + 1];
+if (args.includes('--json-schema')) {
+  if (process.env.AGY_TITLE_CAPTURE) {
+    fs.writeFileSync(process.env.AGY_TITLE_CAPTURE, JSON.stringify({
+      args,
+      cwd: process.cwd(),
+      home: process.env.ANTIGRAVITY_HOME,
+    }));
+  }
+  process.stdout.write(JSON.stringify({ title: 'Generated Antigravity Title' }));
+  process.exit(0);
+}
+const promptIndex = args.indexOf('--prompt');
+const prompt = promptIndex === -1 ? '' : args[promptIndex + 1];
 const id = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : prompt === 'wait' ? 'waiting-native' : prompt === 'reconnect' ? 'reconnect-native' : ['allowed', 'default'].includes(prompt) ? 'permission-' + prompt : 'native-session';
 const emit = (event) => process.stdout.write(JSON.stringify(event) + '\\n');
 fs.writeFileSync(path.join(process.env.ANTIGRAVITY_HOME, 'argv.json'), JSON.stringify(args));
@@ -87,6 +122,40 @@ if (prompt === 'wait') {
     assert.equal(messages.filter((message) => message.kind === 'text').length, 1);
     assert.equal(messages.filter((message) => message.kind === 'complete').length, 1);
     assert.ok(sessionsDb.getSessionById('native-session')?.jsonl_path);
+    await waitFor(() => sessionsDb.getSessionById('native-session')?.custom_name === 'Generated Antigravity Title');
+    const generatedSession = sessionsDb.getSessionById('native-session');
+    assert.equal(generatedSession?.custom_name, 'Generated Antigravity Title');
+    assert.equal(generatedSession?.name_is_custom, 0);
+    const titleCapture = JSON.parse(await readFile(titleCapturePath, 'utf8')) as {
+      args: string[];
+      cwd: string;
+      home: string;
+    };
+    assert.equal(titleCapture.args.includes('--json-schema'), true);
+    assert.equal(titleCapture.args[titleCapture.args.indexOf('--output-format') + 1], 'text');
+    assert.equal(titleCapture.cwd, await realpath(workspace));
+    assert.notEqual(titleCapture.home, root);
+    await waitFor(async () => {
+      try {
+        await access(titleCapture.home);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+
+    const manualTitleWorkspace = path.join(root, 'manual-title-workspace');
+    await mkdir(manualTitleWorkspace);
+    sessionsDb.createSession('manual-title-session', 'antigravity', manualTitleWorkspace, 'Manual title', undefined, undefined, null);
+    sessionsDb.updateSessionCustomName('manual-title-session', 'Manual title', true);
+    await generateAntigravityTitle({
+      sessionId: 'manual-title-session',
+      cwd: manualTitleWorkspace,
+      prompt: 'replace this title',
+      reply: 'but preserve the manual name',
+    });
+    assert.equal(sessionsDb.getSessionById('manual-title-session')?.custom_name, 'Manual title');
+    assert.equal(sessionsDb.getSessionById('manual-title-session')?.name_is_custom, 1);
 
     await spawnAntigravity('second', { cwd: workspace, sessionId: 'native-session' }, writer);
     const argv = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];

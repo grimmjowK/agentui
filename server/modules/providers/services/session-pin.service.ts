@@ -33,6 +33,25 @@ function pinnedDirFor(sessionId: string): string | null {
   return path.join(PINNED_ROOT, sessionId);
 }
 
+/** 啟動期間 sessions 表可能尚未建立；其他 DB 錯誤仍要留下可診斷訊息。 */
+function isDatabaseNotReadyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no such (?:table:\s*sessions|column:\s*name_is_custom)(?:\s|$)/i.test(message);
+}
+
+function getSessionForPinning(sessionId: string, operation: string) {
+  try {
+    return sessionsDb.getSessionById(sessionId);
+  } catch (error) {
+    if (isDatabaseNotReadyError(error)) {
+      return null;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`Failed to ${operation} pinned session ${sessionId}`, { error: message });
+    return null;
+  }
+}
+
 /** 返回备份目录里的唯一一份转录文件 */
 async function findPinnedFile(sessionId: string): Promise<string | null> {
   const pinnedDir = pinnedDirFor(sessionId);
@@ -53,12 +72,7 @@ export const sessionPinService = {
    * 把收藏会话的转录复制一份到备份目录；未收藏或没有转录文件则跳过。
    */
   async syncPinnedTranscript(sessionId: string): Promise<void> {
-    let session;
-    try {
-      session = sessionsDb.getSessionById(sessionId);
-    } catch {
-      return;
-    }
+    const session = getSessionForPinning(sessionId, 'read');
     if (!session?.isStarred || !session.jsonl_path) {
       return;
     }
@@ -97,12 +111,7 @@ export const sessionPinService = {
    * 解析会话转录的可读路径：原文件还在就用原文件，被 CLI 清掉则回退到备份。
    */
   async resolveTranscriptPath(sessionId: string): Promise<string | null> {
-    let jsonlPath: string | null = null;
-    try {
-      jsonlPath = sessionsDb.getSessionById(sessionId)?.jsonl_path ?? null;
-    } catch {
-      // 数据库未就绪或表尚未建立，回退到备份
-    }
+    const jsonlPath = getSessionForPinning(sessionId, 'read')?.jsonl_path ?? null;
 
     if (jsonlPath) {
       try {

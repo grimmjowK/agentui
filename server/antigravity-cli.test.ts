@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { AntigravityResponseHandler } from './antigravity-cli.js';
+import { AntigravityResponseHandler, shouldGenerateAntigravityTitle } from './antigravity-cli.js';
 
 test('AntigravityResponseHandler parses stream deltas and text completion', () => {
   const messages: any[] = [];
@@ -97,6 +97,19 @@ test('result-only responses establish session identity and preserve errors', () 
   assert.equal(messages[0].kind, 'session_created');
   assert.equal(handler.error, 'Permission denied');
   assert.equal(messages.filter((msg) => msg.kind === 'text').length, 0);
+});
+
+test('result-only success records the final assistant response for title generation', () => {
+  const messages: any[] = [];
+  const handler = new AntigravityResponseHandler(null, { isWebSocketWriter: true, send: (msg: any) => messages.push(msg) });
+  handler.handleJsonEvent({
+    event: 'result',
+    result: { conversation_id: 'result-only-id', status: 'SUCCESS', response: '最終回覆內容' },
+  });
+  handler.flush();
+
+  assert.equal(handler.lastAssistantText, '最終回覆內容');
+  assert.deepEqual(messages.filter((msg) => msg.kind === 'text').map((msg) => msg.content), ['最終回覆內容']);
 });
 
 test('findPermissionDeniedNotice 認得 headless 自動拒絕審批的 stderr', async () => {
@@ -271,5 +284,14 @@ test('AntigravityResponseHandler 記錄最後一段助理回覆供標題生成�
   handler.appendStream('最終回覆內容', 1);
   handler.endStream();
   assert.equal(handler.lastAssistantText, '最終回覆內容');
+
+  handler.handleJsonEvent({ type: 'message', content: '非串流完整回覆' });
+  assert.equal(handler.lastAssistantText, '非串流完整回覆');
+});
+
+test('image-only new sessions still qualify for title generation', () => {
+  assert.equal(shouldGenerateAntigravityTitle({}, ''), false);
+  assert.equal(shouldGenerateAntigravityTitle({ images: [{ data: 'image' }] }, ''), true);
+  assert.equal(shouldGenerateAntigravityTitle({ sessionId: 'existing', images: [{ data: 'image' }] }, ''), false);
 });
 

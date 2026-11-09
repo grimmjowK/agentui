@@ -119,6 +119,11 @@ export class AntigravityResponseHandler {
     send(this.writer, { sessionId: this.sessionId, kind: 'stream_delta', content: text });
   }
 
+  recordAssistantText(text) {
+    if (typeof text !== 'string' || !text.trim()) return;
+    this.lastAssistantText = text;
+  }
+
   /**
    * 收尾目前段落：stream_end 帶上與歷史相同的 id（transcript 的 step_index），再送完整文字。
    * 前端把串流氣泡改成這個 id，隨後的 text 以同 id 覆蓋；歷史拉取時也能按 id 去重。
@@ -130,7 +135,7 @@ export class AntigravityResponseHandler {
       : generateMessageId('agy_msg');
     send(this.writer, { sessionId: this.sessionId, kind: 'stream_end', messageId });
     send(this.writer, { sessionId: this.sessionId, id: messageId, kind: 'text', role: 'assistant', content: this.segmentText });
-    this.lastAssistantText = this.segmentText;
+    this.recordAssistantText(this.segmentText);
     this.hasStreamedAny = true;
     this.hasStreamed = false;
     this.streamStep = null;
@@ -234,8 +239,11 @@ export class AntigravityResponseHandler {
       // response 是最後一段回覆，串流時已逐字送出過；只有完全沒有串流（result-only）才用它補上
       // ponytail: 假設最後一段回覆一定有 text_delta（agy 1.5.0 實測如此），否則該段會缺
       const responseText = res.response || '';
-      if (responseText.trim() && !this.hasStreamedAny) {
-        send(this.writer, { sessionId: this.sessionId, kind: 'text', role: 'assistant', content: responseText });
+      if (responseText.trim()) {
+        this.recordAssistantText(responseText);
+        if (!this.hasStreamedAny) {
+          send(this.writer, { sessionId: this.sessionId, kind: 'text', role: 'assistant', content: responseText });
+        }
       }
       return;
     }
@@ -291,6 +299,7 @@ export class AntigravityResponseHandler {
           this.segmentText = content;
           this.endStream();
         } else {
+          this.recordAssistantText(content);
           send(this.writer, { sessionId: this.sessionId, kind: 'text', role: 'assistant', content });
         }
       }
@@ -333,6 +342,22 @@ export function findPermissionDeniedNotice(stderr) {
   return line ? line.trim() : null;
 }
 
+const ANTIGRAVITY_TITLE_SCHEMA = JSON.stringify({
+  type: 'object',
+  properties: {
+    title: { type: 'string', minLength: 1, maxLength: 120 },
+  },
+  required: ['title'],
+  additionalProperties: false,
+});
+
+/** 新會話首輪只要有文字或圖片，就值得在完成後生成標題。 */
+export function shouldGenerateAntigravityTitle(options = {}, message) {
+  if (options.sessionId) return false;
+  if (typeof message === 'string' && message.trim()) return true;
+  return Array.isArray(options.images) && options.images.length > 0;
+}
+
 /**
  * 新會話第一輪結束後在背景另起一個 agy 短暫執行緒生成標題。
  * 使用獨立的臨時 ANTIGRAVITY_HOME 避免污染使用者的會話記錄。
@@ -345,7 +370,8 @@ export async function generateAntigravityTitle(job) {
     const executablePath = resolveAntigravityExecutablePath();
     const instruction = [
       'Write a short title (at most 8 words) for the conversation below.',
-      'Use the same language as the user\'s message. Do not use any tools. Respond with JSON format: {"title": "..."}.',
+      'Use the same language as the user\'s message. Do not use any tools.',
+      'The response must satisfy the provided JSON schema and contain only the title value.',
       '',
       '<user>',
       (job.prompt || '').slice(0, 2000),
@@ -358,6 +384,7 @@ export async function generateAntigravityTitle(job) {
     const args = [
       '-p', instruction,
       '--output-format', 'text',
+      '--json-schema', ANTIGRAVITY_TITLE_SCHEMA,
       '--disable-slash-commands',
       '--sandbox',
     ];
@@ -578,12 +605,12 @@ export async function spawnAntigravity(message, options = {}, ws) {
             summary: `Antigravity 目前以非互動模式執行，需要審批的工具已被自動拒絕。可在設定中切換為跳過權限（bypassPermissions），或在 settings.json 的 permissions.allow 加入允許規則。\n${deniedNotice}`,
           });
         }
-        if (!options.sessionId && message && String(message).trim()) {
+        if (shouldGenerateAntigravityTitle(options, message)) {
           titleJob = {
             sessionId: handler.sessionId,
             cwd,
             model,
-            prompt: String(message),
+            prompt: typeof message === 'string' ? message : '',
             reply: handler.lastAssistantText || '',
           };
         }

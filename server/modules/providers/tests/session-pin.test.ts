@@ -34,3 +34,38 @@ test('收藏的 Antigravity 會話連同 transcript_full.jsonl 一起備份；�
   const { messages } = await new AntigravitySessionsProvider().fetchHistory('pin-1');
   assert.equal(messages.at(-1)?.content, 'head middle tail');
 });
+
+test('session pin lookup skips only database-not-ready errors and warns for unexpected failures', async () => {
+  const originalGetSessionById = sessionsDb.getSessionById;
+  const originalWarn = console.warn;
+  const warnings: unknown[][] = [];
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+
+  try {
+    sessionsDb.getSessionById = (() => {
+      throw new Error('no such table: sessions');
+    }) as typeof sessionsDb.getSessionById;
+    await assert.doesNotReject(sessionPinService.syncPinnedTranscript('pin-not-ready'));
+    await assert.doesNotReject(sessionPinService.resolveTranscriptPath('pin-not-ready'));
+    assert.equal(warnings.length, 0);
+
+    sessionsDb.getSessionById = (() => {
+      throw new Error('no such column: name_is_custom');
+    }) as typeof sessionsDb.getSessionById;
+    await assert.doesNotReject(sessionPinService.syncPinnedTranscript('pin-old-schema'));
+    await assert.doesNotReject(sessionPinService.resolveTranscriptPath('pin-old-schema'));
+    assert.equal(warnings.length, 0);
+
+    sessionsDb.getSessionById = (() => {
+      throw new Error('disk I/O error');
+    }) as typeof sessionsDb.getSessionById;
+    await assert.doesNotReject(sessionPinService.syncPinnedTranscript('pin-broken-db'));
+    await assert.doesNotReject(sessionPinService.resolveTranscriptPath('pin-broken-db'));
+    assert.equal(warnings.length, 2);
+    assert.match(String(warnings[0]?.[0]), /Failed to read pinned session pin-broken-db/);
+    assert.match(String(warnings[1]?.[0]), /Failed to read pinned session pin-broken-db/);
+  } finally {
+    sessionsDb.getSessionById = originalGetSessionById;
+    console.warn = originalWarn;
+  }
+});
