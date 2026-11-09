@@ -135,6 +135,11 @@ function queuePendingWatcherUpdate(
   schedulePendingWatcherFlush();
 }
 
+/** 非檔案事件（如背景生成的標題）改了會話資料時，走同一套 projects_updated 廣播。 */
+export function notifySessionsChanged(provider: LLMProvider, sessionId: string): void {
+  queuePendingWatcherUpdate('change', provider, sessionId);
+}
+
 async function flushPendingWatcherUpdate(): Promise<void> {
   clearPendingWatcherFlushTimer();
 
