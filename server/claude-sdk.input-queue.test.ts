@@ -32,3 +32,13 @@ test('輸入佇列：舊版 CLI 沒有 uuid 列表時依 queued_turn_count 判�
   assert.equal(input.onResult({ queued_turn_count: 1 }), false);
   assert.equal(input.onResult({ queued_turn_count: 0 }), true);
 });
+
+test('輸入佇列：中斷時 close 丟掉尚未交出的插話', async () => {
+  const input = createInputQueue();
+  const it = input[Symbol.asyncIterator]();
+  input.push('first');
+  await it.next();
+  input.push('buffered-steer');
+  input.close();
+  assert.equal((await it.next()).done, true, '已緩衝的插話不能在停止後交給 CLI');
+});

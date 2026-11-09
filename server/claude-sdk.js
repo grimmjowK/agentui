@@ -338,8 +338,14 @@ function createInputQueue() {
       if (pending.size === 0) this.close();
       return closed;
     },
+    /**
+     * 結束輸入。正常收尾時 buffer 必然已空（pending 歸零代表都被讀走並消化）；
+     * 中斷或出錯時丟掉尚未交給 CLI 的插話，避免停止後還被送進模型。
+     */
     close() {
       closed = true;
+      buffer.length = 0;
+      pending.clear();
       notify();
     },
     async *[Symbol.asyncIterator]() {
@@ -467,6 +473,9 @@ async function queryClaudeSDK(command, options = {}, ws) {
   let queryInstance;
   let input = null;
   let lastVisibleAssistantText = '';
+  // 最後一個 result 若是錯誤（error_during_execution、error_max_turns 等），收尾時回報為失敗。
+  // SDK 對這類 result 不會拋錯，迴圈照常結束。
+  let lastResultError = null;
 
   const emitNotification = (event) => {
     notifyUserIfEnabled({
@@ -676,6 +685,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       // Extract and send token budget updates from result messages
       if (message.type === 'result') {
         input.onResult(message);
+        lastResultError = message.is_error ? message : null;
         const tokenBudgetData = extractTokenBudget(message, lastMainUsage, lastMainModel);
         if (tokenBudgetData) {
           ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
@@ -693,6 +703,24 @@ async function queryClaudeSDK(command, options = {}, ws) {
     await cleanupTempFiles(tempImagePaths, tempDir);
 
     if (abortedQueries.has(queryInstance)) return;
+
+    if (lastResultError) {
+      const errorContent = (Array.isArray(lastResultError.errors) && lastResultError.errors.filter(Boolean).join('\n'))
+        || (typeof lastResultError.result === 'string' && lastResultError.result.trim())
+        || `Claude run failed (${lastResultError.subtype || 'error'})`;
+      // 錯誤已以助理文字顯示過時不再重複一個錯誤泡泡，改送失敗的 complete；兩者前端都視為出錯
+      ws.send(createNormalizedMessage(shouldSuppressClaudeWrappedError(lastVisibleAssistantText, errorContent)
+        ? { kind: 'complete', exitCode: 1, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude' }
+        : { kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+      notifyRunFailed({
+        userId: ws?.userId || null,
+        provider: 'claude',
+        sessionId: capturedSessionId || sessionId || null,
+        sessionName: sessionSummary,
+        error: new Error(errorContent)
+      });
+      return;
+    }
 
     // Send completion event
     ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude' }));

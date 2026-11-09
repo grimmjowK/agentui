@@ -1112,6 +1112,24 @@ export function useChatComposerState({
     [addMessage, queueKey, scrollToBottom, sendMessage, t],
   );
 
+  /**
+   * WebSocket 重連後校正等待中的插話：回覆可能隨斷線遺失，否則項目會一直停在引導中。
+   * 以刷新後的歷史是否有 `user:<項目 id>`（後端接受時以此 id 記錄）判斷是否已被接受，避免重複送出。
+   */
+  const reconcilePendingSteer = useCallback(
+    async (isRecorded: (sessionId: string, messageId: string, provider: LLMProvider) => Promise<boolean>) => {
+      const pending = pendingSteerRef.current;
+      if (!pending) return;
+      const recorded = await isRecorded(pending.sessionId, `user:${pending.itemId}`, pending.provider).catch(() => false);
+      // 等待期間若已收到真正的回覆就不再處理
+      if (pendingSteerRef.current !== pending) return;
+      handleSteerResult(recorded
+        ? { type: 'steer-accepted', clientId: pending.itemId }
+        : { type: 'steer-rejected', clientId: pending.itemId, reason: 'disconnected' });
+    },
+    [handleSteerResult],
+  );
+
   /** realtime handler 通知這一輪結束；只有畫面上的會話正常結束才自動送出佇列第一則。 */
   const handleTurnEnded = useCallback((outcome: TurnOutcome, isCurrentSession: boolean) => {
     if (outcome === 'completed' && isCurrentSession) setAutoSendTick((tick) => tick + 1);
@@ -1136,6 +1154,7 @@ export function useChatComposerState({
     removeQueuedMessage,
     handleSteerResult,
     handleTurnEnded,
+    reconcilePendingSteer,
     textareaRef,
     inputHighlightRef,
     isTextareaExpanded,
