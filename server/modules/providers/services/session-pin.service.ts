@@ -53,7 +53,12 @@ export const sessionPinService = {
    * 把收藏会话的转录复制一份到备份目录；未收藏或没有转录文件则跳过。
    */
   async syncPinnedTranscript(sessionId: string): Promise<void> {
-    const session = sessionsDb.getSessionById(sessionId);
+    let session;
+    try {
+      session = sessionsDb.getSessionById(sessionId);
+    } catch {
+      return;
+    }
     if (!session?.isStarred || !session.jsonl_path) {
       return;
     }
@@ -92,7 +97,12 @@ export const sessionPinService = {
    * 解析会话转录的可读路径：原文件还在就用原文件，被 CLI 清掉则回退到备份。
    */
   async resolveTranscriptPath(sessionId: string): Promise<string | null> {
-    const jsonlPath = sessionsDb.getSessionById(sessionId)?.jsonl_path ?? null;
+    let jsonlPath: string | null = null;
+    try {
+      jsonlPath = sessionsDb.getSessionById(sessionId)?.jsonl_path ?? null;
+    } catch {
+      // 数据库未就绪或表尚未建立，回退到备份
+    }
 
     if (jsonlPath) {
       try {
