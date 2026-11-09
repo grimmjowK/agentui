@@ -445,6 +445,14 @@ export const runMigrations = (db: Database) => {
       'isStarred',
       'BOOLEAN DEFAULT 0'
     );
+    // 不給預設值：舊資料保持 NULL（來源未知），由各同步程式自行判斷能否改用自動標題
+    addColumnToTableIfNotExists(
+      db,
+      'sessions',
+      getTableInfo(db, 'sessions').map((column) => column.name),
+      'name_is_custom',
+      'INTEGER'
+    );
     migrateLegacySessionNames(db);
     removeRetiredGeminiSessions(db);
     ensureProjectsForSessionPaths(db);

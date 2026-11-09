@@ -7,6 +7,7 @@ import {
   extractFirstValidJsonlData,
   findFilesRecursivelyCreatedAfter,
   normalizeSessionName,
+  shouldKeepExistingSessionName,
   readFileTimestamps,
 } from '@/shared/utils.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
@@ -49,6 +50,8 @@ export function parseCodexSessionMetadata(rawData: unknown): ParsedSession | nul
 /**
  * Session indexer for Codex transcript artifacts.
  */
+const UNTITLED_CODEX = 'Untitled Codex Session';
+
 export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
   private readonly provider = 'codex' as const;
   private readonly codexHome = resolveCodexConfigRoot();
@@ -74,14 +77,6 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
       const parsed = await this.processSessionFile(filePath, nameMap);
       if (!parsed) {
         continue;
-      }
-
-      const existingSession = sessionsDb.getSessionById(parsed.sessionId);
-      if (existingSession) {
-        // If session name is untitled and we now have a name, update it
-        if (existingSession.custom_name === 'Untitled Codex Session' && parsed.sessionName && parsed.sessionName !== 'Untitled Codex Session') {
-          sessionsDb.updateSessionCustomName(parsed.sessionId, parsed.sessionName);
-        }
       }
 
       const timestamps = await readFileTimestamps(filePath);
@@ -147,22 +142,23 @@ export class CodexSessionSynchronizer implements IProviderSessionSynchronizer {
     }
 
     const existingSession = sessionsDb.getSessionById(parsed.sessionId);
-    const existingSessionName = existingSession?.custom_name;
-    if (existingSessionName && existingSessionName !== 'Untitled Codex Session') {
-      return {
-        ...parsed,
-        sessionName: normalizeSessionName(existingSessionName, 'Untitled Codex Session'),
-      };
+    if (existingSession?.name_is_custom === 1 && existingSession.custom_name) {
+      return { ...parsed, sessionName: existingSession.custom_name };
     }
 
-    let sessionName = nameMap.get(parsed.sessionId);
-    if (!sessionName) {
-      sessionName = await this.extractLastAgentMessageFromEnd(filePath);
+    // Codex Desktop/CLI 會把自動生成的標題寫進 session_index.jsonl；SDK 跑的會話沒有
+    const threadName = nameMap.get(parsed.sessionId);
+    const lastAgentMessage = await this.extractLastAgentMessageFromEnd(filePath);
+    if (shouldKeepExistingSessionName(existingSession, [threadName, lastAgentMessage], UNTITLED_CODEX)) {
+      return { ...parsed, sessionName: existingSession!.custom_name! };
     }
-
+    // 沒有標題時沿用既有自動名，避免每輪都換成最新一則回覆
+    const keepExisting = !threadName && existingSession?.custom_name && existingSession.custom_name !== UNTITLED_CODEX;
     return {
       ...parsed,
-      sessionName: normalizeSessionName(sessionName, 'Untitled Codex Session'),
+      sessionName: keepExisting
+        ? existingSession!.custom_name!
+        : normalizeSessionName(threadName ?? lastAgentMessage, UNTITLED_CODEX),
     };
   }
 

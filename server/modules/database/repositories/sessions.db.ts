@@ -8,6 +8,8 @@ type SessionRow = {
   project_path: string | null;
   jsonl_path: string | null;
   custom_name: string | null;
+  /** 1=使用者手動命名（同步程式不得覆蓋）；0=自動命名；NULL=加欄位前的舊資料，來源未知 */
+  name_is_custom: number | null;
   isArchived: number;
   isStarred: number;
   created_at: string;
@@ -21,6 +23,7 @@ type SessionMetadataLookupRow = Pick<
   | 'project_path'
   | 'jsonl_path'
   | 'custom_name'
+  | 'name_is_custom'
   | 'isArchived'
   | 'isStarred'
   | 'created_at'
@@ -63,15 +66,16 @@ export const sessionsDb = {
     projectsDb.createProjectPath(normalizedProjectPath);
 
     db.prepare(
-      `INSERT INTO sessions (session_id, provider, custom_name, project_path, jsonl_path, isArchived, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 0, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
+      `INSERT INTO sessions (session_id, provider, custom_name, name_is_custom, project_path, jsonl_path, isArchived, created_at, updated_at)
+       VALUES (?, ?, ?, 0, ?, ?, 0, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
        ON CONFLICT(session_id) DO UPDATE SET
          provider = excluded.provider,
          updated_at = excluded.updated_at,
          project_path = excluded.project_path,
          jsonl_path = excluded.jsonl_path,
          isArchived = 0,
-         custom_name = COALESCE(excluded.custom_name, sessions.custom_name)`
+         custom_name = CASE WHEN sessions.name_is_custom = 1 THEN sessions.custom_name
+           ELSE COALESCE(excluded.custom_name, sessions.custom_name) END`
     ).run(
       sessionId,
       provider,
@@ -101,12 +105,13 @@ export const sessionsDb = {
     ).run(sessionId, model);
   },
 
-  updateSessionCustomName(sessionId: string, customName: string): void {
+  /** isCustom=false 供同步程式寫入自動標題：使用者手動命名過的不會被覆蓋。 */
+  updateSessionCustomName(sessionId: string, customName: string, isCustom = true): void {
     const db = getConnection();
     db.prepare(
-      `UPDATE sessions
-       SET custom_name = ?
-       WHERE session_id = ?`
+      isCustom
+        ? 'UPDATE sessions SET custom_name = ?, name_is_custom = 1 WHERE session_id = ?'
+        : 'UPDATE sessions SET custom_name = ? WHERE session_id = ? AND COALESCE(name_is_custom, 0) = 0'
     ).run(customName, sessionId);
   },
 
@@ -114,7 +119,7 @@ export const sessionsDb = {
     const db = getConnection();
     const row = db
       .prepare(
-        `SELECT session_id, provider, project_path, jsonl_path, custom_name, isArchived, isStarred, created_at, updated_at
+        `SELECT session_id, provider, project_path, jsonl_path, custom_name, name_is_custom, isArchived, isStarred, created_at, updated_at
          FROM sessions
          WHERE session_id = ?
          ORDER BY updated_at DESC

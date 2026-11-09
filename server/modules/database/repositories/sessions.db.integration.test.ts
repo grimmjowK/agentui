@@ -8,6 +8,7 @@ import { closeConnection } from '@/modules/database/connection.js';
 import { initializeDatabase } from '@/modules/database/init-db.js';
 import { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
 import { sessionMessagesDb } from '@/modules/database/repositories/session-messages.db.js';
+import { shouldKeepExistingSessionName } from '@/shared/utils.js';
 
 async function withIsolatedDatabase(runTest: () => void | Promise<void>): Promise<void> {
   const previousDatabasePath = process.env.DATABASE_PATH;
@@ -141,4 +142,27 @@ test('啟動遷移刪除 gemini 索引列，殘留的 gemini 收藏在讀取時�
     assert.deepEqual(project.sessionsByProvider.claude!.map((s) => s.id), ['claude-1']);
     assert.equal(JSON.stringify(projects).includes('gemini-2'), false);
   });
+});
+
+test('synced auto names update but manual renames are never overwritten', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createSession('s1', 'claude', '/workspace/demo-project', 'first prompt');
+    sessionsDb.createSession('s1', 'claude', '/workspace/demo-project', 'AI title');
+    assert.equal(sessionsDb.getSessionById('s1')?.custom_name, 'AI title');
+    assert.equal(sessionsDb.getSessionById('s1')?.name_is_custom, 0);
+
+    sessionsDb.updateSessionCustomName('s1', 'My name');
+    sessionsDb.createSession('s1', 'claude', '/workspace/demo-project', 'newer AI title');
+    sessionsDb.updateSessionCustomName('s1', 'auto again', false);
+    assert.equal(sessionsDb.getSessionById('s1')?.custom_name, 'My name');
+    assert.equal(sessionsDb.getSessionById('s1')?.name_is_custom, 1);
+  });
+});
+
+test('legacy names (name_is_custom NULL) are kept only when not derivable from the transcript', () => {
+  const legacy = (name: string) => ({ custom_name: name, name_is_custom: null });
+  assert.equal(shouldKeepExistingSessionName(legacy('first prompt'), ['first prompt', 'AI title'], 'Untitled'), false);
+  assert.equal(shouldKeepExistingSessionName(legacy('Renamed by user'), ['first prompt'], 'Untitled'), true);
+  assert.equal(shouldKeepExistingSessionName(legacy('Untitled'), [], 'Untitled'), false);
+  assert.equal(shouldKeepExistingSessionName({ custom_name: 'x', name_is_custom: 0 }, [], 'Untitled'), false);
 });

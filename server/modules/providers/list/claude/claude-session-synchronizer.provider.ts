@@ -9,6 +9,7 @@ import {
   findFilesRecursivelyCreatedAfter,
   normalizeSessionName,
   readFileTimestamps,
+  shouldKeepExistingSessionName,
 } from '@/shared/utils.js';
 import type { IProviderSessionSynchronizer } from '@/shared/interfaces.js';
 
@@ -17,6 +18,15 @@ type ParsedSession = {
   projectPath: string;
   sessionName?: string;
 };
+
+type SessionTitles = {
+  customTitle?: string;
+  aiTitle?: string;
+  lastPrompt?: string;
+  all: string[];
+};
+
+const UNTITLED = 'Untitled Claude Session';
 
 /**
  * sub-agent 的转录写在 `<主会话 id>/subagents/agent-*.jsonl`，每行的 `sessionId`
@@ -127,65 +137,56 @@ export class ClaudeSessionSynchronizer implements IProviderSessionSynchronizer {
     }
 
     const existingSession = sessionsDb.getSessionById(parsed.sessionId);
-    const existingSessionName = existingSession?.custom_name;
-    if (existingSessionName && existingSessionName !== 'Untitled Claude Session') {
-      return {
-        ...parsed,
-        sessionName: normalizeSessionName(existingSessionName, 'Untitled Claude Session'),
-      };
+    if (existingSession?.name_is_custom === 1 && existingSession.custom_name) {
+      return { ...parsed, sessionName: existingSession.custom_name };
     }
 
-    let sessionName = nameMap.get(parsed.sessionId);
-    if (!sessionName) {
-      sessionName = await this.extractSessionAiTitleFromEnd(filePath, parsed.sessionId);
+    const titles = await this.readSessionTitles(filePath, parsed.sessionId);
+    const historyName = nameMap.get(parsed.sessionId);
+    if (shouldKeepExistingSessionName(existingSession, [...titles.all, historyName], UNTITLED)) {
+      return { ...parsed, sessionName: existingSession!.custom_name! };
     }
 
+    // CLI /rename > Claude 自動生成的標題 > 首句提問 > 最後一句提問
     return {
       ...parsed,
-      sessionName: normalizeSessionName(sessionName, 'Untitled Claude Session'),
+      sessionName: normalizeSessionName(
+        titles.customTitle ?? titles.aiTitle ?? historyName ?? titles.lastPrompt,
+        UNTITLED,
+      ),
     };
   }
 
-  private async extractSessionAiTitleFromEnd(
-    filePath: string,
-    sessionId: string
-  ): Promise<string | undefined> {
+  /** 取各類標題事件的最新值；all 收集所有出現過的值，供判斷舊資料的名稱是否為自動產生。 */
+  private async readSessionTitles(filePath: string, sessionId: string): Promise<SessionTitles> {
+    const result: SessionTitles = { all: [] };
+    let content: string;
     try {
-      const content = await readFile(filePath, 'utf8');
-      const lines = content.split(/\r?\n/);
-
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const line = lines[index]?.trim();
-        if (!line) {
-          continue;
-        }
-
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
-
-        const data = parsed as Record<string, unknown>;
-        const eventType = typeof data.type === 'string' ? data.type : undefined;
-        const eventSessionId = typeof data.sessionId === 'string' ? data.sessionId : undefined;
-        const aiTitle = typeof data.aiTitle === 'string' ? data.aiTitle : undefined;
-        const lastPrompt = typeof data.lastPrompt === 'string' ? data.lastPrompt : undefined;
-        const claudeRenamedTitle = typeof data.customTitle === 'string' ? data.customTitle : undefined;
-
-        if (
-          (eventType === 'ai-title' && eventSessionId === sessionId && aiTitle?.trim()) ||
-          (eventType === 'last-prompt' && eventSessionId === sessionId && lastPrompt?.trim()) ||
-          (eventType === "custom-title" && eventSessionId === sessionId && claudeRenamedTitle?.trim())
-        ) {
-          return aiTitle || lastPrompt || claudeRenamedTitle;
-        }
-      }
+      content = await readFile(filePath, 'utf8');
     } catch {
       // Ignore missing/unreadable files so sync can continue.
+      return result;
     }
 
-    return undefined;
+    for (const line of content.split(/\r?\n/)) {
+      // 先用字串篩掉絕大多數訊息行，避免整檔逐行 JSON.parse
+      const field = line.includes('"type":"ai-title"') ? 'aiTitle'
+        : line.includes('"type":"last-prompt"') ? 'lastPrompt'
+          : line.includes('"type":"custom-title"') ? 'customTitle'
+            : null;
+      if (!field) continue;
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const value = data[field];
+      if (data.sessionId === sessionId && typeof value === 'string' && value.trim()) {
+        result[field] = value;
+        result.all.push(value);
+      }
+    }
+    return result;
   }
 }

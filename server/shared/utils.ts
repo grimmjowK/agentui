@@ -617,6 +617,22 @@ export function normalizeSessionName(rawValue: string | undefined, fallback: str
   return normalized.slice(0, 120);
 }
 
+/**
+ * 同步程式判斷是否沿用資料庫裡的既有名稱：使用者手動命名（name_is_custom=1）一律保留；
+ * 加欄位前的舊資料（NULL）只有在既有名稱能從 transcript 推導出來時才視為自動命名、允許更新。
+ */
+export function shouldKeepExistingSessionName(
+  existing: { custom_name: string | null; name_is_custom: number | null } | null | undefined,
+  derivableNames: Array<string | undefined>,
+  fallback: string,
+): boolean {
+  const name = existing?.custom_name;
+  if (!existing || !name || name === fallback) return false;
+  if (existing.name_is_custom !== null) return existing.name_is_custom === 1;
+  const derivable = new Set(derivableNames.map((value) => normalizeSessionName(value, '')));
+  return !derivable.has(normalizeSessionName(name, ''));
+}
+
 // ---------------------------
 //----------------- SESSION SYNCHRONIZER FILESYSTEM HELPERS ------------
 /**
