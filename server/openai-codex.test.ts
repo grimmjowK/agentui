@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { steerRun } from './openai-codex.js';
+import { extractTitleFromCodexReply, steerRun } from './openai-codex.js';
 
 function run(overrides: Record<string, unknown> = {}) {
   const calls: unknown[] = [];
@@ -50,4 +50,20 @@ test('app-server 回傳錯誤時只回報失敗，這一輪不受影響', async 
   assert.equal(state.finished, false);
   assert.equal(state.interrupted, false);
   assert.equal(isClosed(), false);
+});
+
+test('extractTitleFromCodexReply 容錯解析：標準 JSON、markdown 包裹、正則提取與純文本', () => {
+  // 標準 JSON
+  assert.equal(extractTitleFromCodexReply('{"title": "Review PR 14"}'), 'Review PR 14');
+  // 帶額外空格與換行
+  assert.equal(extractTitleFromCodexReply('  \n{"title": "  Review   PR 14  "}  \n'), 'Review PR 14');
+  // Markdown json 代碼塊包裹
+  assert.equal(extractTitleFromCodexReply('```json\n{"title": "優化佈局"}\n```'), '優化佈局');
+  // 非標準 JSON 含有文字，正則提取
+  assert.equal(extractTitleFromCodexReply('Here is the title:\n{"title": "修復登入問題"}\nHope it helps!'), '修復登入問題');
+  // 純文字降級（模型未輸出 json）
+  assert.equal(extractTitleFromCodexReply('只回覆純文字標題'), '只回覆純文字標題');
+  // 空文字或無效輸入
+  assert.equal(extractTitleFromCodexReply(''), '');
+  assert.equal(extractTitleFromCodexReply('   '), '');
 });

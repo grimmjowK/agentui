@@ -74,6 +74,18 @@ const TITLE_SCHEMA = {
   type: 'object', properties: { title: { type: 'string' } }, required: ['title'], additionalProperties: false,
 };
 
+/** 從 Codex 回覆中容錯解析標題：優先 JSON.parse，失敗退回正則提取或純文字清理。 */
+export function extractTitleFromCodexReply(text: string): string {
+  let rawTitle: string | undefined;
+  try {
+    rawTitle = (JSON.parse(text) as { title?: string }).title;
+  } catch {
+    const match = text.match(/"title"\s*:\s*"([^"]+)"/);
+    rawTitle = match ? match[1] : text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
+  }
+  return normalizeSessionName(rawTitle, '');
+}
+
 /**
  * SDK/app-server 起的會話不會像 Codex Desktop 那樣寫 thread_name，這裡補上：
  * 新會話第一輪結束後另起一個 app-server，用不落盤的 ephemeral thread 生成標題。
@@ -111,7 +123,7 @@ export async function generateCodexTitle(job: TitleJob): Promise<void> {
       threadId: thread.id, input: [{ type: 'text', text: instruction, text_elements: [] }], outputSchema: TITLE_SCHEMA,
     });
     await done;
-    const title = normalizeSessionName((JSON.parse(text) as { title?: string }).title, '');
+    const title = extractTitleFromCodexReply(text);
     if (!title) return;
     sessionsDb.updateSessionCustomName(job.threadId, title, false);
     notifySessionsChanged('codex', job.threadId);
