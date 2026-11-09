@@ -7,10 +7,18 @@
  * No localStorage for messages. Backend JSONL is the source of truth.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { authenticatedFetch } from '../utils/api';
 import type { LLMProvider } from '../types/app';
+import {
+  applyLogMessage as applySharedLogMessage,
+  buildLogMerged as buildSharedLogMerged,
+  clearLogStreaming as clearSharedLogStreaming,
+  compareBySeq,
+  replaceWithFetched as replaceSharedWithFetched,
+  upsertLogMessage,
+} from '../../shared/sessionMessageLogMerge';
 
 // ─── NormalizedMessage (mirrors server/adapters/types.js) ────────────────────
 
@@ -32,6 +40,7 @@ export type MessageKind =
 
 export interface NormalizedMessage {
   id: string;
+  seq?: number;
   sessionId: string;
   timestamp: string;
   provider: LLMProvider;
@@ -103,6 +112,7 @@ export interface SessionSlot {
   total: number;
   hasMore: boolean;
   offset: number;
+  nextBeforeSeq: number | null;
   tokenUsage: unknown;
 }
 
@@ -120,6 +130,7 @@ function createEmptySlot(): SessionSlot {
     total: 0,
     hasMore: false,
     offset: 0,
+    nextBeforeSeq: null,
     tokenUsage: null,
   };
 }
@@ -389,14 +400,64 @@ const STALE_THRESHOLD_MS = 30_000;
 
 const MAX_REALTIME_MESSAGES = 500;
 
+function upsertMessage(messages: NormalizedMessage[], incoming: NormalizedMessage): NormalizedMessage[] {
+  return upsertLogMessage<NormalizedMessage>(messages, incoming);
+}
+
+function buildLogMerged(slot: SessionSlot): NormalizedMessage[] {
+  return buildSharedLogMerged<NormalizedMessage>(slot);
+}
+
+export function applyLogMessage(slot: SessionSlot, message: NormalizedMessage): SessionSlot {
+  return applySharedLogMessage<NormalizedMessage, SessionSlot>(slot, message);
+}
+
+export function clearLogStreaming(slot: SessionSlot, sessionId: string): SessionSlot {
+  return clearSharedLogStreaming<NormalizedMessage, SessionSlot>(slot, sessionId);
+}
+
+export function replaceWithFetched(
+  slot: SessionSlot,
+  messages: NormalizedMessage[],
+): SessionSlot {
+  return replaceSharedWithFetched<NormalizedMessage, SessionSlot>(slot, messages);
+}
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useSessionStore() {
   const storeRef = useRef(new Map<string, SessionSlot>());
   const sessionAliasesRef = useRef(new Map<string, string>());
   const activeSessionIdRef = useRef<string | null>(null);
+  const logModeRef = useRef(true);
   // Bump to force re-render — only when the active session's data changes
   const [, setTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void authenticatedFetch('/api/config')
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((config) => {
+        if (cancelled || !config) return;
+        logModeRef.current = config.sessionMessageLogEnabled !== false;
+        for (const slot of storeRef.current.values()) {
+          if (logModeRef.current) {
+            slot.merged = buildLogMerged(slot);
+          } else {
+            slot.merged = computeMerged(slot.serverMessages, slot.realtimeMessages);
+          }
+          slot._lastServerRef = slot.serverMessages;
+          slot._lastRealtimeRef = slot.realtimeMessages;
+        }
+        setTick((value) => value + 1);
+      })
+      .catch(() => {
+        // The default is the new path; a config failure must not blank chat.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const notify = useCallback((sessionId: string) => {
     const aliases = sessionAliasesRef.current;
     let resolvedSessionId = sessionId;
@@ -460,6 +521,7 @@ export function useSessionStore() {
       projectPath?: string;
       limit?: number | null;
       offset?: number;
+      beforeSeq?: number;
     } = {},
   ) => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
@@ -471,7 +533,11 @@ export function useSessionStore() {
       const params = new URLSearchParams();
       if (opts.limit !== null && opts.limit !== undefined) {
         params.append('limit', String(opts.limit));
-        params.append('offset', String(opts.offset ?? 0));
+        if (logModeRef.current && opts.beforeSeq !== undefined) {
+          params.append('beforeSeq', String(opts.beforeSeq));
+        } else {
+          params.append('offset', String(opts.offset ?? 0));
+        }
       }
 
       const qs = params.toString();
@@ -485,13 +551,30 @@ export function useSessionStore() {
       const data = await response.json();
       const messages: NormalizedMessage[] = data.messages || [];
 
-      slot.serverMessages = messages;
+      if (logModeRef.current) {
+        replaceWithFetched(slot, messages);
+      } else {
+        slot.serverMessages = messages;
+      }
       slot.total = data.total ?? messages.length;
       slot.hasMore = Boolean(data.hasMore);
       slot.offset = (opts.offset ?? 0) + messages.length;
+      slot.nextBeforeSeq = typeof data.nextBeforeSeq === 'number'
+        ? data.nextBeforeSeq
+        : messages.reduce<number | null>((minimum, message) => (
+          typeof message.seq === 'number' && (minimum === null || message.seq < minimum)
+            ? message.seq
+            : minimum
+        ), null);
       slot.fetchedAt = Date.now();
       slot.status = 'idle';
-      recomputeMergedIfNeeded(slot);
+      if (logModeRef.current) {
+        slot.merged = buildLogMerged(slot);
+        slot._lastServerRef = slot.serverMessages;
+        slot._lastRealtimeRef = slot.realtimeMessages;
+      } else {
+        recomputeMergedIfNeeded(slot);
+      }
       if (data.tokenUsage) {
         slot.tokenUsage = data.tokenUsage;
       }
@@ -525,7 +608,11 @@ export function useSessionStore() {
     const params = new URLSearchParams();
     const limit = opts.limit ?? 20;
     params.append('limit', String(limit));
-    params.append('offset', String(slot.offset));
+    if (logModeRef.current && slot.nextBeforeSeq !== null) {
+      params.append('beforeSeq', String(slot.nextBeforeSeq));
+    } else {
+      params.append('offset', String(slot.offset));
+    }
 
     const qs = params.toString();
     const url = `/api/providers/sessions/${encodeURIComponent(resolvedSessionId)}/messages${qs ? `?${qs}` : ''}`;
@@ -536,11 +623,27 @@ export function useSessionStore() {
       const data = await response.json();
       const olderMessages: NormalizedMessage[] = data.messages || [];
 
-      // Prepend older messages (they're earlier in the conversation)
-      slot.serverMessages = [...olderMessages, ...slot.serverMessages];
+      if (logModeRef.current) {
+        for (const message of olderMessages) {
+          slot.serverMessages = upsertMessage(slot.serverMessages, message);
+        }
+        slot.merged = buildLogMerged(slot);
+        slot._lastServerRef = slot.serverMessages;
+        slot._lastRealtimeRef = slot.realtimeMessages;
+      } else {
+        // Prepend older messages (they're earlier in the conversation)
+        slot.serverMessages = [...olderMessages, ...slot.serverMessages];
+        recomputeMergedIfNeeded(slot);
+      }
       slot.hasMore = Boolean(data.hasMore);
       slot.offset = slot.offset + olderMessages.length;
-      recomputeMergedIfNeeded(slot);
+      slot.nextBeforeSeq = typeof data.nextBeforeSeq === 'number'
+        ? data.nextBeforeSeq
+        : olderMessages.reduce<number | null>((minimum, message) => (
+          typeof message.seq === 'number' && (minimum === null || message.seq < minimum)
+            ? message.seq
+            : minimum
+        ), slot.nextBeforeSeq);
       notify(resolvedSessionId);
       return slot;
     } catch (error) {
@@ -560,6 +663,13 @@ export function useSessionStore() {
       msg.sessionId === resolvedSessionId
         ? msg
         : { ...msg, sessionId: resolvedSessionId };
+    if (logModeRef.current) {
+      applyLogMessage(slot, normalizedMessage);
+      slot._lastServerRef = slot.serverMessages;
+      slot._lastRealtimeRef = slot.realtimeMessages;
+      notify(resolvedSessionId);
+      return;
+    }
     const existingIndex = normalizedMessage.id
       ? slot.realtimeMessages.findIndex((existing) => existing.id === normalizedMessage.id)
       : -1;
@@ -590,6 +700,13 @@ export function useSessionStore() {
         ? msg
         : { ...msg, sessionId: resolvedSessionId },
     );
+    if (logModeRef.current) {
+      for (const message of normalizedMessages) applyLogMessage(slot, message);
+      slot._lastServerRef = slot.serverMessages;
+      slot._lastRealtimeRef = slot.realtimeMessages;
+      notify(resolvedSessionId);
+      return;
+    }
     let updated = [...slot.realtimeMessages, ...normalizedMessages];
     if (updated.length > MAX_REALTIME_MESSAGES) {
       updated = updated.slice(-MAX_REALTIME_MESSAGES);
@@ -598,6 +715,22 @@ export function useSessionStore() {
     recomputeMergedIfNeeded(slot);
     notify(resolvedSessionId);
   }, [getSlot, notify, resolveSessionId]);
+
+  const removeRealtimeMessage = useCallback((sessionId: string, messageId: string) => {
+    const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
+    const slot = storeRef.current.get(resolvedSessionId);
+    if (!slot) return;
+    slot.serverMessages = slot.serverMessages.filter((message) => message.id !== messageId);
+    slot.realtimeMessages = slot.realtimeMessages.filter((message) => message.id !== messageId);
+    if (logModeRef.current) {
+      slot.merged = buildLogMerged(slot);
+      slot._lastServerRef = slot.serverMessages;
+      slot._lastRealtimeRef = slot.realtimeMessages;
+    } else {
+      recomputeMergedIfNeeded(slot);
+    }
+    notify(resolvedSessionId);
+  }, [notify, resolveSessionId]);
 
   /**
    * Re-fetch serverMessages from the provider sessions endpoint.
@@ -614,6 +747,11 @@ export function useSessionStore() {
     const slot = getSlot(resolvedSessionId);
     try {
       const params = new URLSearchParams();
+      if (logModeRef.current && slot.hasMore) {
+        const refreshLimit = Math.max(slot.serverMessages.length, 20);
+        params.append('limit', String(refreshLimit));
+        params.append('offset', '0');
+      }
 
       const qs = params.toString();
       const url = `/api/providers/sessions/${encodeURIComponent(resolvedSessionId)}/messages${qs ? `?${qs}` : ''}`;
@@ -622,7 +760,26 @@ export function useSessionStore() {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
 
-      slot.serverMessages = data.messages || [];
+      const messages: NormalizedMessage[] = data.messages || [];
+      if (logModeRef.current) {
+        replaceWithFetched(slot, messages);
+        slot.total = data.total ?? slot.serverMessages.length;
+        slot.hasMore = Boolean(data.hasMore);
+        slot.nextBeforeSeq = typeof data.nextBeforeSeq === 'number'
+          ? data.nextBeforeSeq
+          : slot.serverMessages.reduce<number | null>((minimum, message) => (
+            typeof message.seq === 'number' && (minimum === null || message.seq < minimum)
+              ? message.seq
+              : minimum
+          ), null);
+        slot.fetchedAt = Date.now();
+        slot._lastServerRef = slot.serverMessages;
+        slot._lastRealtimeRef = slot.realtimeMessages;
+        notify(resolvedSessionId);
+        return;
+      }
+
+      slot.serverMessages = messages;
       slot.total = data.total ?? slot.serverMessages.length;
       slot.hasMore = Boolean(data.hasMore);
       slot.fetchedAt = Date.now();
@@ -703,7 +860,13 @@ export function useSessionStore() {
     } else {
       slot.realtimeMessages = [...slot.realtimeMessages, msg];
     }
-    recomputeMergedIfNeeded(slot);
+    if (logModeRef.current) {
+      slot.merged = buildLogMerged(slot);
+      slot._lastServerRef = slot.serverMessages;
+      slot._lastRealtimeRef = slot.realtimeMessages;
+    } else {
+      recomputeMergedIfNeeded(slot);
+    }
     notify(resolvedSessionId);
   }, [getSlot, notify, resolveSessionId]);
 
@@ -712,22 +875,49 @@ export function useSessionStore() {
    * 有 messageId（後端 stream_end 帶來、與歷史同一則訊息的 id）就沿用，
    * 隨後同 id 的 text 會覆蓋它，歷史拉取時也能按 id 去重；沒有才產生本地 id。
    */
-  const finalizeStreaming = useCallback((sessionId: string, messageId?: string) => {
+  const finalizeStreaming = useCallback((
+    sessionId: string,
+    messageId?: string,
+    options?: { clearIfUnmatched?: boolean },
+  ) => {
     const resolvedSessionId = resolveSessionId(sessionId) ?? sessionId;
     const slot = storeRef.current.get(resolvedSessionId);
     if (!slot) return;
+    if (logModeRef.current && options?.clearIfUnmatched) {
+      clearLogStreaming(slot, resolvedSessionId);
+      slot._lastServerRef = slot.serverMessages;
+      slot._lastRealtimeRef = slot.realtimeMessages;
+      notify(resolvedSessionId);
+      return;
+    }
     const streamId = `__streaming_${resolvedSessionId}`;
     const idx = slot.realtimeMessages.findIndex(m => m.id === streamId);
     if (idx >= 0) {
       const stream = slot.realtimeMessages[idx];
       slot.realtimeMessages = [...slot.realtimeMessages];
-      slot.realtimeMessages[idx] = {
-        ...stream,
-        id: messageId || `text_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        kind: 'text',
-        role: 'assistant',
-      };
-      recomputeMergedIfNeeded(slot);
+      slot.realtimeMessages[idx] = messageId
+        ? {
+            ...stream,
+            id: messageId,
+            kind: 'text',
+            role: 'assistant',
+          }
+        : stream;
+      if (logModeRef.current) {
+        slot.merged = buildLogMerged(slot);
+        slot._lastServerRef = slot.serverMessages;
+        slot._lastRealtimeRef = slot.realtimeMessages;
+      } else if (messageId) {
+        recomputeMergedIfNeeded(slot);
+      } else {
+        slot.realtimeMessages[idx] = {
+          ...stream,
+          id: `text_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          kind: 'text',
+          role: 'assistant',
+        };
+        recomputeMergedIfNeeded(slot);
+      }
       notify(resolvedSessionId);
     }
   }, [notify, resolveSessionId]);
@@ -740,7 +930,13 @@ export function useSessionStore() {
     const slot = storeRef.current.get(resolvedSessionId);
     if (slot) {
       slot.realtimeMessages = [];
-      recomputeMergedIfNeeded(slot);
+      if (logModeRef.current) {
+        slot.merged = buildLogMerged(slot);
+        slot._lastServerRef = slot.serverMessages;
+        slot._lastRealtimeRef = slot.realtimeMessages;
+      } else {
+        recomputeMergedIfNeeded(slot);
+      }
       notify(resolvedSessionId);
     }
   }, [notify, resolveSessionId]);
@@ -804,8 +1000,20 @@ export function useSessionStore() {
       );
       targetSlot.hasMore = targetSlot.hasMore || sourceSlot.hasMore;
       targetSlot.offset = Math.max(targetSlot.offset, sourceSlot.offset);
+      targetSlot.nextBeforeSeq = targetSlot.nextBeforeSeq === null
+        ? sourceSlot.nextBeforeSeq
+        : sourceSlot.nextBeforeSeq === null
+          ? targetSlot.nextBeforeSeq
+          : Math.min(targetSlot.nextBeforeSeq, sourceSlot.nextBeforeSeq);
       targetSlot.tokenUsage = targetSlot.tokenUsage ?? sourceSlot.tokenUsage;
-      recomputeMergedIfNeeded(targetSlot);
+      if (logModeRef.current) {
+        targetSlot.serverMessages.sort(compareBySeq);
+        targetSlot.merged = buildLogMerged(targetSlot);
+        targetSlot._lastServerRef = targetSlot.serverMessages;
+        targetSlot._lastRealtimeRef = targetSlot.realtimeMessages;
+      } else {
+        recomputeMergedIfNeeded(targetSlot);
+      }
 
       store.set(resolvedToSessionId, targetSlot);
       store.delete(resolvedFromSessionId);
@@ -834,6 +1042,7 @@ export function useSessionStore() {
     fetchMore,
     appendRealtime,
     appendRealtimeBatch,
+    removeRealtimeMessage,
     refreshFromServer,
     setActiveSession,
     setStatus,
@@ -846,7 +1055,7 @@ export function useSessionStore() {
     replaceSessionId,
   }), [
     getSlot, has, fetchFromServer, fetchMore,
-    appendRealtime, appendRealtimeBatch, refreshFromServer,
+    appendRealtime, appendRealtimeBatch, removeRealtimeMessage, refreshFromServer,
     setActiveSession, setStatus, isStale, updateStreaming, finalizeStreaming,
     clearRealtime, getMessages, getSessionSlot, replaceSessionId,
   ]);

@@ -175,6 +175,12 @@ A 的分階段（見 Migration Plan）讓第一階段「只寫不讀」就能先
 | 使用者訊息 | 即時無對應事件；歷史有 jsonl `uuid`（穩定） | 即時 `userMessage` id 與 rollout 不同；歷史為**隨機 id** | 即時無；歷史 `agy_${sessionId}_${lineIndex}_user`（穩定） |
 | Cursor | **無契約** | | |
 
+**一致性驗證結果（2026-11-07）**：Claude（`docs/fixtures/claude/multistep.jsonl`）、
+Codex（`docs/fixtures/codex/multistep-rollout.jsonl`）與 Antigravity
+（`docs/fixtures/antigravity/multistep.*.jsonl`）的助手文字、工具呼叫、thinking、
+壓縮邊界、中斷標記與使用者訊息均通過穩定 id 檢查；工具結果經日誌層摺疊後
+不再有獨立 id 契約。Cursor 維持「僅空日誌可完整匯入」。
+
 需在進入第一階段前修正，使上表每一格都是「穩定」：
 
 - **工具結果**：依 D3，日誌層一律併入 `tool_use`，對帳忽略歷史中的獨立 `tool_result`。三家不再需要各自對齊這一格。
@@ -273,7 +279,7 @@ store 的狀態轉移抽成純函式（`applyLogMessage`、`replaceWithFetched`�
 - [寫入延遲加在送出路徑上] → better-sqlite3 同步寫入，單則微秒級；`stream_delta` 不寫入，高頻路徑不受影響。以 WAL 模式避免讀寫互鎖。
 - [既有會話第一次讀取時大量匯入] → 匯入在讀取時進行、與檔案 mtime 快取搭配；只在第一次付出成本。大型會話的首次讀取可能變慢，需量測。
 - [終端機與 UI 交替寫同一會話時中段插入過多，`seq` 精度耗盡] → REAL 中點插入在同一間隙約可分 50 次；超過時對該會話整體重新編號（離線、單一交易）。
-- [遷移期間兩套讀取路徑並存] → 以設定旗標切換（見 Migration Plan），驗收通過前預設維持舊路徑。
+- [遷移期間兩套讀取路徑並存] → 以設定旗標 `SESSION_MESSAGE_LOG_ENABLED` 控制（預設開啟，設為 `0`/`false`/`off` 可立即回退至舊路徑）。
 - [runtime 依 writer 標記決定送字串，繞過日誌] → `LoggingWriter` 固定宣告 `isWebSocketWriter`，收到字串時先解析；驗收以真實 runtime 驅動（D2）。
 - [客戶端以 `clientId` 覆寫既有訊息] → 驗證 UUID、伺服器加 `user:` 前綴、使用者訊息只 insert-if-absent（D6）。
 - [圖片縮圖重新整理後消失] → 前端在記憶體保留本地 `images`，重新整理後與現況相同；持久化另案（D6）。

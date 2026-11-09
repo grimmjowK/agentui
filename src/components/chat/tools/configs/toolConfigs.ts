@@ -36,7 +36,7 @@ export interface ToolDisplayConfig {
     hidden?: boolean;
     hideOnSuccess?: boolean;
     type?: 'one-line' | 'collapsible' | 'plan' | 'special';
-    title?: string | ((result: any) => string);
+    title?: string | ((result: any, t: Translate) => string);
     defaultOpen?: boolean;
     // Special result handlers
     contentType?: 'markdown' | 'file-list' | 'todo-list' | 'text' | 'success-message' | 'task' | 'question-answer';
@@ -120,8 +120,11 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
       }
     },
     result: {
-      hideOnSuccess: true,
-      type: 'special'
+      type: 'collapsible',
+      title: (_result, t) => t('tools.commandOutput'),
+      defaultOpen: false,
+      contentType: 'text',
+      getContentProps: (result) => ({ content: String(result?.content ?? ''), format: 'code' })
     }
   },
 
@@ -688,9 +691,12 @@ export function shouldHideToolResult(toolName: string, toolResult: any): boolean
     return true;
   }
 
-  // 成功但沒有任何內容（例如 Codex 的搜尋、計畫）時不渲染空區塊
-  if (toolResult && !toolResult.isError && !toolResult.toolUseResult && !String(toolResult.content ?? '').trim()) {
-    return true;
+  // 成功但沒有任何可顯示內容（例如 Codex 的搜尋、計畫、或無輸出的指令）時不渲染空區塊
+  if (toolResult && !toolResult.isError && !String(toolResult.content ?? '').trim()) {
+    const usesToolUseResult = config.result.contentType === 'file-list';
+    if (!usesToolUseResult || !toolResult.toolUseResult) {
+      return true;
+    }
   }
 
   return false;

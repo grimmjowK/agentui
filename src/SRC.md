@@ -10,7 +10,7 @@ React 18 + TypeScript 前端。组件按功能模块组织在 `components/`，
 | `components/` | UI 组件，按功能模块组织，见 [components/COMPONENTS.md](./components/COMPONENTS.md) |
 | `contexts/` | React 全局状态容器：WebSocket、Plugins、PaletteOps、Permission、TaskMaster |
 | `hooks/` | 自定义业务 Hooks：项目/会话状态、Web Push、版本检测、设备偏好、会话保护等 |
-| `stores/` | Zustand 状态存储；`useSessionStore` 按 sessionId 管理消息（后端 JSONL 为真实源） |
+| `stores/` | 状态存储；`useSessionStore` 按 sessionId 管理消息。服务器 `session_messages.seq` 是显示顺序与内容的唯一来源；前端按 id upsert，不按时间戳拼接 |
 | `utils/` | 前端工具函数：剪贴板操作、日期格式化 |
 | `lib/` | 样式工具库：`cn()` 合并 Tailwind 类、`safeJsonParse()` 安全解析 JSON |
 | `shared/` | 通用 UI 组件库（Card/Button/Dialog/Input 等）与基础类型（含 `view/`） |

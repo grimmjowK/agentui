@@ -15,6 +15,10 @@ import mime from 'mime-types';
 import { AppError, WORKSPACES_ROOT, validateWorkspacePath } from '@/shared/utils.js';
 import { closeSessionsWatcher, initializeSessionsWatcher, providerRegistry } from '@/modules/providers/index.js';
 import { createWebSocketServer } from '@/modules/websocket/index.js';
+import {
+    startSessionMessageLogCleanup,
+    stopSessionMessageLogCleanup,
+} from '@/modules/websocket/services/session-message-log-cleanup.service.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
 
@@ -47,6 +51,7 @@ import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './util
 import { initializeDatabase, projectsDb, sessionsDb } from './modules/database/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
+import { isSessionMessageLogEnabled } from './shared/session-message-log-flags.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { c } from './utils/colors.js';
 
@@ -126,6 +131,12 @@ app.use('/api', validateApiKey);
 
 // Authentication routes (public)
 app.use('/api/auth', authRoutes);
+
+app.get('/api/config', authenticateToken, (req, res) => {
+    res.json({
+        sessionMessageLogEnabled: isSessionMessageLogEnabled(),
+    });
+});
 
 // Projects API Routes (protected)
 app.use('/api/projects', authenticateToken, projectModuleRoutes);
@@ -1345,6 +1356,7 @@ async function startServer() {
     try {
         // Initialize authentication database
         await initializeDatabase();
+        startSessionMessageLogCleanup();
 
         // Configure Web Push (VAPID keys)
         configureWebPush();
@@ -1394,6 +1406,7 @@ async function startServer() {
         await closeSessionsWatcher();
         // Clean up plugin processes on shutdown
         const shutdownPlugins = async () => {
+            stopSessionMessageLogCleanup();
             await shutdownCodexSessions();
   await shutdownShellSessions();
             await stopAllPlugins();

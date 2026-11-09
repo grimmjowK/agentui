@@ -22,6 +22,7 @@
     "antigravity": "Antigravity"
   },
   "tools": {
+    "commandOutput": "Command output",
     "settings": "Tool Settings",
     "error": "Tool Error",
     "result": "Tool Result",

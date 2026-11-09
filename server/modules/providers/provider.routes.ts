@@ -3,7 +3,7 @@ import express, { type Request, type Response } from 'express';
 import multer from 'multer';
 
 import { codexOwnership } from '@/modules/codex-runtime/index.js';
-import { sessionsDb } from '@/modules/database/index.js';
+import { sessionMessagesDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { getCodexRuntimeInfo } from '@/shared/codex-cli-path.js';
 import { providerAuthService } from '@/modules/providers/services/provider-auth.service.js';
@@ -12,6 +12,7 @@ import { providerModelsService } from '@/modules/providers/services/models.servi
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
+import { rebuildSessionMessageLog } from '@/modules/providers/services/session-message-reconciler.service.js';
 import { buildResumeCommand } from '@/modules/providers/services/session-resume.js';
 import type { LLMProvider, McpScope, McpTransport, UpsertProviderMcpServerInput } from '@/shared/types.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
@@ -481,11 +482,89 @@ router.put(
 );
 
 router.get(
+  '/sessions/:sessionId/messages/diagnostics',
+  asyncHandler(async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === 'production') {
+      throw new AppError('Message log diagnostics are only available in development.', {
+        code: 'NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+    const sessionId = parseSessionId(req.params.sessionId);
+    const session = sessionsDb.getSessionById(sessionId);
+    if (!session) {
+      throw new AppError(`Session "${sessionId}" was not found.`, {
+        code: 'SESSION_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+    const journal = sessionMessagesDb.listAll(sessionId).map((row) => row.payload);
+    const history = await providerRegistry
+      .resolveProvider(session.provider)
+      .sessions
+      .fetchHistory(sessionId, {
+        limit: null,
+        projectPath: session.project_path ?? '',
+      });
+    const journalIds = new Set(journal.map((message) => message.id));
+    const historyIds = new Set(history.messages.map((message) => message.id));
+    res.json(createApiSuccessResponse({
+      sessionId,
+      provider: session.provider,
+      journalCount: journal.length,
+      historyCount: history.messages.length,
+      journalOnly: journal.filter((message) => !historyIds.has(message.id)).map((message) => ({
+        id: message.id,
+        kind: message.kind,
+        role: message.role,
+      })),
+      historyOnly: history.messages.filter((message) => !journalIds.has(message.id)).map((message) => ({
+        id: message.id,
+        kind: message.kind,
+        role: message.role,
+      })),
+    }));
+  }),
+);
+
+router.post(
+  '/sessions/:sessionId/messages/rebuild',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const session = sessionsDb.getSessionById(sessionId);
+    if (!session) {
+      throw new AppError(`Session "${sessionId}" was not found.`, {
+        code: 'SESSION_NOT_FOUND',
+        statusCode: 404,
+      });
+    }
+    const history = await providerRegistry
+      .resolveProvider(session.provider)
+      .sessions
+      .fetchHistory(sessionId, {
+        limit: null,
+        projectPath: session.project_path ?? '',
+      });
+    const messages = rebuildSessionMessageLog(
+      sessionId,
+      history.messages,
+      session.provider as LLMProvider,
+    );
+    res.json(createApiSuccessResponse({
+      sessionId,
+      provider: session.provider,
+      count: messages.length,
+    }));
+  }),
+);
+
+router.get(
   '/sessions/:sessionId/messages',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
     const limitRaw = readOptionalQueryString(req.query.limit);
     const offsetRaw = readOptionalQueryString(req.query.offset);
+    const beforeSeqRaw = readOptionalQueryString(req.query.beforeSeq);
 
     let limit: number | null = null;
     if (limitRaw !== undefined) {
@@ -511,9 +590,22 @@ router.get(
       offset = parsedOffset;
     }
 
+    let beforeSeq: number | null = null;
+    if (beforeSeqRaw !== undefined) {
+      const parsedBeforeSeq = Number(beforeSeqRaw);
+      if (!Number.isFinite(parsedBeforeSeq)) {
+        throw new AppError('beforeSeq must be a finite number.', {
+          code: 'INVALID_QUERY_PARAMETER',
+          statusCode: 400,
+        });
+      }
+      beforeSeq = parsedBeforeSeq;
+    }
+
     const result = await sessionsService.fetchHistory(sessionId, {
       limit,
       offset,
+      beforeSeq,
     });
     res.json(result);
   }),

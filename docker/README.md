@@ -109,6 +109,19 @@ sbx exec -d my-project cloudcli start --port 3001
 | `HOST` | `0.0.0.0` | Bind address (must be `0.0.0.0` for `sbx ports`) |
 | `DATABASE_PATH` | `~/.cloudcli/auth.db` | SQLite database location |
 
+### Deployment constraint
+
+CloudCLI uses a single SQLite database for session metadata and the durable
+session-message log. Run exactly one CloudCLI application process against a
+given `DATABASE_PATH`. The bundled `docker-compose.yaml` satisfies this by
+running one `cloudcli` service. Do not scale that service to multiple replicas
+or mount the same database file into multiple writer processes.
+
+If the deployment later needs multiple replicas, first route every session to a
+stable replica and replace the in-memory running-session registry with a
+shared coordination mechanism. Sharing the SQLite file between replicas is not
+supported.
+
 ## Advanced usage
 
 For branch mode, multiple workspaces, memory limits, or the terminal agent experience, use `sbx` with the template:

@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 import type { WebSocket } from 'ws';
 
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
@@ -6,6 +8,12 @@ import {
   markShellSessionStale,
 } from '@/modules/websocket/services/shell-websocket.service.js';
 import { WebSocketWriter } from '@/modules/websocket/services/websocket-writer.service.js';
+import {
+  getLoggingWriterForSession,
+  LoggingWriter,
+  sendToClient,
+} from '@/modules/websocket/services/logging-writer.service.js';
+import { isSessionMessageLogEnabled } from '@/shared/session-message-log-flags.js';
 import type { IProviderRuntime } from '@/shared/interfaces.js';
 import type {
   AnyRecord,
@@ -25,7 +33,23 @@ type ChatIncomingMessage = AnyRecord & {
   updatedInput?: unknown;
   message?: unknown;
   rememberEntry?: unknown;
+  clientId?: string;
+  afterSeq?: number;
 };
+
+const CLIENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * 缺省時由伺服器補一個 clientId：部署後仍在跑快取舊前端（PWA）或其他不帶 clientId 的
+ * 客戶端不能因此整個送不出訊息；帶了但格式不對才視為錯誤請求。
+ */
+function resolveClientId(raw: unknown): string {
+  if (raw === undefined || raw === null || raw === '') return crypto.randomUUID();
+  if (typeof raw !== 'string' || !CLIENT_ID_PATTERN.test(raw)) {
+    throw new Error('clientId must be a UUID');
+  }
+  return raw;
+}
 
 /**
  * 同一个 sessionId 如果同时被终端页的 `<cli> --resume` 进程和聊天页的 SDK
@@ -38,14 +62,14 @@ type ChatIncomingMessage = AnyRecord & {
 function warnOnConcurrentShellSession(
   sessionId: unknown,
   provider: LLMProvider,
-  writer: WebSocketWriter,
+  writer: WebSocketWriter | LoggingWriter,
 ): void {
   if (typeof sessionId !== 'string' || !hasLiveShellSession(sessionId)) {
     return;
   }
 
   markShellSessionStale(sessionId);
-  writer.send(
+  sendToClient(writer,
     createNormalizedMessage({
       kind: 'task_notification',
       provider,
@@ -137,31 +161,62 @@ export function handleChatConnection(
 
       if (messageType === 'chat-command') {
         const { id, runtime } = resolveRuntime(registry, data.provider);
-        // Codex hands the session over from the terminal itself (codex-session-handoff).
-        if (id !== 'codex') {
-          warnOnConcurrentShellSession(data.options?.sessionId, id, writer);
+        const clientId = resolveClientId(data.clientId);
+        const requestedSessionId = typeof data.options?.sessionId === 'string'
+          ? data.options.sessionId
+          : null;
+        const loggingWriter = new LoggingWriter(writer, {
+          initialSessionId: requestedSessionId,
+          userId: writer.userId,
+          provider: id,
+        });
+        try {
+          loggingWriter.recordUserMessage({
+            clientId,
+            content: data.command ?? '',
+            images: data.options?.images,
+            provider: id,
+            sessionId: requestedSessionId,
+          });
+          // Codex hands the session over from the terminal itself (codex-session-handoff).
+          if (id !== 'codex') {
+            warnOnConcurrentShellSession(requestedSessionId, id, loggingWriter);
+          }
+          await runtime.start(data.command ?? '', data.options ?? {}, loggingWriter);
+        } finally {
+          loggingWriter.finish();
         }
-        await runtime.start(data.command ?? '', data.options ?? {}, writer);
         return;
       }
 
       if (messageType === 'abort-session') {
         const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
-        const { ok, emitsTerminal } = await runtime.abort(sessionId, writer);
-        // 每次中斷只有一個終止事件：emitsTerminal 的 runtime（Codex、Antigravity）自己送；
-        // 其他 runtime（Claude、Cursor）由這裡立即送出，底層在中斷後會略過自己的 complete/error。
-        if (ok && emitsTerminal) return;
-        writer.send(
-          createNormalizedMessage({
-            kind: 'complete',
-            exitCode: ok ? 0 : 1,
-            aborted: true,
-            success: ok,
-            sessionId,
+        const registered = getLoggingWriterForSession(sessionId);
+        const loggingWriter = registered
+          ?? new LoggingWriter(writer, {
+            initialSessionId: sessionId,
+            userId: writer.userId,
             provider: id,
-          })
-        );
+          });
+        try {
+          const { ok, emitsTerminal } = await runtime.abort(sessionId, loggingWriter);
+          // 每次中斷只有一個終止事件：emitsTerminal 的 runtime（Codex、Antigravity）自己送；
+          // 其他 runtime（Claude、Cursor）由這裡立即送出，底層在中斷後會略過自己的 complete/error。
+          if (ok && emitsTerminal) return;
+          sendToClient(loggingWriter,
+            createNormalizedMessage({
+              kind: 'complete',
+              exitCode: ok ? 0 : 1,
+              aborted: true,
+              success: ok,
+              sessionId,
+              provider: id,
+            })
+          );
+        } finally {
+          if (!registered) loggingWriter.finish();
+        }
         return;
       }
 
@@ -169,11 +224,31 @@ export function handleChatConnection(
         const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
         const text = typeof data.text === 'string' ? data.text : '';
+        const clientId = resolveClientId(data.clientId);
         const result = runtime.steer
           ? await runtime.steer(sessionId, writer.userId, text)
           : { ok: false, reason: 'unsupported' };
+        if (result.ok) {
+          const registeredWriter = getLoggingWriterForSession(sessionId);
+          const loggingWriter = registeredWriter
+            ?? new LoggingWriter(writer, {
+              initialSessionId: sessionId,
+              userId: writer.userId,
+              provider: id,
+            });
+          try {
+            loggingWriter.recordUserMessage({
+              clientId,
+              content: text,
+              provider: id,
+              sessionId,
+            });
+          } finally {
+            if (!registeredWriter) loggingWriter.finish();
+          }
+        }
         // clientId 原樣回傳，前端據此對應是哪一次送出
-        writer.send({
+        sendToClient(writer, {
           type: result.ok ? 'steer-accepted' : 'steer-rejected',
           provider: id,
           sessionId,
@@ -187,7 +262,7 @@ export function handleChatConnection(
       if (messageType === 'codex-permission-response') {
         const ok = dependencies.resolveCodexApproval(String(data.requestId || ''), writer.userId,
           String(data.sessionId || ''), data.decision);
-        if (!ok) writer.send(createNormalizedMessage({ kind: 'task_notification', provider: 'codex',
+        if (!ok) sendToClient(writer, createNormalizedMessage({ kind: 'task_notification', provider: 'codex',
           sessionId: String(data.sessionId || ''), status: 'warning', summary: 'Approval is no longer valid or does not belong to this session.' }));
         return;
       }
@@ -200,7 +275,7 @@ export function handleChatConnection(
             message: typeof data.message === 'string' ? data.message : undefined,
             rememberEntry: data.rememberEntry,
           });
-          if (!ok) writer.send(createNormalizedMessage({ kind: 'task_notification', provider: 'claude',
+          if (!ok) sendToClient(writer, createNormalizedMessage({ kind: 'task_notification', provider: 'claude',
             sessionId: typeof data.sessionId === 'string' ? data.sessionId : null, status: 'warning',
             summary: 'Approval is no longer valid or does not belong to this session.' }));
         }
@@ -210,11 +285,33 @@ export function handleChatConnection(
       if (messageType === 'check-session-status') {
         const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
+        const registered = getLoggingWriterForSession(sessionId);
+        const afterSeq = typeof data.afterSeq === 'number' && Number.isFinite(data.afterSeq)
+          ? data.afterSeq
+          : null;
+        // 關閉日誌讀路徑時前端走舊合併邏輯，重播的日誌行（user:<uuid> 等 id）會與 provider 歷史重複
+        const replayEnabled = isSessionMessageLogEnabled();
+        if (registered) {
+          registered.updateWebSocket(writer.ws);
+          if (replayEnabled) registered.replayAfterSeq(afterSeq);
+        } else if (sessionId && replayEnabled) {
+          const tempWriter = new LoggingWriter(writer, {
+            initialSessionId: sessionId,
+            userId: writer.userId,
+            provider: id,
+          });
+          try {
+            tempWriter.replayAfterSeq(afterSeq);
+          } finally {
+            tempWriter.finish();
+          }
+        }
+        const isProcessing = runtime.reconnect(sessionId, registered ?? writer);
         writer.send({
           type: 'session-status',
           sessionId,
           provider: id,
-          isProcessing: runtime.reconnect(sessionId, writer),
+          isProcessing,
         });
         return;
       }

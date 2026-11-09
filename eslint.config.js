@@ -178,6 +178,7 @@ export default tseslint.config(
             "server/shared/antigravity-cli-path.ts",
             "server/shared/antigravity-session-store.ts",
             "server/shared/image-temp-files.ts",
+            "server/shared/session-message-log-flags.ts",
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
         },

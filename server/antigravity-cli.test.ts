@@ -179,3 +179,86 @@ test('unrecovered error event is emitted on flush when stream terminates without
     'API error (attempt 3): connection reset by peer',
   ]);
 });
+
+test('stale trajectory error in result event is ignored when current turn finished with a DONE agent_response', () => {
+  const messages: any[] = [];
+  const handler = new AntigravityResponseHandler('sid', { isWebSocketWriter: true, send: (msg: any) => messages.push(msg) });
+  handler.handleJsonEvent({ event: 'init', conversation_id: 'sid' });
+  handler.handleJsonEvent({
+    event: 'step_update',
+    step_update: {
+      conversation_id: 'sid',
+      step_index: 24,
+      step_type: 'agent_response',
+      state: 'ACTIVE',
+      text_delta: '這是本輪正常的回覆',
+    },
+  });
+  handler.handleJsonEvent({
+    event: 'step_update',
+    step_update: {
+      conversation_id: 'sid',
+      step_index: 24,
+      step_type: 'agent_response',
+      state: 'DONE',
+      text_delta: '',
+    },
+  });
+  handler.handleJsonEvent({
+    event: 'result',
+    result: {
+      conversation_id: 'sid',
+      status: 'ERROR',
+      error: 'FAILED_PRECONDITION (code 400): User location is not supported for the API use.',
+    },
+  });
+  handler.flush();
+
+  assert.equal(handler.error, null);
+  assert.equal(handler.errorEmitted, false);
+  assert.equal(messages.filter((m) => m.kind === 'error').length, 0);
+  assert.deepEqual(messages.filter((m) => m.kind === 'text').map((m) => [m.id, m.content]), [
+    ['agy_sid_step_24', '這是本輪正常的回覆'],
+  ]);
+});
+
+test('current-turn error after an earlier agent_response step is still emitted', () => {
+  const messages: any[] = [];
+  const handler = new AntigravityResponseHandler('sid', { isWebSocketWriter: true, send: (msg: any) => messages.push(msg) });
+  handler.handleJsonEvent({
+    event: 'step_update',
+    step_update: {
+      conversation_id: 'sid',
+      step_index: 5,
+      step_type: 'agent_response',
+      state: 'DONE',
+      text_delta: '讓我先讀取檔案',
+    },
+  });
+  handler.handleJsonEvent({
+    event: 'step_update',
+    step_update: {
+      conversation_id: 'sid',
+      step_index: 6,
+      step_type: 'tool',
+      state: 'DONE',
+      tool_name: 'read_file',
+      tool_info: { output: 'content' },
+    },
+  });
+  handler.handleJsonEvent({
+    event: 'result',
+    result: {
+      conversation_id: 'sid',
+      status: 'ERROR',
+      error: 'FAILED_PRECONDITION (code 400): User location is not supported for the API use.',
+    },
+  });
+  handler.flush();
+
+  assert.equal(handler.error, 'FAILED_PRECONDITION (code 400): User location is not supported for the API use.');
+  assert.deepEqual(messages.filter((m) => m.kind === 'error').map((m) => m.content), [
+    'FAILED_PRECONDITION (code 400): User location is not supported for the API use.',
+  ]);
+});
+

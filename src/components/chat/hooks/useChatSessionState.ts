@@ -44,13 +44,19 @@ function chatMessageToNormalized(
   sessionId: string,
   provider: LLMProvider,
 ): NormalizedMessage | null {
-  const id = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const id = msg.id || `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const ts = msg.timestamp instanceof Date
     ? msg.timestamp.toISOString()
     : typeof msg.timestamp === 'number'
       ? new Date(msg.timestamp).toISOString()
       : String(msg.timestamp);
-  const base = { id, sessionId, timestamp: ts, provider };
+  const base = {
+    id,
+    sessionId,
+    timestamp: ts,
+    provider,
+    ...(typeof msg.seq === 'number' ? { seq: msg.seq } : {}),
+  };
 
   if (msg.isToolUse) {
     return {
@@ -289,6 +295,11 @@ export function useChatSessionState({
     }
   }, [activeSessionId, sessionStore]);
 
+  const removeMessage = useCallback((msg: ChatMessage) => {
+    if (!activeSessionId || !msg.id) return;
+    sessionStore.removeRealtimeMessage(activeSessionId, msg.id);
+  }, [activeSessionId, sessionStore]);
+
   const clearMessages = useCallback(() => {
     if (!activeSessionId) return;
     sessionStore.clearRealtime(activeSessionId);
@@ -459,7 +470,13 @@ export function useChatSessionState({
     }
 
     // Check session status — sendMessage returns false if WS is not yet connected
-    sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider });
+    const afterSeq = sessionStore.getMessages(selectedSession.id).reduce<number | null>(
+      (maximum, message) => typeof message.seq === 'number'
+        ? Math.max(maximum ?? message.seq, message.seq)
+        : maximum,
+      null,
+    );
+    sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider, afterSeq });
 
     lastLoadedSessionKeyRef.current = sessionKey;
 
@@ -814,6 +831,7 @@ export function useChatSessionState({
   return {
     chatMessages,
     addMessage,
+    removeMessage,
     clearMessages,
     rewindMessages,
     isLoading,

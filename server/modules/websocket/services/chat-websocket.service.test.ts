@@ -1,12 +1,36 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import test from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import test, { after, before } from 'node:test';
 
+import { closeConnection, initializeDatabase, sessionMessagesDb } from '@/modules/database/index.js';
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
+import { isSessionLogActive } from '@/modules/websocket/services/logging-writer.service.js';
 import type { IProviderRuntime } from '@/shared/interfaces.js';
 import type { LLMProvider } from '@/shared/types.js';
 
 type Sent = Record<string, any>;
+const CLIENT_ID_1 = '11111111-1111-4111-8111-111111111111';
+const CLIENT_ID_2 = '22222222-2222-4222-8222-222222222222';
+let databaseDirectory = '';
+let previousDatabasePath: string | undefined;
+
+before(async () => {
+  previousDatabasePath = process.env.DATABASE_PATH;
+  databaseDirectory = await mkdtemp(path.join(tmpdir(), 'chat-logging-'));
+  closeConnection();
+  process.env.DATABASE_PATH = path.join(databaseDirectory, 'auth.db');
+  await initializeDatabase();
+});
+
+after(async () => {
+  closeConnection();
+  if (previousDatabasePath === undefined) delete process.env.DATABASE_PATH;
+  else process.env.DATABASE_PATH = previousDatabasePath;
+  await rm(databaseDirectory, { recursive: true, force: true });
+});
 
 function fakeRuntime(overrides: Partial<IProviderRuntime> = {}): IProviderRuntime {
   return {
@@ -51,7 +75,7 @@ function connect(
 test('chat-command 依 provider 分派到 runtime.start', async () => {
   const calls: unknown[] = [];
   const { send } = connect({ codex: fakeRuntime({ start: async (...args) => { calls.push(args.slice(0, 2)); } }) });
-  await send({ type: 'chat-command', provider: 'codex', command: 'hi', options: { model: 'm' } });
+  await send({ type: 'chat-command', provider: 'codex', command: 'hi', clientId: CLIENT_ID_1, options: { model: 'm' } });
   assert.deepEqual(calls, [['hi', { model: 'm' }]]);
 });
 
@@ -65,13 +89,13 @@ test('未註冊的 provider 回傳錯誤', async () => {
 
 test('abort：emitsTerminal 為 true 時不補送結束事件', async () => {
   const { ws, send } = connect({ codex: fakeRuntime({ abort: async () => ({ ok: true, emitsTerminal: true }) }) });
-  await send({ type: 'abort-session', provider: 'codex', sessionId: 's1' });
+  await send({ type: 'abort-session', provider: 'codex', sessionId: 's-terminal' });
   assert.equal(ws.sent.filter((m) => m.kind === 'complete').length, 0);
 });
 
 test('abort：emitsTerminal 為 false 時補送一次結束事件', async () => {
   const { ws, send } = connect({ claude: fakeRuntime({ abort: async () => ({ ok: true, emitsTerminal: false }) }) });
-  await send({ type: 'abort-session', provider: 'claude', sessionId: 's1' });
+  await send({ type: 'abort-session', provider: 'claude', sessionId: 's-no-terminal' });
   const completes = ws.sent.filter((m) => m.kind === 'complete');
   assert.equal(completes.length, 1);
   assert.equal(completes[0].aborted, true);
@@ -80,7 +104,7 @@ test('abort：emitsTerminal 為 false 時補送一次結束事件', async () => 
 
 test('abort 失敗時即使 runtime 會自送結束事件，也補送一次失敗結果', async () => {
   const { ws, send } = connect({ antigravity: fakeRuntime({ abort: async () => ({ ok: false, emitsTerminal: true }) }) });
-  await send({ type: 'abort-session', provider: 'antigravity', sessionId: 's1' });
+  await send({ type: 'abort-session', provider: 'antigravity', sessionId: 's-fail' });
   const completes = ws.sent.filter((m) => m.kind === 'complete');
   assert.equal(completes.length, 1);
   assert.equal(completes[0].success, false);
@@ -106,20 +130,22 @@ test('check-session-status 透過 runtime.reconnect 回報狀態', async () => {
 
 test('chat-steer：provider 未實作時回傳 steer-rejected', async () => {
   const { ws, send } = connect({ claude: fakeRuntime() });
-  await send({ type: 'chat-steer', provider: 'claude', sessionId: 's1', text: 'hi', clientId: 'c1' });
-  assert.deepEqual(ws.sent[0], { type: 'steer-rejected', provider: 'claude', sessionId: 's1', clientId: 'c1', text: 'hi', reason: 'unsupported' });
+  await send({ type: 'chat-steer', provider: 'claude', sessionId: 's1', text: 'hi', clientId: CLIENT_ID_1 });
+  assert.deepEqual(ws.sent[0], { type: 'steer-rejected', provider: 'claude', sessionId: 's1', clientId: CLIENT_ID_1, text: 'hi', reason: 'unsupported' });
 });
 
 test('chat-steer：分派到 runtime.steer 並依結果回覆', async () => {
   const calls: unknown[] = [];
   let ok = true;
   const { ws, send } = connect({ codex: fakeRuntime({ steer: async (...args) => { calls.push(args); return ok ? { ok } : { ok, reason: 'turn_not_started' }; } }) });
-  await send({ type: 'chat-steer', provider: 'codex', sessionId: 's1', text: 'hi', clientId: 'c1' });
+  await send({ type: 'chat-steer', provider: 'codex', sessionId: 's1', text: 'hi', clientId: CLIENT_ID_1 });
   ok = false;
-  await send({ type: 'chat-steer', provider: 'codex', sessionId: 's1', text: 'again', clientId: 'c2' });
+  await send({ type: 'chat-steer', provider: 'codex', sessionId: 's1', text: 'again', clientId: CLIENT_ID_2 });
   assert.deepEqual(calls, [['s1', 7, 'hi'], ['s1', 7, 'again']]);
-  assert.equal(ws.sent[0].type, 'steer-accepted');
-  assert.deepEqual(ws.sent[1], { type: 'steer-rejected', provider: 'codex', sessionId: 's1', clientId: 'c2', text: 'again', reason: 'turn_not_started' });
+  assert.equal(ws.sent[0].kind, 'text');
+  assert.equal(ws.sent[0].id, `user:${CLIENT_ID_1}`);
+  assert.equal(ws.sent[1].type, 'steer-accepted');
+  assert.deepEqual(ws.sent[2], { type: 'steer-rejected', provider: 'codex', sessionId: 's1', clientId: CLIENT_ID_2, text: 'again', reason: 'turn_not_started' });
 });
 
 test('claude-permission-response 帶上呼叫者 userId；被拒時回覆警告', async () => {
@@ -149,3 +175,45 @@ test('get-pending-permissions 不帶 sessionId 時跨 provider 匯總，帶 sess
   assert.equal(ws.sent[1].sessionId, 's1');
   assert.deepEqual(calls, [['claude', 7, undefined], ['codex', 7, undefined], ['claude', 7, 's1'], ['codex', 7, 's1']]);
 });
+
+test('abort-session、check-session-status 與 recordUserMessage 衝突不會洩漏 activeWriters', async () => {
+  // 1. abort-session with emitsTerminal: true when no active writer exists
+  const { send: sendAbort } = connect({
+    codex: fakeRuntime({ abort: async () => ({ ok: true, emitsTerminal: true }) }),
+  });
+  await sendAbort({ type: 'abort-session', provider: 'codex', sessionId: 'leak-abort-1' });
+  assert.equal(isSessionLogActive('leak-abort-1'), false);
+
+  // 2. check-session-status when reconnect returns true but no active writer was registered from chat-command
+  const { send: sendStatus } = connect({
+    cursor: fakeRuntime({ reconnect: () => true }),
+  });
+  await sendStatus({ type: 'check-session-status', provider: 'cursor', sessionId: 'leak-status-1' });
+  assert.equal(isSessionLogActive('leak-status-1'), false);
+
+  // 3. chat-command where clientId conflicts with another user's message
+  sessionMessagesDb.insertUserIfAbsent(
+    'leak-conflict-1',
+    {
+      id: `user:${CLIENT_ID_1}`,
+      sessionId: 'leak-conflict-1',
+      timestamp: new Date().toISOString(),
+      provider: 'codex',
+      kind: 'text',
+      role: 'user',
+      content: 'other user msg',
+    },
+    999,
+  );
+  const { ws: conflictWs, send: sendConflict } = connect({ codex: fakeRuntime() });
+  await sendConflict({
+    type: 'chat-command',
+    provider: 'codex',
+    command: 'hi',
+    clientId: CLIENT_ID_1,
+    options: { sessionId: 'leak-conflict-1' },
+  });
+  assert.equal(conflictWs.sent.at(-1)?.type, 'error');
+  assert.equal(isSessionLogActive('leak-conflict-1'), false);
+});
+

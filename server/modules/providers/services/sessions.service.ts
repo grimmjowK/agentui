@@ -1,9 +1,12 @@
 import fsp from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 
-import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { projectsDb, sessionMessagesDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
+import { isSessionMessageLogEnabled } from '@/shared/session-message-log-flags.js';
+import { reconcileSessionMessageLog } from '@/modules/providers/services/session-message-reconciler.service.js';
 import type {
   FetchHistoryOptions,
   FetchHistoryResult,
@@ -24,6 +27,25 @@ type ArchivedSessionListItem = {
   lastActivity: string | null;
   isProjectArchived: boolean;
 };
+
+type ProviderHistoryCacheEntry = {
+  mtimeMs: number;
+  result: FetchHistoryResult;
+};
+
+const providerHistoryCache = new Map<string, ProviderHistoryCacheEntry>();
+// ponytail: 按插入順序淘汰的簡易 LRU，命中時重新插入；需要按記憶體大小淘汰再換實作
+const PROVIDER_HISTORY_CACHE_MAX = 20;
+
+function cacheProviderHistory(key: string, entry: ProviderHistoryCacheEntry): void {
+  providerHistoryCache.delete(key);
+  providerHistoryCache.set(key, entry);
+  while (providerHistoryCache.size > PROVIDER_HISTORY_CACHE_MAX) {
+    const oldest = providerHistoryCache.keys().next().value;
+    if (oldest === undefined) break;
+    providerHistoryCache.delete(oldest);
+  }
+}
 
 /**
  * Removes one file if it exists.
@@ -95,9 +117,9 @@ export const sessionsService = {
    * Provider and provider-specific lookup hints are resolved from the indexed
    * session metadata in the database.
    */
-  fetchHistory(
+  async fetchHistory(
     sessionId: string,
-    options: Pick<FetchHistoryOptions, 'limit' | 'offset'> = {},
+    options: Pick<FetchHistoryOptions, 'limit' | 'offset' | 'beforeSeq'> = {},
   ): Promise<FetchHistoryResult> {
     const session = sessionsDb.getSessionById(sessionId);
     if (!session) {
@@ -108,11 +130,85 @@ export const sessionsService = {
     }
 
     const provider = session.provider as LLMProvider;
-    return providerRegistry.resolveProvider(provider).sessions.fetchHistory(sessionId, {
-      limit: options.limit ?? null,
-      offset: options.offset ?? 0,
-      projectPath: session.project_path ?? '',
+    const providerSessions = providerRegistry.resolveProvider(provider).sessions;
+    if (!isSessionMessageLogEnabled()) {
+      return providerSessions.fetchHistory(sessionId, {
+        limit: options.limit ?? null,
+        offset: options.offset ?? 0,
+        beforeSeq: options.beforeSeq,
+        projectPath: session.project_path ?? '',
+      });
+    }
+
+    // 往前翻頁（帶 beforeSeq）時日誌已在首屏對帳過，直接讀 DB，不再全量解析 provider 歷史
+    if (options.beforeSeq !== undefined && options.beforeSeq !== null) {
+      const page = sessionMessagesDb.list(sessionId, {
+        beforeSeq: options.beforeSeq,
+        limit: options.limit ?? null,
+      });
+      return {
+        messages: page.messages,
+        total: page.total,
+        hasMore: page.hasMore,
+        offset: options.offset ?? 0,
+        limit: options.limit ?? null,
+        nextBeforeSeq: page.nextBeforeSeq,
+      };
+    }
+
+    const cacheKey = `${provider}:${sessionId}`;
+    let history: FetchHistoryResult;
+    if (session.jsonl_path) {
+      try {
+        const mtimeMs = fsSync.statSync(session.jsonl_path).mtimeMs;
+        const cached = providerHistoryCache.get(cacheKey);
+        if (cached?.mtimeMs === mtimeMs) {
+          history = cached.result;
+          cacheProviderHistory(cacheKey, cached);
+        } else {
+          history = await providerSessions.fetchHistory(sessionId, {
+            limit: null,
+            offset: 0,
+            projectPath: session.project_path ?? '',
+          });
+          cacheProviderHistory(cacheKey, { mtimeMs, result: history });
+        }
+      } catch {
+        history = await providerSessions.fetchHistory(sessionId, {
+          limit: null,
+          offset: 0,
+          projectPath: session.project_path ?? '',
+        });
+      }
+    } else {
+      history = await providerSessions.fetchHistory(sessionId, {
+        limit: null,
+        offset: 0,
+        projectPath: session.project_path ?? '',
+      });
+    }
+
+    reconcileSessionMessageLog({
+      sessionId,
+      provider,
+      history: history.messages,
     });
+    const page = sessionMessagesDb.list(sessionId, {
+      beforeSeq: options.beforeSeq ?? null,
+      offset: options.beforeSeq === undefined || options.beforeSeq === null
+        ? options.offset ?? 0
+        : 0,
+      limit: options.limit ?? null,
+    });
+    return {
+      messages: page.messages,
+      total: page.total,
+      hasMore: page.hasMore,
+      offset: options.offset ?? 0,
+      limit: options.limit ?? null,
+      nextBeforeSeq: page.nextBeforeSeq,
+      tokenUsage: history.tokenUsage,
+    };
   },
 
   /**

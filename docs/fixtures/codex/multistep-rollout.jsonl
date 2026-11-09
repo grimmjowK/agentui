@@ -1,0 +1,7 @@
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Inspect the project"}]}}
+{"timestamp":"2026-01-01T00:00:01.000Z","type":"response_item","payload":{"id":"reasoning-contract-1","type":"reasoning","summary":[{"text":"I should inspect the directory."}]}}
+{"timestamp":"2026-01-01T00:00:02.000Z","type":"response_item","payload":{"id":"call-contract-1","type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"}}
+{"timestamp":"2026-01-01T00:00:03.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-contract-1","output":"/workspace/demo"}}
+{"timestamp":"2026-01-01T00:00:04.000Z","type":"response_item","payload":{"id":"assistant-contract-1","type":"message","role":"assistant","content":[{"type":"output_text","text":"The workspace is ready."}]}}
+{"timestamp":"2026-01-01T00:00:05.000Z","type":"compacted","payload":{"message":"Context compacted"}}
+{"timestamp":"2026-01-01T00:00:06.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<turn_aborted>"}]}}

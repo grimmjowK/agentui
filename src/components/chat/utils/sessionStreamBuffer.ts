@@ -28,13 +28,13 @@ export function createSessionStreamBuffer(
         stream.timer = setTimeout(() => flush(sessionId, pending), 100);
       }
     },
-    finish(sessionId: string, messageId?: string) {
+    finish(sessionId: string, messageId?: string, options?: { clearIfUnmatched?: boolean }) {
       const stream = streams.get(sessionId);
       if (stream) {
         flush(sessionId, stream);
         streams.delete(sessionId);
       }
-      store.finalizeStreaming(sessionId, messageId);
+      store.finalizeStreaming(sessionId, messageId, options);
     },
     dispose() {
       // 卸載時保留已收到的內容並取消計時器，不虛構完成事件。

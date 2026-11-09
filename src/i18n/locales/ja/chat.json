@@ -36,6 +36,7 @@
     "readTodo": "Todoリストを読み取り",
     "searchResults": "件の結果",
     "waitingOutput": "ターミナル出力を待機中",
+    "commandOutput": "実行出力",
     "runCode": "コードを実行",
     "changeDeleted": "削除"
   },

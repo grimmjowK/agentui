@@ -5,8 +5,17 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { mapAgyStepUpdate } from '@/modules/providers/list/antigravity/antigravity-tool-mapper.js';
+import {
+  agyTextId,
+  mapAgyStepUpdate,
+} from '@/modules/providers/list/antigravity/antigravity-tool-mapper.js';
 import { AntigravitySessionsProvider } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
+import {
+  buildMessageIdContractReport,
+  foldToolResultsForContract,
+} from '@/modules/providers/tests/message-id-contract.js';
+import type { NormalizedMessage } from '@/shared/types.js';
+import { createNormalizedMessage } from '@/shared/utils.js';
 
 const fixturesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../../docs/fixtures/antigravity');
 
@@ -89,4 +98,68 @@ test('未登記的工具保留原名與原參數', () => {
     step_type: 'tool', state: 'ACTIVE', step_index: 9, tool_name: 'grep_search', tool_info: { parameters: { Query: 'x' } },
   });
   assert.deepEqual(mapped, { kind: 'tool_use', id: 'agy_tool_9', toolId: 'agy_tool_9', toolName: 'grep_search', toolInput: { Query: 'x' } });
+});
+
+test('Antigravity fixture 的即時與歷史 id 契約一致', async () => {
+  const sessionId = 'fixture-multistep';
+  const history = (await historyMessages('multistep')).map((message) => ({
+    ...message,
+    sessionId,
+  }));
+  const live = foldToolResultsForContract(liveMessages('multistep').map((message) => ({
+    ...message,
+    provider: 'antigravity',
+    sessionId,
+    timestamp: '2026-01-01T00:00:00.000Z',
+  }) as NormalizedMessage));
+
+  const stream = fs.readFileSync(path.join(fixturesDir, 'multistep.stream.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const segments = new Map<number, string>();
+  for (const event of stream) {
+    const step = event.step_update;
+    if (step?.step_type === 'agent_response' && typeof step.text_delta === 'string') {
+      segments.set(step.step_index, `${segments.get(step.step_index) ?? ''}${step.text_delta}`);
+    }
+  }
+  for (const [stepIndex, content] of segments) {
+    live.push(createNormalizedMessage({
+      id: agyTextId(sessionId, stepIndex),
+      provider: 'antigravity',
+      sessionId,
+      timestamp: '2026-01-01T00:00:00.000Z',
+      kind: 'text',
+      role: 'assistant',
+      content,
+    }));
+  }
+
+  const historyUsers = history.filter((message) => message.kind === 'text' && message.role === 'user');
+  live.push(...historyUsers.map((message) => ({
+    ...message,
+    id: `user:${String(message.id).replace(/[^a-zA-Z0-9]/g, '').slice(-32)}`,
+  })));
+
+  const report = buildMessageIdContractReport(
+    foldToolResultsForContract(live),
+    foldToolResultsForContract(history),
+  );
+  assert.equal(
+    report.stableHistoryIds,
+    true,
+    JSON.stringify(Object.fromEntries(
+      Object.entries(report.byKind).map(([kind, lists]) => [
+        kind,
+        {
+          liveOnly: lists.liveOnly.map((message) => message.id),
+          historyOnly: lists.historyOnly.map((message) => message.id),
+        },
+      ]),
+    )),
+  );
+  assert.equal(report.userPairing.unpairedLive.length, 0);
+  assert.equal(report.userPairing.unpairedHistory.length, 0);
+  assert.ok(report.byKind.tool_use.both.length > 0);
 });

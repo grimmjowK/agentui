@@ -28,7 +28,13 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
   }
 
   for (const msg of messages) {
+    const renderableImages = msg.images?.filter((image) => (
+      typeof image.data === 'string' && image.data.startsWith('data:image/')
+    ));
+    const hasImageMetadata = msg.role === 'user' && Boolean(msg.images?.length);
     const sharedMetadata = {
+      id: msg.id,
+      seq: msg.seq,
       displayText: msg.displayText,
       commandName: msg.commandName,
       commandMessage: msg.commandMessage,
@@ -41,13 +47,19 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
       attachmentPath: msg.attachmentPath,
       attachmentDetail: msg.attachmentDetail,
       isCompactBoundary: msg.isCompactBoundary,
-      images: msg.images,
+      images: renderableImages,
     };
 
     switch (msg.kind) {
       case 'text': {
         const content = msg.content || '';
-        if (!content.trim() && (!msg.images || msg.images.length === 0)) continue;
+        if (
+          !content.trim()
+          && (!renderableImages || renderableImages.length === 0)
+          && !hasImageMetadata
+        ) {
+          continue;
+        }
 
         if (msg.role === 'user') {
           // 后台任务通知：模型自发触发，不是用户发起的对话，直接丢弃，不展示也不进索引。
@@ -58,7 +70,7 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           } else {
             // 已经有缩略图可渲染时，服务端追加的临时路径说明就是冗余噪声，隐藏掉；
             // 没有缩略图（刷新后历史不带图片数据）时保留，至少能看出当时带了图。
-            const display = msg.images?.length ? stripImagePathNote(content) : content;
+            const display = renderableImages?.length ? stripImagePathNote(content) : content;
             converted.push({
               type: 'user',
               content: unescapeWithMathProtection(decodeHtmlEntities(display)),

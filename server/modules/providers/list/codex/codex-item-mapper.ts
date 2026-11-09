@@ -10,6 +10,18 @@ import type { AnyRecord, MessageKind } from '@/shared/types.js';
 
 export type MappedMessage = { kind: MessageKind } & AnyRecord;
 
+export type RolloutMappingContext = {
+  sessionId?: string | null;
+  lineIndex?: number;
+};
+
+function deterministicRolloutId(context?: RolloutMappingContext): string | undefined {
+  if (!context?.sessionId || context.lineIndex === undefined) {
+    return undefined;
+  }
+  return `codex_${context.sessionId}_${context.lineIndex}`;
+}
+
 /** 檔案變更的中間形狀：即時 `FileUpdateChange` 與歷史 `apply_patch` 都先收斂到這裡。 */
 export type CodexFileChange = {
   path: string;
@@ -315,9 +327,20 @@ export function mapPlanUpdate(params: Pick<TurnPlanUpdatedNotification, 'turnId'
  * `callIdToSplitIdsMap` 記錄被拆分的 `apply_patch`，讓後續輸出展開成多筆 `tool_result`。
  * 非工具條目（使用者/助手訊息、token 計數等）回傳空陣列，由呼叫端處理。
  */
-export function mapRolloutEntry(entry: AnyRecord, callIdToSplitIdsMap: Map<string, string[]>): MappedMessage[] {
+export function mapRolloutEntry(
+  entry: AnyRecord,
+  callIdToSplitIdsMap: Map<string, string[]>,
+  context?: RolloutMappingContext,
+): MappedMessage[] {
+  const fallbackId = deterministicRolloutId(context);
   if (entry.type === 'compacted') {
-    return [{ kind: 'text', role: 'assistant', content: COMPACT_BOUNDARY_TEXT, isCompactBoundary: true }];
+    return [{
+      kind: 'text',
+      ...(fallbackId ? { id: fallbackId } : {}),
+      role: 'assistant',
+      content: COMPACT_BOUNDARY_TEXT,
+      isCompactBoundary: true,
+    }];
   }
   if (entry.type !== 'response_item' || !entry.payload) return [];
   const payload = entry.payload as AnyRecord;
@@ -328,7 +351,13 @@ export function mapRolloutEntry(entry: AnyRecord, callIdToSplitIdsMap: Map<strin
       const content = Array.isArray(payload.summary)
         ? payload.summary.map((part: AnyRecord) => part?.text).filter(Boolean).join('\n')
         : '';
-      return content.trim() ? [{ kind: 'thinking', content }] : [];
+      return content.trim()
+        ? [{
+            kind: 'thinking',
+            id: typeof payload.id === 'string' && payload.id ? payload.id : fallbackId,
+            content,
+          }]
+        : [];
     }
 
     case 'function_call': {

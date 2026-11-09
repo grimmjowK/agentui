@@ -42,6 +42,12 @@ emit({ event: 'init', conversation_id: id, init: { cwd: process.cwd() } });
 if (prompt === 'wait') {
   process.on('SIGTERM', () => { emit({ event: 'result', result: { conversation_id: id, status: 'ERROR', error: 'interrupted' } }); process.exit(1); });
   setInterval(() => {}, 1000);
+} else if (prompt === 'stale-error' || prompt === 'new-exit-error') {
+  const error = 'API error (attempt 1): unexpected EOF';
+  emit({ event: 'step_update', step_update: { conversation_id: id, step_index: 552, step_type: 'agent_response', state: 'DONE', text_delta: 'completed answer' } });
+  emit({ event: 'result', result: { conversation_id: id, status: 'ERROR', error } });
+  process.stderr.write(prompt === 'new-exit-error' ? 'new shutdown failure' : error);
+  process.exitCode = 1;
 } else if (prompt === 'reconnect') {
   setTimeout(() => {
     emit({ event: 'step_update', step_update: { conversation_id: id, step_type: 'agent_response', state: 'IN_PROGRESS', text_delta: 'during disconnect' } });
@@ -104,13 +110,13 @@ if (prompt === 'wait') {
     assert.equal((await provider.fetchHistory('native-session')).total, 4);
 
     const defaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
-    assert.equal(defaultArgs.includes('--dangerously-skip-permissions'), false);
+    assert.equal(defaultArgs.includes('--dangerously-skip-permissions'), false, JSON.stringify(defaultArgs));
     await spawnAntigravity('allowed', { cwd: workspace, permissionMode: 'bypassPermissions' }, writer);
     const allowedArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
-    assert.equal(allowedArgs.includes('--dangerously-skip-permissions'), true);
+    assert.equal(allowedArgs.includes('--dangerously-skip-permissions'), true, JSON.stringify(allowedArgs));
     await spawnAntigravity('default', { cwd: workspace, permissionMode: 'default', skipPermissions: true }, writer);
     const backToDefaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
-    assert.equal(backToDefaultArgs.includes('--dangerously-skip-permissions'), false);
+    assert.equal(backToDefaultArgs.includes('--dangerously-skip-permissions'), false, JSON.stringify(backToDefaultArgs));
 
     // An offline CLI transcript gets its workspace from the native summary DB.
     const externalLog = path.join(root, 'brain', 'offline-native', 'transcript.jsonl');
@@ -159,7 +165,9 @@ if (prompt === 'wait') {
       },
     };
     await spawnAntigravity('reconnect', { cwd: workspace }, reconnectWriter);
-    assert.ok(reconnectedMessages.some((message) => message.kind === 'stream_delta' && message.content === 'during disconnect'));
+    // The runtime no longer buffers disconnected events itself; LoggingWriter
+    // persists durable rows and replays them after reconnect.
+    assert.ok(disconnectedMessages.some((message) => message.kind === 'stream_delta' && message.content === 'during disconnect'));
     assert.ok(reconnectedMessages.some((message) => message.kind === 'stream_delta' && message.content === 'after reconnect'));
     assert.ok(reconnectedMessages.some((message) => message.kind === 'complete'));
     const originalLog = sessionsDb.getSessionById('native-session')!.jsonl_path!;
@@ -172,6 +180,12 @@ if (prompt === 'wait') {
     assert.deepEqual(getActiveAntigravitySessions(), []);
     assert.equal(messages.filter((message) => message.kind === 'complete' && message.aborted).length, 1);
     assert.equal(messages.filter((message) => message.kind === 'error').length, 0);
+
+    messages.length = 0;
+    await spawnAntigravity('stale-error', { cwd: workspace }, writer);
+    assert.equal(messages.filter((message) => message.kind === 'error').length, 0);
+    assert.equal(messages.filter((message) => message.kind === 'complete' && message.success).length, 1);
+    await assert.rejects(spawnAntigravity('new-exit-error', { cwd: workspace }, writer), /new shutdown failure/);
 
     const beforeFailure = sessionsDb.getAllSessions().length;
     await assert.rejects(spawnAntigravity('fail', { cwd: workspace }, writer), /CLI startup failure/);

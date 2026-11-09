@@ -24,8 +24,8 @@ export class WebSocketWriter {
     }
   }
 
-  updateWebSocket(newRawWs: RealtimeClientConnection): void {
-    this.ws = newRawWs;
+  updateWebSocket(newRawWs: unknown): void {
+    this.ws = newRawWs as RealtimeClientConnection;
   }
 
   setSessionId(sessionId: string): void {

@@ -35,6 +35,16 @@ const activeSessions = new Map();
 const abortedQueries = new WeakSet();
 const pendingToolApprovals = new Map();
 
+export function shouldSuppressClaudeWrappedError(assistantText, errorMessage) {
+  const visible = typeof assistantText === 'string' ? assistantText.trim() : '';
+  const error = typeof errorMessage === 'string' ? errorMessage.trim() : '';
+  if (!visible || !error) return false;
+  const assistantLooksLikeError = /^(?:API error|Error:|\[Request interrupted)/i.test(visible);
+  if (!assistantLooksLikeError) return false;
+  const probe = visible.slice(0, 160);
+  return error.includes(probe) || visible.includes(error.slice(0, 160));
+}
+
 // 預設 10 分鐘，與 Codex 審批一致；0 以外的無效值回退預設
 const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEOUT_MS, 10) || 600000;
 
@@ -399,6 +409,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
   let tempImagePaths = [];
   let tempDir = null;
   let queryInstance;
+  let lastVisibleAssistantText = '';
 
   const emitNotification = (event) => {
     notifyUserIfEnabled({
@@ -591,6 +602,9 @@ async function queryClaudeSDK(command, options = {}, ws) {
         if (transformedMessage.parentToolUseId && !msg.parentToolUseId) {
           msg.parentToolUseId = transformedMessage.parentToolUseId;
         }
+        if (msg.kind === 'text' && msg.role === 'assistant' && typeof msg.content === 'string') {
+          lastVisibleAssistantText = msg.content;
+        }
         ws.send(msg);
       }
 
@@ -670,8 +684,12 @@ async function queryClaudeSDK(command, options = {}, ws) {
         ? 'Claude Code is not installed. Please install it first: https://docs.anthropic.com/en/docs/claude-code' + providerAuthService.cliLookupPathHint()
         : error.message;
 
-      // Send error to WebSocket
-      ws.send(createNormalizedMessage({ kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+      // The SDK can first emit the API error as assistant text and then throw a
+      // wrapper for the same failure. The text is already durable, so do not
+      // create a second error bubble.
+      if (!shouldSuppressClaudeWrappedError(lastVisibleAssistantText, errorContent)) {
+        ws.send(createNormalizedMessage({ kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+      }
     }
 
 

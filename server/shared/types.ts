@@ -98,6 +98,10 @@ export type MessageKind =
  */
 export type NormalizedMessage = {
   id: string;
+  /** Provider-native aliases used when the same logical row has more than one id. */
+  providerIds?: string[];
+  /** Display sequence assigned by the server-side session message log. */
+  seq?: number;
   sessionId: string;
   timestamp: string;
   provider: LLMProvider;
@@ -180,6 +184,7 @@ export type FetchHistoryOptions = {
   projectPath?: string;
   limit?: number | null;
   offset?: number;
+  beforeSeq?: number | null;
 };
 
 /**
@@ -193,6 +198,7 @@ export type FetchHistoryResult = {
   hasMore: boolean;
   offset: number;
   limit: number | null;
+  nextBeforeSeq?: number | null;
   tokenUsage?: unknown;
 };
 
