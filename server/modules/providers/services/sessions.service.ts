@@ -5,7 +5,7 @@ import path from 'node:path';
 import { projectsDb, sessionMessagesDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { sessionPinService } from '@/modules/providers/services/session-pin.service.js';
-import { isSessionMessageLogEnabled } from '@/modules/providers/services/session-message-log-flags.js';
+import { isSessionMessageLogEnabled } from '@/shared/session-message-log-flags.js';
 import { reconcileSessionMessageLog } from '@/modules/providers/services/session-message-reconciler.service.js';
 import type {
   FetchHistoryOptions,
@@ -34,6 +34,18 @@ type ProviderHistoryCacheEntry = {
 };
 
 const providerHistoryCache = new Map<string, ProviderHistoryCacheEntry>();
+// ponytail: 按插入順序淘汰的簡易 LRU，命中時重新插入；需要按記憶體大小淘汰再換實作
+const PROVIDER_HISTORY_CACHE_MAX = 20;
+
+function cacheProviderHistory(key: string, entry: ProviderHistoryCacheEntry): void {
+  providerHistoryCache.delete(key);
+  providerHistoryCache.set(key, entry);
+  while (providerHistoryCache.size > PROVIDER_HISTORY_CACHE_MAX) {
+    const oldest = providerHistoryCache.keys().next().value;
+    if (oldest === undefined) break;
+    providerHistoryCache.delete(oldest);
+  }
+}
 
 /**
  * Removes one file if it exists.
@@ -128,6 +140,22 @@ export const sessionsService = {
       });
     }
 
+    // 往前翻頁（帶 beforeSeq）時日誌已在首屏對帳過，直接讀 DB，不再全量解析 provider 歷史
+    if (options.beforeSeq !== undefined && options.beforeSeq !== null) {
+      const page = sessionMessagesDb.list(sessionId, {
+        beforeSeq: options.beforeSeq,
+        limit: options.limit ?? null,
+      });
+      return {
+        messages: page.messages,
+        total: page.total,
+        hasMore: page.hasMore,
+        offset: options.offset ?? 0,
+        limit: options.limit ?? null,
+        nextBeforeSeq: page.nextBeforeSeq,
+      };
+    }
+
     const cacheKey = `${provider}:${sessionId}`;
     let history: FetchHistoryResult;
     if (session.jsonl_path) {
@@ -136,13 +164,14 @@ export const sessionsService = {
         const cached = providerHistoryCache.get(cacheKey);
         if (cached?.mtimeMs === mtimeMs) {
           history = cached.result;
+          cacheProviderHistory(cacheKey, cached);
         } else {
           history = await providerSessions.fetchHistory(sessionId, {
             limit: null,
             offset: 0,
             projectPath: session.project_path ?? '',
           });
-          providerHistoryCache.set(cacheKey, { mtimeMs, result: history });
+          cacheProviderHistory(cacheKey, { mtimeMs, result: history });
         }
       } catch {
         history = await providerSessions.fetchHistory(sessionId, {

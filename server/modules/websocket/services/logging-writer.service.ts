@@ -311,11 +311,19 @@ export class LoggingWriter {
       return message;
     }
 
-    const result = sessionMessagesDb.insertUserIfAbsent(
-      this.currentSessionId,
-      message,
-      this.writerUserId,
-    );
+    let result: ReturnType<typeof sessionMessagesDb.insertUserIfAbsent>;
+    try {
+      result = sessionMessagesDb.insertUserIfAbsent(
+        this.currentSessionId,
+        message,
+        this.writerUserId,
+      );
+    } catch (error) {
+      // DB 故障不該擋住使用者送出；只有 clientId 衝突才拒絕
+      console.warn('[LoggingWriter] failed to persist user message; forwarding without log', error);
+      this.inner.send(message);
+      return message;
+    }
     if (result.status === 'conflict' || !result.message) {
       throw new Error('clientId conflicts with an existing session message');
     }
@@ -325,12 +333,16 @@ export class LoggingWriter {
 
   replayAfterSeq(afterSeq: number | null): void {
     if (!this.currentSessionId) return;
-    const page = sessionMessagesDb.list(this.currentSessionId, {
-      afterSeq: afterSeq ?? 0,
-      limit: null,
-    });
-    for (const message of page.messages) {
-      this.inner.send(message);
+    // afterSeq 為 null 表示前端還沒有任何持久化訊息，首屏由 HTTP 分頁載入；
+    // 這裡若全量重播，長會話會被整段推過 WS，分頁失效。
+    if (afterSeq !== null) {
+      const page = sessionMessagesDb.list(this.currentSessionId, {
+        afterSeq,
+        limit: null,
+      });
+      for (const message of page.messages) {
+        this.inner.send(message);
+      }
     }
     if (this.streamingText) {
       this.inner.send({
@@ -408,7 +420,24 @@ export class LoggingWriter {
     }
   }
 
+  /**
+   * 日誌只是旁路：落庫失敗（SQLITE_BUSY、磁碟滿、clientId 衝突等）時降級為只轉發，
+   * 不能讓異常沿 runtime 的 writer.send 往上拋而中斷整輪對話。
+   */
   private persistAndSend(message: NormalizedMessage): void {
+    try {
+      this.persistAndSendOrThrow(message);
+    } catch (error) {
+      console.warn('[LoggingWriter] failed to persist message; forwarding without log', {
+        sessionId: this.currentSessionId,
+        id: message.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      this.inner.send(message);
+    }
+  }
+
+  private persistAndSendOrThrow(message: NormalizedMessage): void {
     if (!this.currentSessionId) return;
     const normalized = {
       ...message,
@@ -489,13 +518,18 @@ export function sendToClient(writer: ProviderRuntimeWriter, message: unknown): v
 
   if (isRecord(message) && isPersistentMessage(message) && typeof message.sessionId === 'string') {
     const normalized = mergeRuntimeMessage(message, message.sessionId, message.provider);
-    const result = normalized.kind === 'tool_result' && normalized.toolId
-      ? sessionMessagesDb.foldToolResult(
-        normalized.sessionId,
-        truncateMessagePayload(normalized),
-        truncateMessagePayload,
-      )
-      : sessionMessagesDb.upsertById(normalized.sessionId, truncateMessagePayload(normalized), 'live').message;
+    let result: NormalizedMessage | null = null;
+    try {
+      result = normalized.kind === 'tool_result' && normalized.toolId
+        ? sessionMessagesDb.foldToolResult(
+          normalized.sessionId,
+          truncateMessagePayload(normalized),
+          truncateMessagePayload,
+        )
+        : sessionMessagesDb.upsertById(normalized.sessionId, truncateMessagePayload(normalized), 'live').message;
+    } catch (error) {
+      console.warn('[LoggingWriter] failed to persist dispatcher message; forwarding without log', error);
+    }
     writer.send(result || truncateMessagePayload(normalized));
     return;
   }

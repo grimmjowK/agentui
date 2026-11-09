@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 import type { WebSocket } from 'ws';
 
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
@@ -11,6 +13,7 @@ import {
   LoggingWriter,
   sendToClient,
 } from '@/modules/websocket/services/logging-writer.service.js';
+import { isSessionMessageLogEnabled } from '@/shared/session-message-log-flags.js';
 import type { IProviderRuntime } from '@/shared/interfaces.js';
 import type {
   AnyRecord,
@@ -35,6 +38,18 @@ type ChatIncomingMessage = AnyRecord & {
 };
 
 const CLIENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * 缺省時由伺服器補一個 clientId：部署後仍在跑快取舊前端（PWA）或其他不帶 clientId 的
+ * 客戶端不能因此整個送不出訊息；帶了但格式不對才視為錯誤請求。
+ */
+function resolveClientId(raw: unknown): string {
+  if (raw === undefined || raw === null || raw === '') return crypto.randomUUID();
+  if (typeof raw !== 'string' || !CLIENT_ID_PATTERN.test(raw)) {
+    throw new Error('clientId must be a UUID');
+  }
+  return raw;
+}
 
 /**
  * 同一个 sessionId 如果同时被终端页的 `<cli> --resume` 进程和聊天页的 SDK
@@ -146,10 +161,7 @@ export function handleChatConnection(
 
       if (messageType === 'chat-command') {
         const { id, runtime } = resolveRuntime(registry, data.provider);
-        const clientId = typeof data.clientId === 'string' ? data.clientId : '';
-        if (!CLIENT_ID_PATTERN.test(clientId)) {
-          throw new Error('clientId must be a UUID');
-        }
+        const clientId = resolveClientId(data.clientId);
         const requestedSessionId = typeof data.options?.sessionId === 'string'
           ? data.options.sessionId
           : null;
@@ -212,10 +224,7 @@ export function handleChatConnection(
         const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
         const text = typeof data.text === 'string' ? data.text : '';
-        const clientId = typeof data.clientId === 'string' ? data.clientId : '';
-        if (!CLIENT_ID_PATTERN.test(clientId)) {
-          throw new Error('clientId must be a UUID');
-        }
+        const clientId = resolveClientId(data.clientId);
         const result = runtime.steer
           ? await runtime.steer(sessionId, writer.userId, text)
           : { ok: false, reason: 'unsupported' };
@@ -280,10 +289,12 @@ export function handleChatConnection(
         const afterSeq = typeof data.afterSeq === 'number' && Number.isFinite(data.afterSeq)
           ? data.afterSeq
           : null;
+        // 關閉日誌讀路徑時前端走舊合併邏輯，重播的日誌行（user:<uuid> 等 id）會與 provider 歷史重複
+        const replayEnabled = isSessionMessageLogEnabled();
         if (registered) {
           registered.updateWebSocket(writer.ws);
-          registered.replayAfterSeq(afterSeq);
-        } else if (sessionId) {
+          if (replayEnabled) registered.replayAfterSeq(afterSeq);
+        } else if (sessionId && replayEnabled) {
           const tempWriter = new LoggingWriter(writer, {
             initialSessionId: sessionId,
             userId: writer.userId,

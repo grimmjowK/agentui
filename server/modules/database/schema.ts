@@ -141,6 +141,8 @@ CREATE INDEX IF NOT EXISTS idx_session_messages_session_updated
     ON session_messages(session_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_session_messages_id
     ON session_messages(id);
+CREATE INDEX IF NOT EXISTS idx_session_messages_tool_id
+    ON session_messages(session_id, json_extract(payload, '$.toolId'));
 `;
 
 export const INIT_SCHEMA_SQL = `

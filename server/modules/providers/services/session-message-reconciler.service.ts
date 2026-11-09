@@ -1,4 +1,5 @@
 import {
+  getConnection,
   sessionMessagesDb,
   type SessionMessageRow,
 } from '@/modules/database/index.js';
@@ -54,16 +55,26 @@ function collectHistoricalIds(history: NormalizedMessage[]): Set<string> {
   return ids;
 }
 
-function matches(row: SessionMessageRow, message: NormalizedMessage): boolean {
-  const ids = new Set(providerIds(message));
-  return ids.has(row.id) || (row.providerIds ?? []).some((id) => ids.has(id));
+/** id/providerId → row 索引，讓逐條歷史比對從 O(N) 降到 O(1)。 */
+function indexRows(rows: SessionMessageRow[]): Map<string, SessionMessageRow> {
+  const index = new Map<string, SessionMessageRow>();
+  for (const row of rows) {
+    for (const id of [row.id, ...(row.providerIds ?? [])]) {
+      if (!index.has(id)) index.set(id, row);
+    }
+  }
+  return index;
 }
 
 function findMatch(
-  rows: SessionMessageRow[],
+  index: Map<string, SessionMessageRow>,
   message: NormalizedMessage,
 ): SessionMessageRow | undefined {
-  return rows.find((row) => matches(row, message));
+  for (const id of providerIds(message)) {
+    const row = index.get(id);
+    if (row) return row;
+  }
+  return undefined;
 }
 
 function uniqueHistory(messages: NormalizedMessage[]): NormalizedMessage[] {
@@ -81,12 +92,18 @@ function overlayFullHistory(
   rows: SessionMessageRow[],
   history: NormalizedMessage[],
 ): NormalizedMessage[] {
+  const historyById = new Map<string, NormalizedMessage>();
+  for (const message of history) {
+    for (const id of providerIds(message)) {
+      if (!historyById.has(id)) historyById.set(id, message);
+    }
+  }
   return rows.map((row) => {
-    const rowIds = new Set([row.id, ...(row.providerIds ?? [])]);
-    const match = history.find((message) => (
-      providerIds(message).some((id) => rowIds.has(id))
-    ));
-    if (!match || !row.payload.truncated) return row.payload;
+    if (!row.payload.truncated) return row.payload;
+    const match = [row.id, ...(row.providerIds ?? [])]
+      .map((id) => historyById.get(id))
+      .find(Boolean);
+    if (!match) return row.payload;
     return {
       ...row.payload,
       ...match,
@@ -123,12 +140,19 @@ export function rebuildSessionMessageLog(
   return sessionMessagesDb.list(sessionId).messages;
 }
 
-export function reconcileSessionMessageLog(input: {
+type ReconcileInput = {
   sessionId: string;
   provider: LLMProvider;
   history: NormalizedMessage[];
   active?: boolean;
-}): NormalizedMessage[] {
+};
+
+/** 整段對帳在單一 transaction 內完成：中途失敗不會留下半套日誌，批量寫入也快得多。 */
+export function reconcileSessionMessageLog(input: ReconcileInput): NormalizedMessage[] {
+  return getConnection().transaction(() => reconcileInTransaction(input))();
+}
+
+function reconcileInTransaction(input: ReconcileInput): NormalizedMessage[] {
   const { sessionId, provider } = input;
   const active = input.active ?? isSessionLogActive(sessionId);
   const history = uniqueHistory(input.history);
@@ -165,10 +189,11 @@ export function reconcileSessionMessageLog(input: {
   }
 
   journal = sessionMessagesDb.listAll(sessionId);
+  const journalIndex = indexRows(journal);
   const matchedByHistoryIndex = new Map<number, SessionMessageRow>();
   for (let index = 0; index < history.length; index++) {
     const message = history[index];
-    const match = findMatch(journal, message);
+    const match = findMatch(journalIndex, message);
     if (!match) continue;
     matchedByHistoryIndex.set(index, match);
     if (isUserMessage(message)) {

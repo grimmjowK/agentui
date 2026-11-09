@@ -336,3 +336,42 @@ test('foldToolResult truncates merged payload and multi-field large payload stay
   });
 });
 
+
+test('replay with null afterSeq skips durable rows but still sends buffered stream text', async () => {
+  await withDatabase(() => {
+    const inner = new FakeWriter();
+    const writer = new LoggingWriter(inner, { initialSessionId: 'session-replay', provider: 'codex' });
+    writer.send({ kind: 'text', role: 'assistant', provider: 'codex', sessionId: 'session-replay', id: 'a1', content: 'done' });
+    writer.send({ kind: 'stream_delta', provider: 'codex', sessionId: 'session-replay', content: 'partial' });
+    inner.sent.length = 0;
+
+    writer.replayAfterSeq(null);
+    assert.deepEqual(inner.sent.map((message) => message.kind), ['stream_delta']);
+
+    inner.sent.length = 0;
+    writer.replayAfterSeq(0);
+    assert.deepEqual(inner.sent.map((message) => message.kind), ['text', 'stream_delta']);
+    writer.finish();
+  });
+});
+
+test('persistence failure degrades to forwarding instead of throwing into the runtime', async () => {
+  await withDatabase(() => {
+    const inner = new FakeWriter();
+    const writer = new LoggingWriter(inner, { initialSessionId: 'session-db-fail', provider: 'codex' });
+    const originalUpsert = sessionMessagesDb.upsertById;
+    sessionMessagesDb.upsertById = () => {
+      throw new Error('SQLITE_BUSY');
+    };
+    try {
+      assert.doesNotThrow(() => writer.send({
+        kind: 'text', role: 'assistant', provider: 'codex', sessionId: 'session-db-fail', id: 'a1', content: 'hi',
+      }));
+    } finally {
+      sessionMessagesDb.upsertById = originalUpsert;
+    }
+    assert.equal(inner.sent.at(-1)?.id, 'a1');
+    assert.equal(inner.sent.at(-1)?.content, 'hi');
+    writer.finish();
+  });
+});

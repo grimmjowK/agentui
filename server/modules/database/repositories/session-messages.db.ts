@@ -15,6 +15,7 @@ type CachedStatements = {
   negateSeqBySession: Statement;
   updateSeqById: Statement;
   listSizes: Statement;
+  findToolUse: Statement;
 };
 
 let cachedDb: Database | null = null;
@@ -71,6 +72,16 @@ function stmts(): CachedStatements {
     ),
     updateSeqById: db.prepare(
       'UPDATE session_messages SET seq = ? WHERE session_id = ? AND id = ?',
+    ),
+    // 只在 SQLite 側定位 tool_use，避免每個 tool_result 都把整個會話 payload 解析一遍
+    findToolUse: db.prepare(
+      `SELECT session_id, id, seq, provider_ids, payload, source, created_at, updated_at
+       FROM session_messages
+       WHERE session_id = ?
+         AND json_extract(payload, '$.toolId') = ?
+         AND json_extract(payload, '$.kind') = 'tool_use'
+       ORDER BY seq ASC
+       LIMIT 1`,
     ),
     listSizes: db.prepare(
       `SELECT
@@ -337,29 +348,24 @@ export const sessionMessagesDb = {
     if (!toolResult.toolId) return null;
     const db = getConnection();
     return db.transaction(() => {
-      const rows = stmts().listBySession.all(sessionId) as SessionMessageDatabaseRow[];
-      for (const dbRow of rows) {
-        const row = rowToMessage(dbRow);
-        if (
-          row?.payload.kind === 'tool_use'
-          && row.payload.toolId === toolResult.toolId
-        ) {
-          const rawMerged: NormalizedMessage = {
-            ...row.payload,
-            toolResult: {
-              content: toolResult.content,
-              isError: Boolean(toolResult.isError),
-              toolUseResult: toolResult.toolUseResult,
-            },
-            ...(toolResult.subagentTools !== undefined
-              ? { subagentTools: toolResult.subagentTools }
-              : {}),
-            seq: row.seq,
-          };
-          const merged = transformMerged ? { ...transformMerged(rawMerged), seq: row.seq } : rawMerged;
-          writeRow(merged, row.providerIds, row.source);
-          return merged;
-        }
+      const dbRow = stmts().findToolUse.get(sessionId, toolResult.toolId) as SessionMessageDatabaseRow | undefined;
+      const row = dbRow ? rowToMessage(dbRow) : null;
+      if (row) {
+        const rawMerged: NormalizedMessage = {
+          ...row.payload,
+          toolResult: {
+            content: toolResult.content,
+            isError: Boolean(toolResult.isError),
+            toolUseResult: toolResult.toolUseResult,
+          },
+          ...(toolResult.subagentTools !== undefined
+            ? { subagentTools: toolResult.subagentTools }
+            : {}),
+          seq: row.seq,
+        };
+        const merged = transformMerged ? { ...transformMerged(rawMerged), seq: row.seq } : rawMerged;
+        writeRow(merged, row.providerIds, row.source);
+        return merged;
       }
       return null;
     })();
@@ -420,17 +426,22 @@ export const sessionMessagesDb = {
     const existing = getRow(sessionId, message.id);
     if (!existing) return null;
     const merged = mergeDefined(existing.payload, message, existing.seq);
-    writeRow(
-      merged,
-      [...existing.providerIds, ...(message.providerIds ?? [])],
-      existing.source,
-    );
+    const providerIds = [...new Set([...existing.providerIds, ...(message.providerIds ?? [])])];
+    // 對帳每次讀歷史都會走到這裡；內容沒變就不重寫，避免整個會話反覆寫盤
+    if (
+      providerIds.length === existing.providerIds.length
+      && JSON.stringify(merged) === JSON.stringify(existing.payload)
+    ) {
+      return existing.payload;
+    }
+    writeRow(merged, providerIds, existing.source);
     return merged;
   },
 
   updateProviderIds(sessionId: string, id: string, providerIds: string[]): void {
     const existing = getRow(sessionId, id);
     if (!existing) return;
+    if (providerIds.every((id) => existing.providerIds.includes(id))) return;
     writeRow(
       existing.payload,
       [...existing.providerIds, ...providerIds],
