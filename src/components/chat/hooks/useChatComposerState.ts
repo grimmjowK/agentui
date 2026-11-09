@@ -570,9 +570,9 @@ export function useChatComposerState({
       // queued：送出佇列項目，用它的內容，不動輸入框（使用者可能正在寫下一則）
       const currentInput = queued ? queued.text : inputValueRef.current;
       const images = queued ? queued.images : attachedImages;
-      // ponytail: 送出失敗時放回佇列尾端，多則排隊時順序會變；失敗很少見，需要時改成插回原位
+      // 送出失敗時放回佇列最前面，維持原本順序
       const requeue = () => {
-        if (queued) queuedMessages.enqueue(queueKey, queued.text, queued.images);
+        if (queued) queuedMessages.enqueue(queueKey, queued.text, queued.images, { front: true });
       };
       const clearComposer = () => {
         if (queued) return;
@@ -1085,7 +1085,11 @@ export function useChatComposerState({
     prevQueueScopeRef.current = { sessionId: steerSessionId, projectId: selectedProjectId };
     const action = getDraftQueueTransition(prev, prevQueueScopeRef.current, pendingViewSessionRef.current?.sessionId ?? null);
     if (action === 'move' && steerSessionId) queuedMessages.renameSession(draftQueueKey, steerSessionId);
-    else if (action === 'new-draft') setDraftQueueKey(createDraftQueueKey());
+    else if (action === 'new-draft') {
+      // 舊的暫存 key 之後不會再被使用，順手釋放
+      if (!prev.sessionId) queuedMessages.discard(draftQueueKey);
+      setDraftQueueKey(createDraftQueueKey());
+    }
   }, [draftQueueKey, pendingViewSessionRef, selectedProjectId, steerSessionId]);
 
   /** 立即引導：把佇列項目以 chat-steer 插進正在執行的這一輪；同時只允許一則等待回覆。 */

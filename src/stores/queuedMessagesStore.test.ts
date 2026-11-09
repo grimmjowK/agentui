@@ -53,3 +53,12 @@ test('getDraftQueueTransition：只有本次建立請求拿到 id 才搬移暫�
   assert.equal(getDraftQueueTransition({ sessionId: 's1', projectId: 'A' }, draft, null), 'new-draft', '離開會話回到新會話換新暫存');
   assert.equal(getDraftQueueTransition(draft, draft, null), 'keep');
 });
+
+test('enqueue front 放回最前面；discard 清掉整個佇列', () => {
+  queuedMessages.reset();
+  queuedMessages.enqueue('A', 'second');
+  queuedMessages.enqueue('A', 'first', [], { front: true });
+  assert.deepEqual(queuedMessages.get('A').map((m) => m.text), ['first', 'second']);
+  queuedMessages.discard('A');
+  assert.equal(queuedMessages.get('A').length, 0);
+});

@@ -35,10 +35,16 @@ export const queuedMessages = {
     return state[key] ?? EMPTY;
   },
 
-  enqueue(key: string, text: string, images: File[] = []): QueuedMessage {
+  enqueue(key: string, text: string, images: File[] = [], options: { front?: boolean } = {}): QueuedMessage {
     const item: QueuedMessage = { id: crypto.randomUUID(), text, images, steering: false };
-    setQueue(key, [...queuedMessages.get(key), item]);
+    const queue = queuedMessages.get(key);
+    setQueue(key, options.front ? [item, ...queue] : [...queue, item]);
     return item;
+  },
+
+  /** 丟掉整個佇列（已無法再回到的新會話暫存）。 */
+  discard(key: string) {
+    if (state[key]) setQueue(key, []);
   },
 
   remove(key: string, id: string) {

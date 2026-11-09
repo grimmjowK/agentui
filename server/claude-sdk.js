@@ -735,7 +735,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
   } catch (error) {
     console.error('SDK query error:', error);
-    input?.close();
 
     // Clean up session on error
     // 只刪自己的登記：中斷後使用者可能已在同一會話開了新一輪
@@ -789,6 +788,9 @@ async function queryClaudeSDK(command, options = {}, ws) {
       sessionName: sessionSummary,
       error
     });
+  } finally {
+    // 任何結束路徑（中斷提前返回、錯誤 result、CLI 未拋錯即結束）都釋放輸入迭代器
+    input?.close();
   }
 }
 
