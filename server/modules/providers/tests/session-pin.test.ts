@@ -34,3 +34,20 @@ test('收藏的 Antigravity 會話連同 transcript_full.jsonl 一起備份；�
   const { messages } = await new AntigravitySessionsProvider().fetchHistory('pin-1');
   assert.equal(messages.at(-1)?.content, 'head middle tail');
 });
+
+test('資料庫查詢拋錯或未就緒時，syncPinnedTranscript 靜默略過且 resolveTranscriptPath 回退到備份', async () => {
+  const originalGet = sessionsDb.getSessionById;
+  (sessionsDb as any).getSessionById = () => {
+    throw new Error('Database not ready');
+  };
+  try {
+    await assert.doesNotReject(async () => {
+      await sessionPinService.syncPinnedTranscript('pin-error');
+    });
+
+    const result = await sessionPinService.resolveTranscriptPath('pin-error');
+    assert.equal(result, null);
+  } finally {
+    sessionsDb.getSessionById = originalGet;
+  }
+});
