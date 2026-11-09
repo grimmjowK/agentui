@@ -14,6 +14,7 @@ import type {
 } from 'react';
 import { ImageIcon, MessageSquareIcon, XIcon, ArrowDownIcon, WifiOffIcon } from 'lucide-react';
 import type { PendingPermissionRequest, PermissionMode, Provider } from '../../types/types';
+import type { QueuedMessage } from '../../../../stores/queuedMessagesStore';
 import { useWebSocket } from '../../../../contexts/WebSocketContext';
 import CommandMenu from './CommandMenu';
 import CommandChip from './CommandChip';
@@ -21,6 +22,7 @@ import ClaudeStatus from './ClaudeStatus';
 import ImageAttachment from './ImageAttachment';
 import ModelSelector from './ModelSelector';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
+import QueuedMessages from './QueuedMessages';
 import ThinkingModeSelector from './ThinkingModeSelector';
 import TokenUsagePie from './TokenUsagePie';
 import {
@@ -58,9 +60,12 @@ interface ChatComposerProps {
   handleGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
   claudeStatus: { text: string; tokens: number; can_interrupt: boolean } | null;
   isLoading: boolean;
-  /** 執行中仍可送出，改為插話（provider 支援 midTurnSteer）。 */
+  /** 這一輪正在跑且 provider 支援插話（midTurnSteer），佇列項目可立即引導。 */
   canSteer?: boolean;
-  isSteerPending?: boolean;
+  queuedItems?: QueuedMessage[];
+  onSteerQueued?: (item: QueuedMessage) => void;
+  onSendQueued?: (item: QueuedMessage) => void;
+  onRemoveQueued?: (id: string) => void;
   onAbortSession: () => void;
   provider: Provider | string;
   permissionMode: PermissionMode | string;
@@ -124,7 +129,10 @@ export default function ChatComposer({
   claudeStatus,
   isLoading,
   canSteer = false,
-  isSteerPending = false,
+  queuedItems = [],
+  onSteerQueued = () => undefined,
+  onSendQueued = () => undefined,
+  onRemoveQueued = () => undefined,
   onAbortSession,
   provider,
   permissionMode,
@@ -216,6 +224,17 @@ export default function ChatComposer({
             handleGrantToolPermission={handleGrantToolPermission}
           />
         </div>
+      )}
+
+      {!hasQuestionPanel && (
+        <QueuedMessages
+          items={queuedItems}
+          isLoading={isLoading}
+          canSteer={canSteer}
+          onSteer={onSteerQueued}
+          onSend={onSendQueued}
+          onRemove={onRemoveQueued}
+        />
       )}
 
       {!hasQuestionPanel && <div className="relative mx-auto max-w-4xl">
@@ -459,9 +478,9 @@ export default function ChatComposer({
               onOpenChange={onModelMenuOpenChange}
             />
             <PromptInputSubmit
-              disabled={(!input.trim() && !pendingCommand && attachedImages.length === 0) || (isLoading && !canSteer) || isSteerPending}
-              status={canSteer ? 'ready' : undefined}
-              title={canSteer ? t('steer.hint') : undefined}
+              disabled={(!input.trim() && !pendingCommand && attachedImages.length === 0) || (isLoading && Boolean(pendingCommand))}
+              status={isLoading ? 'ready' : undefined}
+              title={isLoading ? t('steer.hint') : undefined}
               className="h-10 w-10 sm:h-10 sm:w-10"
               onMouseDown={(event) => {
                 event.preventDefault();

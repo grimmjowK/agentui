@@ -27,9 +27,9 @@
 
 ## Decisions
 
-### D1. 佇列存在一個小的 Zustand store，以會話為 key
+### D1. 佇列存在一個模組層級的小 store，以會話為 key
 
-`src/stores/` 已經使用 Zustand。新增 `useQueuedMessagesStore`：`Record<sessionKey, QueuedMessage[]>`，`QueuedMessage = { id, text, images: File[], steerState: 'idle' | 'pending' }`，操作只有 `enqueue`、`remove`、`shift`、`setSteerState`、`renameSession`。
+專案沒有 Zustand（`useSessionStore` 是自寫 hook），所以不新增依賴，改用 React 內建的 `useSyncExternalStore`。新增 `src/stores/queuedMessagesStore.ts`：`Record<sessionKey, QueuedMessage[]>`，`QueuedMessage = { id, text, images: File[], steering: boolean }`，操作只有 `enqueue`、`remove`、`takeNext`、`setSteering`、`renameSession`；元件以 `useQueuedMessages(key)` 訂閱。
 
 - **為何不用 hook 內的 `useState`**：切換會話時輸入框元件可能重新掛載或重設狀態，佇列需要跨會話保留。
 - **為何不放進 `useSessionStore`**：那是訊息與同步的核心 store，佇列是純 UI 草稿，分開比較不會互相影響。
@@ -37,10 +37,11 @@
 
 ### D2. 送出流程拆成「排隊」與「開始新一輪」
 
-把 `handleSubmit` 中「上傳圖片 → 加入使用者訊息 → 送 `claude-command` 等」這一段抽成 `startTurn({ text, images })`。
+`handleSubmit(event, queued?)` 多接受一個可選的佇列項目，而不是另外抽出 `startTurn`：現有流程中斜線指令攔截、清空輸入框、失敗還原草稿散落多處，抽函式的 diff 遠大於在這幾處判斷「是否為佇列項目」。
 
-- `handleSubmit`：生成中 → `enqueue`，清空輸入框與附件，結束。不在生成中 → 維持原流程（斜線指令攔截、`pendingCommand` 晶片等），最後呼叫 `startTurn`。
-- 自動送出與手動送出佇列項目，都走與 `handleSubmit` 相同的「不在生成中」分支（以項目的 text 與 images 為輸入），所以斜線指令與圖片行為和一般送出一致。
+- 沒有 `queued`、生成中 → `enqueue` 目前輸入與附件，清空輸入框，結束。
+- 沒有 `queued`、不在生成中 → 原流程不變。
+- 有 `queued` → 以項目的 text 與 images 走「不在生成中」的流程（含斜線指令攔截、圖片上傳），但不清空也不還原輸入框（使用者可能正在寫下一則）；送出失敗時把項目放回佇列。
 - 生成中的 `pendingCommand` 晶片：維持現狀，不能在生成中執行（送出按鈕對晶片仍停用）。
 
 ### D3. 「這一輪如何結束」由 realtime handler 通知
@@ -51,16 +52,16 @@
 - `complete` 且 `aborted === true` → `'aborted'`
 - 其他（`complete` 帶非 0 `exitCode`、`error`）→ `'error'`
 
-輸入框狀態只在 `outcome === 'completed'`，而且 `sessionId` 是目前畫面上的會話時，才 `shift` 第一則（跳過 `steerState === 'pending'` 的項目）並送出。
+輸入框狀態只在 `outcome === 'completed'`，而且 `sessionId` 是目前畫面上的會話時，才以 `takeNext` 取出第一則（跳過 `steering` 的項目）並送出。
 
 - **為何不直接監聽 `isLoading` 變成 `false`**：`isLoading` 也會因 `check-session-status`、切換會話而變化，分不出中斷與錯誤，容易誤送。
 - 送出時機用 `setTimeout(0)` 延到 `complete` 的狀態更新之後，避免 `startTurn` 在 `isLoading` 仍為 `true` 時被擋下。
 
 ### D4. 立即引導改從佇列項目觸發，接受後才加入對話
 
-- 按下立即引導：`setSteerState(id, 'pending')`，送 `chat-steer { clientId: item.id }`；`pendingSteerRef` 改存佇列項目的 id 與 sessionKey。
+- 按下立即引導：`setSteering(key, id, true)`，送 `chat-steer { clientId: item.id }`；`pendingSteerRef` 改存佇列項目的 id 與 sessionKey。
 - `steer-accepted`：從佇列移除該項目，此時才 `addMessage` 使用者訊息（不再先樂觀加入、被拒再移除，避免閃爍）。
-- `steer-rejected`：`setSteerState(id, 'idle')`，項目留在佇列，加入一則錯誤訊息說明原因；`not_running` 時沿用現有的 `check-session-status` 校正。
+- `steer-rejected`：`setSteering(key, id, false)`，項目留在佇列，加入一則錯誤訊息說明原因；`not_running` 時沿用現有的 `check-session-status` 校正。
 - 同一時間仍只允許一則引導在等待回覆（其他項目的按鈕停用），沿用現有限制。
 - 現有「生成中按送出就直接插話」的路徑移除。
 
@@ -74,13 +75,13 @@
 | 生成中、其他情況 | 無 |
 | 不在生成中 | 送出 |
 
-送出按鈕在生成中只要有文字或圖片就可按，`title` 顯示「會在這一輪結束後送出」。i18n 在 `chat.json` 的 `steer` 區塊新增 `queued`、`steerNow`、`sendNow`、`remove`、`queuedHint`，並改寫 `hint`；八種語系都要補。
+送出按鈕在生成中只要有文字或圖片就可按，`title` 顯示「會在這一輪結束後送出」。i18n 在 `chat.json` 的 `steer` 區塊新增 `queued`、`steerNow`、`sendNow`、`remove`、`steering`、`imageOnly`，並改寫 `hint` 與 `rejected`（被拒的訊息留在佇列，不再是「輸入已保留」）；八種語系都要補。
 
 ## Risks / Trade-offs
 
 - [習慣「Enter 直接插話」的使用者需要多按一次] → 這是刻意對齊 Codex / Gemini App 的行為；送出按鈕提示與佇列項目上的按鈕說明新行為。
-- [自動送出和立即引導搶同一則] → 自動送出跳過 `steerState === 'pending'` 的項目；引導被拒後項目回到 idle，由使用者手動處理。
-- [新會話在拿到 id 前排隊，`'__new__'` 搬移失敗會讓佇列留在暫時 key 上] → `renameSession` 在 `session_created` 與 `actualSessionId` 替換兩處都呼叫；切到新會話時清掉 `'__new__'` 中已無主的項目。
+- [自動送出和立即引導搶同一則] → 自動送出跳過 `steering` 的項目；引導被拒後項目回到 idle，由使用者手動處理。
+- [新會話在拿到 id 前排隊，`'__new__'` 搬移失敗會讓佇列留在暫時 key 上] → `renameSession` 在 `session_created` 與 `actualSessionId` 替換兩處都呼叫。若新會話在拿到 id 前就失敗，項目會留在 `'__new__'`，下一個新會話會看到它們；刻意不清除，因為那是使用者寫好、尚未送出的內容。
 - [重新整理後佇列遺失] → 列為 Non-Goal；佇列是短暫的草稿，丟失的代價低。若之後有需求，再存到 `sessionStorage`。
 - [中斷與錯誤判斷依賴 `complete` 的 `aborted`、`exitCode` 欄位] → 各 runtime 已依 dispatcher 規則送出這些欄位；實作時為 `onTurnEnded` 的判斷寫單元測試。
 

@@ -234,7 +234,13 @@
     "jumpToMessage": "Vai a questo messaggio"
   },
   "steer": {
-    "hint": "Invia ora per aggiungere l'istruzione al turno in corso",
-    "rejected": "Impossibile aggiungere l'istruzione al turno in corso ({{reason}}). Il testo è stato conservato."
+    "hint": "Se invii ora, il messaggio va in coda e parte al termine di questo turno",
+    "rejected": "Impossibile inserire nel turno in corso ({{reason}}). Il messaggio è ancora in coda.",
+    "queued": "Messaggi in coda",
+    "steerNow": "Guida ora (inserisci nel turno in corso senza interromperlo)",
+    "sendNow": "Invia ora",
+    "remove": "Rimuovi",
+    "steering": "Inserimento…",
+    "imageOnly": "(immagine)"
   }
 }

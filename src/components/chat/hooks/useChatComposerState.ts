@@ -13,6 +13,7 @@ import { useDropzone } from 'react-dropzone';
 import { useTranslation } from 'react-i18next';
 
 import { PROVIDER_INFO } from '../../../../shared/providers';
+import { NEW_SESSION_KEY, queuedMessages, useQueuedMessages, type QueuedMessage } from '../../../stores/queuedMessagesStore';
 import { authenticatedFetch } from '../../../utils/api';
 import { EFFORT_STORAGE_KEY, resolveEffort } from '../constants/thinkingModes';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
@@ -27,6 +28,7 @@ import { escapeRegExp } from '../utils/chatFormatting';
 
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
+import type { TurnOutcome } from './useChatRealtimeHandlers';
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -56,7 +58,6 @@ interface UseChatComposerStateArgs {
   pendingViewSessionRef: { current: PendingViewSession | null };
   scrollToBottom: () => void;
   addMessage: (msg: ChatMessage) => void;
-  removeMessage: (msg: ChatMessage) => void;
   clearMessages: () => void;
   rewindMessages: (count: number) => void;
   setIsLoading: (loading: boolean) => void;
@@ -127,7 +128,6 @@ export function useChatComposerState({
   pendingViewSessionRef,
   scrollToBottom,
   addMessage,
-  removeMessage,
   clearMessages,
   rewindMessages,
   setIsLoading,
@@ -153,14 +153,19 @@ export function useChatComposerState({
   const { t } = useTranslation('chat');
   // 執行中插話（design D9）：等待後端回覆期間不能再送第二則
   const pendingSteerRef = useRef<{
-    clientId: string;
+    itemId: string;
+    queueKey: string;
     text: string;
     sessionId: string;
     provider: LLMProvider;
   } | null>(null);
-  const [isSteerPending, setIsSteerPending] = useState(false);
   const steerSessionId = currentSessionId || selectedSession?.id || null;
   const canSteer = isLoading && PROVIDER_INFO[provider].capabilities.midTurnSteer && Boolean(steerSessionId);
+  // 生成中送出的待送佇列（chat-queued-steer-composer）
+  const queueKey = steerSessionId || NEW_SESSION_KEY;
+  const queuedItems = useQueuedMessages(queueKey);
+  // 這一輪正常結束、且是畫面上的會話時，由 effect 自動送出佇列第一則
+  const [autoSendTick, setAutoSendTick] = useState(0);
   // 推理强度（effort）。跨消息、跨会话保持，不再每次发送后重置
   const [thinkingMode, setThinkingMode] = useState(() => safeLocalStorage.getItem(EFFORT_STORAGE_KEY) || 'default');
   useEffect(() => {
@@ -173,7 +178,10 @@ export function useChatComposerState({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputHighlightRef = useRef<HTMLDivElement>(null);
   const handleSubmitRef = useRef<
-    ((event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>) => Promise<void>) | null
+    ((
+      event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
+      queued?: QueuedMessage,
+    ) => Promise<void>) | null
   >(null);
   const inputValueRef = useRef(input);
   const selectedProjectId = selectedProject?.projectId;
@@ -539,12 +547,40 @@ export function useChatComposerState({
   const handleSubmit = useCallback(
     async (
       event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
+      queued?: QueuedMessage,
     ) => {
       event.preventDefault();
-      const currentInput = inputValueRef.current;
+      // queued：送出佇列項目，用它的內容，不動輸入框（使用者可能正在寫下一則）
+      const currentInput = queued ? queued.text : inputValueRef.current;
+      const images = queued ? queued.images : attachedImages;
+      // ponytail: 送出失敗時放回佇列尾端，多則排隊時順序會變；失敗很少見，需要時改成插回原位
+      const requeue = () => {
+        if (queued) queuedMessages.enqueue(queueKey, queued.text, queued.images);
+      };
+      const clearComposer = () => {
+        if (queued) return;
+        setInput('');
+        inputValueRef.current = '';
+        setAttachedImages([]);
+        setUploadingImages(new Map());
+        setImageErrors(new Map());
+        resetCommandMenuState();
+        setIsTextareaExpanded(false);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+      };
+
+      // 生成中送出：先進佇列，這一輪結束後再送（或由使用者按立即引導）
+      if (!queued && isLoading) {
+        if (pendingCommand || (!currentInput.trim() && attachedImages.length === 0)) return;
+        queuedMessages.enqueue(queueKey, currentInput, attachedImages);
+        clearComposer();
+        return;
+      }
 
       // Handle pending command chip: execute command with appended text
-      if (pendingCommand && !isLoading && selectedProject) {
+      if (!queued && pendingCommand && !isLoading && selectedProject) {
         const appendedText = currentInput.trim();
         const rawInput = appendedText
           ? `${pendingCommand.name} ${appendedText}`
@@ -566,28 +602,8 @@ export function useChatComposerState({
         return;
       }
 
-      if (canSteer && !pendingCommand && steerSessionId) {
-        if (!currentInput.trim() || pendingSteerRef.current) return;
-        const clientId = crypto.randomUUID();
-        pendingSteerRef.current = { clientId, text: currentInput, sessionId: steerSessionId, provider };
-        setIsSteerPending(true);
-        addMessage({
-          id: `user:${clientId}`,
-          type: 'user',
-          content: currentInput,
-          timestamp: new Date(),
-        });
-        const sent = sendMessage({ type: 'chat-steer', provider, sessionId: steerSessionId, text: currentInput, clientId });
-        if (!sent) {
-          pendingSteerRef.current = null;
-          setIsSteerPending(false);
-          removeMessage({ id: `user:${clientId}`, type: 'user', content: currentInput, timestamp: new Date() });
-          addMessage({ type: 'error', content: t('steer.rejected', { reason: 'disconnected' }), timestamp: new Date() });
-        }
-        return;
-      }
-
-      if ((!currentInput.trim() && attachedImages.length === 0) || isLoading || !selectedProject) {
+      if ((!currentInput.trim() && images.length === 0) || isLoading || !selectedProject) {
+        requeue();
         return;
       }
 
@@ -599,16 +615,7 @@ export function useChatComposerState({
         const matchedCommand = slashCommands.find((cmd: SlashCommand) => cmd.name === commandName);
         if (matchedCommand && matchedCommand.type !== 'skill') {
           executeCommand(matchedCommand, commandInput);
-          setInput('');
-          inputValueRef.current = '';
-          setAttachedImages([]);
-          setUploadingImages(new Map());
-          setImageErrors(new Map());
-          resetCommandMenuState();
-          setIsTextareaExpanded(false);
-          if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-          }
+          clearComposer();
           return;
         }
       }
@@ -618,9 +625,9 @@ export function useChatComposerState({
       const effortOption = effort === 'default' ? {} : { effort };
 
       let uploadedImages: unknown[] = [];
-      if (attachedImages.length > 0) {
+      if (images.length > 0) {
         const formData = new FormData();
-        attachedImages.forEach((file) => {
+        images.forEach((file) => {
           formData.append('images', file);
         });
 
@@ -645,6 +652,7 @@ export function useChatComposerState({
             content: `Failed to upload images: ${message}`,
             timestamp: new Date(),
           });
+          requeue();
           return;
         }
       }
@@ -675,19 +683,13 @@ export function useChatComposerState({
       setTimeout(() => scrollToBottom(), 100);
 
       const savedDraft = currentInput;
-      setInput('');
-      inputValueRef.current = '';
-      resetCommandMenuState();
-      setAttachedImages([]);
-      setUploadingImages(new Map());
-      setImageErrors(new Map());
-      setIsTextareaExpanded(false);
-
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
+      clearComposer();
 
       const restoreDraft = () => {
+        if (queued) {
+          requeue();
+          return;
+        }
         setInput(savedDraft);
         inputValueRef.current = savedDraft;
       };
@@ -795,16 +797,13 @@ export function useChatComposerState({
       sendMessage,
       setCanAbortSession,
       addMessage,
-      removeMessage,
       setClaudeStatus,
       setIsLoading,
       setIsUserScrolledUp,
       slashCommands,
       thinkingMode,
       pendingCommand,
-      canSteer,
-      steerSessionId,
-      t,
+      queueKey,
     ],
   );
 
@@ -1052,62 +1051,91 @@ export function useChatComposerState({
     [onInputFocusChange],
   );
 
-  /** 後端回覆 steer-accepted / steer-rejected：成功才清空輸入並加入使用者訊息，失敗保留輸入。 */
+  /** 立即引導：把佇列項目以 chat-steer 插進正在執行的這一輪；同時只允許一則等待回覆。 */
+  const steerQueuedMessage = useCallback(
+    (item: QueuedMessage) => {
+      if (!canSteer || !steerSessionId || pendingSteerRef.current || item.steering || item.images.length > 0) return;
+      pendingSteerRef.current = { itemId: item.id, queueKey, text: item.text, sessionId: steerSessionId, provider };
+      queuedMessages.setSteering(queueKey, item.id, true);
+      const sent = sendMessage({ type: 'chat-steer', provider, sessionId: steerSessionId, text: item.text, clientId: item.id });
+      if (!sent) {
+        pendingSteerRef.current = null;
+        queuedMessages.setSteering(queueKey, item.id, false);
+        addMessage({ type: 'error', content: t('steer.rejected', { reason: 'disconnected' }), timestamp: new Date() });
+      }
+    },
+    [addMessage, canSteer, provider, queueKey, sendMessage, steerSessionId, t],
+  );
+
+  /** 不在生成中時手動送出佇列項目（中斷、出錯或在背景結束後）。 */
+  const sendQueuedMessage = useCallback(
+    (item: QueuedMessage) => {
+      if (isLoading || item.steering) return;
+      queuedMessages.remove(queueKey, item.id);
+      void handleSubmitRef.current?.(createFakeSubmitEvent(), item);
+    },
+    [isLoading, queueKey],
+  );
+
+  const removeQueuedMessage = useCallback(
+    (id: string) => queuedMessages.remove(queueKey, id),
+    [queueKey],
+  );
+
+  /**
+   * 後端回覆 steer-accepted / steer-rejected：接受才從佇列移到對話中，拒絕則留在佇列。
+   * 這一輪結束時不主動放掉引導狀態：後端對每個 chat-steer 一定回覆，提早放掉會讓自動送出重送同一則。
+   */
   const handleSteerResult = useCallback(
     (result: { type: string; clientId?: string | null; reason?: string }) => {
       const pending = pendingSteerRef.current;
-      if (!pending || result.clientId !== pending.clientId) return;
+      if (!pending || result.clientId !== pending.itemId) return;
       pendingSteerRef.current = null;
-      setIsSteerPending(false);
 
       if (result.type !== 'steer-accepted') {
-        removeMessage({
-          id: `user:${pending.clientId}`,
-          type: 'user',
-          content: pending.text,
-          timestamp: new Date(),
-        });
+        queuedMessages.setSteering(pending.queueKey, pending.itemId, false);
         if (result.reason === 'not_running') {
-          // 以後端狀態校正殘留的 Processing；保留輸入，讓使用者可重新送出新一輪。
-          // 使用送出時的 session/provider，避免等待回覆期間切換會話後查錯對象。
+          // 以後端狀態校正殘留的 Processing。使用送出時的 session/provider，避免等待期間切換會話後查錯對象。
           sendMessage({ type: 'check-session-status', sessionId: pending.sessionId, provider: pending.provider });
         }
         addMessage({ type: 'error', content: t('steer.rejected', { reason: result.reason ?? 'rejected' }), timestamp: new Date() });
         return;
       }
 
-      // 等待期間若使用者已改寫輸入，就不覆蓋
-      if (inputValueRef.current === pending.text) {
-        setInput('');
-        inputValueRef.current = '';
-        setIsTextareaExpanded(false);
-        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      queuedMessages.remove(pending.queueKey, pending.itemId);
+      // 等待期間切到別的會話時不加到目前畫面；後端已記錄這則訊息，切回去時會從歷史載入
+      if (pending.queueKey === queueKey) {
+        addMessage({ id: `user:${pending.itemId}`, type: 'user', content: pending.text, timestamp: new Date() });
+        setTimeout(() => scrollToBottom(), 100);
       }
-      setTimeout(() => scrollToBottom(), 100);
     },
-    [addMessage, removeMessage, scrollToBottom, sendMessage, t],
+    [addMessage, queueKey, scrollToBottom, sendMessage, t],
   );
 
-  // 這一輪結束後就不會再有回覆，放掉等待狀態
+  /** realtime handler 通知這一輪結束；只有畫面上的會話正常結束才自動送出佇列第一則。 */
+  const handleTurnEnded = useCallback((outcome: TurnOutcome, isCurrentSession: boolean) => {
+    if (outcome === 'completed' && isCurrentSession) setAutoSendTick((tick) => tick + 1);
+  }, []);
+
+  // 等 isLoading 也已更新為 false（同一批狀態更新）後才送，否則 handleSubmit 會把它當成生成中又排回佇列
+  const handledAutoSendTickRef = useRef(0);
   useEffect(() => {
-    if (!isLoading && pendingSteerRef.current) {
-      removeMessage({
-        id: `user:${pendingSteerRef.current.clientId}`,
-        type: 'user',
-        content: pendingSteerRef.current.text,
-        timestamp: new Date(),
-      });
-      pendingSteerRef.current = null;
-      setIsSteerPending(false);
-    }
-  }, [isLoading, removeMessage]);
+    if (autoSendTick === handledAutoSendTickRef.current || isLoading) return;
+    handledAutoSendTickRef.current = autoSendTick;
+    const next = queuedMessages.takeNext(queueKey);
+    if (next) void handleSubmitRef.current?.(createFakeSubmitEvent(), next);
+  }, [autoSendTick, isLoading, queueKey]);
 
   return {
     input,
     setInput,
     canSteer,
-    isSteerPending,
+    queuedItems,
+    steerQueuedMessage,
+    sendQueuedMessage,
+    removeQueuedMessage,
     handleSteerResult,
+    handleTurnEnded,
     textareaRef,
     inputHighlightRef,
     isTextareaExpanded,

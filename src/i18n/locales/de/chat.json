@@ -234,7 +234,13 @@
     "jumpToMessage": "Zu dieser Nachricht springen"
   },
   "steer": {
-    "hint": "Jetzt senden, um die Anweisung zum laufenden Durchgang hinzuzufügen",
-    "rejected": "Die Anweisung konnte dem laufenden Durchgang nicht hinzugefügt werden ({{reason}}). Dein Text bleibt erhalten."
+    "hint": "Jetzt gesendete Nachrichten werden eingereiht und nach diesem Durchlauf gesendet",
+    "rejected": "Konnte nicht in den laufenden Durchlauf eingefügt werden ({{reason}}). Die Nachricht bleibt in der Warteschlange.",
+    "queued": "Wartende Nachrichten",
+    "steerNow": "Jetzt einlenken (in den laufenden Durchlauf einfügen, ohne ihn zu stoppen)",
+    "sendNow": "Jetzt senden",
+    "remove": "Entfernen",
+    "steering": "Wird eingefügt…",
+    "imageOnly": "(Bild)"
   }
 }

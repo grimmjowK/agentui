@@ -160,8 +160,12 @@ function ChatInterface({
     pendingCommand,
     clearPendingCommand,
     canSteer,
-    isSteerPending,
+    queuedItems,
+    steerQueuedMessage,
+    sendQueuedMessage,
+    removeQueuedMessage,
     handleSteerResult,
+    handleTurnEnded,
     handleModelSwitch,
     currentModel,
     isModelMenuOpen,
@@ -189,7 +193,6 @@ function ChatInterface({
     pendingViewSessionRef,
     scrollToBottom,
     addMessage,
-    removeMessage,
     clearMessages,
     rewindMessages,
     setIsLoading,
@@ -247,6 +250,7 @@ function ChatInterface({
     onNavigateToSession,
     onWebSocketReconnect: handleWebSocketReconnect,
     onSteerResult: handleSteerResult,
+    onTurnEnded: handleTurnEnded,
     sessionStore,
   });
 
@@ -367,7 +371,10 @@ function ChatInterface({
           claudeStatus={claudeStatus}
           isLoading={isLoading}
           canSteer={canSteer}
-          isSteerPending={isSteerPending}
+          queuedItems={queuedItems}
+          onSteerQueued={steerQueuedMessage}
+          onSendQueued={sendQueuedMessage}
+          onRemoveQueued={removeQueuedMessage}
           onAbortSession={handleAbortSession}
           provider={provider}
           permissionMode={permissionMode}
