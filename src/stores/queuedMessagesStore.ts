@@ -87,6 +87,20 @@ export const queuedMessages = {
   },
 };
 
+type QueueScope = { sessionId: string | null; projectId: string | null | undefined };
+
+/**
+ * 會話或專案切換時，新會話暫存佇列該怎麼處理：
+ * - move：這次新會話的建立請求拿到了 id（pendingSessionId 對上），把暫存佇列搬過去
+ * - new-draft：進入另一個新會話畫面（離開既有會話或換專案），換新的暫存 key
+ * - keep：其他情況（例如從新會話畫面點進既有會話，不能把暫存訊息搬進去）
+ */
+export function getDraftQueueTransition(prev: QueueScope, next: QueueScope, pendingSessionId: string | null): 'move' | 'new-draft' | 'keep' {
+  if (prev.sessionId === next.sessionId && prev.projectId === next.projectId) return 'keep';
+  if (!prev.sessionId && next.sessionId && prev.projectId === next.projectId && pendingSessionId === next.sessionId) return 'move';
+  return next.sessionId ? 'keep' : 'new-draft';
+}
+
 export function useQueuedMessages(key: string): QueuedMessage[] {
   return useSyncExternalStore(queuedMessages.subscribe, () => queuedMessages.get(key));
 }

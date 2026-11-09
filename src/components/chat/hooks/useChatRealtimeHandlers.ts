@@ -8,7 +8,7 @@ import { saveSessionModel } from '../utils/chatStorage';
 import { isEventForSession } from '../../../utils/pendingApprovals';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
-import { NEW_SESSION_KEY, queuedMessages } from '../../../stores/queuedMessagesStore';
+import { queuedMessages } from '../../../stores/queuedMessagesStore';
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -241,7 +241,6 @@ export function useChatRealtimeHandlers({
           if (pendingViewSessionRef.current && !pendingViewSessionRef.current.sessionId) {
             pendingViewSessionRef.current.sessionId = newSessionId;
           }
-          queuedMessages.renameSession(NEW_SESSION_KEY, newSessionId);
           setCurrentSessionId(newSessionId);
           onNavigateToSession?.(newSessionId);
         }

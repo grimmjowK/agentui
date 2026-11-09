@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   ChangeEvent,
   ClipboardEvent,
@@ -13,7 +13,13 @@ import { useDropzone } from 'react-dropzone';
 import { useTranslation } from 'react-i18next';
 
 import { PROVIDER_INFO } from '../../../../shared/providers';
-import { NEW_SESSION_KEY, queuedMessages, useQueuedMessages, type QueuedMessage } from '../../../stores/queuedMessagesStore';
+import {
+  NEW_SESSION_KEY,
+  getDraftQueueTransition,
+  queuedMessages,
+  useQueuedMessages,
+  type QueuedMessage,
+} from '../../../stores/queuedMessagesStore';
 import { authenticatedFetch } from '../../../utils/api';
 import { EFFORT_STORAGE_KEY, resolveEffort } from '../constants/thinkingModes';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
@@ -82,6 +88,8 @@ interface CommandExecutionResult {
   hasBashCommands?: boolean;
   hasFileIncludes?: boolean;
 }
+
+const createDraftQueueKey = () => `${NEW_SESSION_KEY}:${crypto.randomUUID()}`;
 
 const createFakeSubmitEvent = () => {
   return { preventDefault: () => undefined } as unknown as FormEvent<HTMLFormElement>;
@@ -162,7 +170,16 @@ export function useChatComposerState({
   const steerSessionId = currentSessionId || selectedSession?.id || null;
   const canSteer = isLoading && PROVIDER_INFO[provider].capabilities.midTurnSteer && Boolean(steerSessionId);
   // 生成中送出的待送佇列（chat-queued-steer-composer）
-  const queueKey = steerSessionId || NEW_SESSION_KEY;
+  // 尚未取得 id 的新會話各自有暫存 key，避免不同專案或不同次新會話共用同一個佇列
+  const [draftQueueKey, setDraftQueueKey] = useState(createDraftQueueKey);
+  const queueKey = steerSessionId || draftQueueKey;
+  // 從已送出到這一輪真正開始（上傳圖片期間 isLoading 仍為 false）也視為忙碌，避免同會話並行送出
+  const startingTurnRef = useRef(false);
+  const [isStartingTurn, setIsStartingTurn] = useState(false);
+  const setStartingTurn = useCallback((starting: boolean) => {
+    startingTurnRef.current = starting;
+    setIsStartingTurn(starting);
+  }, []);
   const queuedItems = useQueuedMessages(queueKey);
   // 這一輪正常結束、且是畫面上的會話時，由 effect 自動送出佇列第一則
   const [autoSendTick, setAutoSendTick] = useState(0);
@@ -572,7 +589,12 @@ export function useChatComposerState({
       };
 
       // 生成中送出：先進佇列，這一輪結束後再送（或由使用者按立即引導）
-      if (!queued && isLoading) {
+      const busy = isLoading || startingTurnRef.current;
+      if (queued && busy) {
+        requeue();
+        return;
+      }
+      if (!queued && busy) {
         if (pendingCommand || (!currentInput.trim() && attachedImages.length === 0)) return;
         queuedMessages.enqueue(queueKey, currentInput, attachedImages);
         clearComposer();
@@ -624,6 +646,7 @@ export function useChatComposerState({
       const effort = resolveEffort(provider, thinkingMode);
       const effortOption = effort === 'default' ? {} : { effort };
 
+      setStartingTurn(true);
       let uploadedImages: unknown[] = [];
       if (images.length > 0) {
         const formData = new FormData();
@@ -652,6 +675,7 @@ export function useChatComposerState({
             content: `Failed to upload images: ${message}`,
             timestamp: new Date(),
           });
+          setStartingTurn(false);
           requeue();
           return;
         }
@@ -672,6 +696,7 @@ export function useChatComposerState({
 
       addMessage(userMessage);
       setIsLoading(true); // Processing banner starts
+      setStartingTurn(false);
       setCanAbortSession(true);
       setClaudeStatus({
         text: 'Processing',
@@ -804,6 +829,7 @@ export function useChatComposerState({
       thinkingMode,
       pendingCommand,
       queueKey,
+      setStartingTurn,
     ],
   );
 
@@ -1051,6 +1077,17 @@ export function useChatComposerState({
     [onInputFocusChange],
   );
 
+  // 新會話拿到 id 時，只有在這次建立請求（pendingViewSessionRef）對上時才把暫存佇列搬過去；
+  // 從新會話畫面點進其他既有會話不搬。離開新會話畫面或換專案後，再回到新會話就換新的暫存 key。
+  const prevQueueScopeRef = useRef({ sessionId: steerSessionId, projectId: selectedProjectId });
+  useLayoutEffect(() => {
+    const prev = prevQueueScopeRef.current;
+    prevQueueScopeRef.current = { sessionId: steerSessionId, projectId: selectedProjectId };
+    const action = getDraftQueueTransition(prev, prevQueueScopeRef.current, pendingViewSessionRef.current?.sessionId ?? null);
+    if (action === 'move' && steerSessionId) queuedMessages.renameSession(draftQueueKey, steerSessionId);
+    else if (action === 'new-draft') setDraftQueueKey(createDraftQueueKey());
+  }, [draftQueueKey, pendingViewSessionRef, selectedProjectId, steerSessionId]);
+
   /** 立即引導：把佇列項目以 chat-steer 插進正在執行的這一輪；同時只允許一則等待回覆。 */
   const steerQueuedMessage = useCallback(
     (item: QueuedMessage) => {
@@ -1070,7 +1107,7 @@ export function useChatComposerState({
   /** 不在生成中時手動送出佇列項目（中斷、出錯或在背景結束後）。 */
   const sendQueuedMessage = useCallback(
     (item: QueuedMessage) => {
-      if (isLoading || item.steering) return;
+      if (isLoading || startingTurnRef.current || item.steering) return;
       queuedMessages.remove(queueKey, item.id);
       void handleSubmitRef.current?.(createFakeSubmitEvent(), item);
     },
@@ -1149,6 +1186,7 @@ export function useChatComposerState({
     setInput,
     canSteer,
     queuedItems,
+    isStartingTurn,
     steerQueuedMessage,
     sendQueuedMessage,
     removeQueuedMessage,

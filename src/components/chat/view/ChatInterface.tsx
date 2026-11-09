@@ -160,6 +160,7 @@ function ChatInterface({
     clearPendingCommand,
     canSteer,
     queuedItems,
+    isStartingTurn,
     steerQueuedMessage,
     sendQueuedMessage,
     removeQueuedMessage,
@@ -378,7 +379,7 @@ function ChatInterface({
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
           claudeStatus={claudeStatus}
-          isLoading={isLoading}
+          isLoading={isLoading || isStartingTurn}
           canSteer={canSteer}
           queuedItems={queuedItems}
           onSteerQueued={steerQueuedMessage}

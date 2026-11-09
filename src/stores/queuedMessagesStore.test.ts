@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { NEW_SESSION_KEY, queuedMessages } from './queuedMessagesStore';
+import { NEW_SESSION_KEY, getDraftQueueTransition, queuedMessages } from './queuedMessagesStore';
 
 test('佇列依會話隔離，移除後不再出現', () => {
   queuedMessages.reset();
@@ -43,4 +43,13 @@ test('狀態改變時通知訂閱者，無變化時不通知', () => {
   queuedMessages.remove('A', 'nope');
   assert.equal(calls, 1);
   unsubscribe();
+});
+
+test('getDraftQueueTransition：只有本次建立請求拿到 id 才搬移暫存佇列', () => {
+  const draft = { sessionId: null, projectId: 'A' };
+  assert.equal(getDraftQueueTransition(draft, { sessionId: 's1', projectId: 'A' }, 's1'), 'move');
+  assert.equal(getDraftQueueTransition(draft, { sessionId: 'old', projectId: 'A' }, null), 'keep', '從新會話點進既有會話不搬');
+  assert.equal(getDraftQueueTransition(draft, { sessionId: null, projectId: 'B' }, null), 'new-draft', '換專案換新暫存');
+  assert.equal(getDraftQueueTransition({ sessionId: 's1', projectId: 'A' }, draft, null), 'new-draft', '離開會話回到新會話換新暫存');
+  assert.equal(getDraftQueueTransition(draft, draft, null), 'keep');
 });
