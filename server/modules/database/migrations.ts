@@ -411,6 +411,29 @@ const ensureProjectsForSessionPaths = (db: Database): void => {
   `);
 };
 
+const ANTIGRAVITY_NATIVE_TITLE_RESCAN_MIGRATION_KEY =
+  'migration:antigravity-native-title-rescan:v1';
+
+/**
+ * Native Antigravity titles can arrive after the previous incremental scan
+ * cursor. Reset that cursor once so existing sessions are re-indexed.
+ */
+function resetAntigravityScanCursorForNativeTitleRescan(db: Database) {
+  const applied = db.prepare('SELECT key FROM app_config WHERE key = ?')
+    .get(ANTIGRAVITY_NATIVE_TITLE_RESCAN_MIGRATION_KEY);
+  if (applied) return;
+
+  db.transaction(() => {
+    db.prepare(
+      `DELETE FROM app_config
+       WHERE key IN ('scan_cursor:antigravity', 'antigravity_last_scanned_at')`,
+    ).run();
+    db.prepare('INSERT INTO app_config (key, value) VALUES (?, ?)')
+      .run(ANTIGRAVITY_NATIVE_TITLE_RESCAN_MIGRATION_KEY, '1');
+  })();
+  console.log('Running migration: Scheduling one full Antigravity session rescan');
+}
+
 export const runMigrations = (db: Database) => {
   try {
     const usersTableInfo = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
@@ -475,6 +498,7 @@ export const runMigrations = (db: Database) => {
     }
 
     db.exec(LAST_SCANNED_AT_SQL);
+    resetAntigravityScanCursorForNativeTitleRescan(db);
     db.exec(SESSION_MESSAGES_TABLE_SCHEMA_SQL);
     console.log('Database migrations completed successfully');
   } catch (error: any) {

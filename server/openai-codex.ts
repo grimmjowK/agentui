@@ -74,7 +74,7 @@ const TITLE_SCHEMA = {
   type: 'object', properties: { title: { type: 'string' } }, required: ['title'], additionalProperties: false,
 };
 
-/** 從 Codex 回覆中容錯解析標題：優先 JSON.parse，失敗退回正則提取或純文字清理。 */
+/** 從 Codex 結構化回覆中解析字串 title；拒絕報錯、拒答與非字串值。 */
 export function extractTitleFromCodexReply(text: string): string {
   // 只接受帶 title 欄位的結構化輸出；outputSchema 已強制 JSON，拿不到 title 多半是報錯或拒答，不能當標題
   const unfenced = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');

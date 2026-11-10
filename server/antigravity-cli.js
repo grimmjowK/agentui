@@ -12,7 +12,12 @@ import { createNormalizedMessage, generateMessageId } from './shared/utils.js';
 import { resolveAntigravityExecutablePath } from './shared/antigravity-cli-path.js';
 import { ensureAntigravitySessionInCliStore } from './shared/antigravity-session-store.js';
 import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
-import { agyTextId, mapAgyStepUpdate, providerRegistry } from './modules/providers/index.js';
+import {
+  agyTextId,
+  mapAgyStepUpdate,
+  notifySessionsChanged,
+  providerRegistry,
+} from './modules/providers/index.js';
 import { sessionsDb } from './modules/database/index.js';
 
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
@@ -327,6 +332,58 @@ export function findPermissionDeniedNotice(stderr) {
   return line ? line.trim() : null;
 }
 
+function antigravityBrainRoots() {
+  const roots = [
+    path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain'),
+    path.join(os.homedir(), '.gemini', 'antigravity', 'brain'),
+  ];
+  if (process.env.ANTIGRAVITY_HOME) {
+    roots.unshift(path.join(process.env.ANTIGRAVITY_HOME, 'brain'));
+  }
+  return roots;
+}
+
+function findAntigravityTranscriptPath(sessionId) {
+  if (!sessionId) return null;
+  for (const root of antigravityBrainRoots()) {
+    const nestedPath = path.join(root, sessionId, '.system_generated', 'logs', 'transcript.jsonl');
+    if (fs.existsSync(nestedPath)) return nestedPath;
+    const flatPath = path.join(root, sessionId, 'transcript.jsonl');
+    if (fs.existsSync(flatPath)) return flatPath;
+  }
+  return null;
+}
+
+/**
+ * Re-reads a completed session so a native title written after the immediate
+ * post-run sync can replace the first-prompt fallback.
+ */
+export async function resyncAntigravitySessionMetadata(sessionId, transcriptPath) {
+  if (!sessionId || !transcriptPath || !fs.existsSync(transcriptPath)) return false;
+  const existing = sessionsDb.getSessionById(sessionId);
+  if (!existing || existing.isArchived) return false;
+
+  const synchronizer = providerRegistry.resolveProvider('antigravity')?.sessionSynchronizer;
+  if (!synchronizer) return false;
+  await synchronizer.synchronizeFile(transcriptPath);
+
+  const updated = sessionsDb.getSessionById(sessionId);
+  if (!updated || updated.custom_name === existing.custom_name) return false;
+  notifySessionsChanged('antigravity', sessionId);
+  return true;
+}
+
+function scheduleAntigravityMetadataResync(sessionId, transcriptPath) {
+  const parsedDelay = Number.parseInt(process.env.ANTIGRAVITY_NATIVE_TITLE_RESYNC_DELAY_MS ?? '', 10);
+  const delay = Number.isFinite(parsedDelay) && parsedDelay >= 0 ? parsedDelay : 3000;
+  const timer = setTimeout(() => {
+    void resyncAntigravitySessionMetadata(sessionId, transcriptPath).catch((error) => {
+      console.warn('Antigravity delayed session sync warning:', error.message);
+    });
+  }, delay);
+  timer.unref?.();
+}
+
 /**
  * Launches an Antigravity CLI process and pipes events to the provided writer.
  */
@@ -450,29 +507,20 @@ export async function spawnAntigravity(message, options = {}, ws) {
       }
 
       // Trigger immediate sync for this session into sessionsDb
+      let transcriptPath = null;
       try {
-        const candidateRoots = [
-          path.join(os.homedir(), '.gemini', 'antigravity-cli', 'brain'),
-          path.join(os.homedir(), '.gemini', 'antigravity', 'brain'),
-        ];
-        if (process.env.ANTIGRAVITY_HOME) {
-          candidateRoots.unshift(path.join(process.env.ANTIGRAVITY_HOME, 'brain'));
-        }
-        for (const root of handler.sessionId ? candidateRoots : []) {
-          let transcriptPath = path.join(root, handler.sessionId, '.system_generated', 'logs', 'transcript.jsonl');
-          if (!fs.existsSync(transcriptPath)) {
-            transcriptPath = path.join(root, handler.sessionId, 'transcript.jsonl');
-          }
-          if (fs.existsSync(transcriptPath)) {
-            const synchronizer = providerRegistry.resolveProvider('antigravity')?.sessionSynchronizer;
-            if (synchronizer) {
-              await synchronizer.synchronizeFile(transcriptPath);
-            }
-            break;
+        transcriptPath = findAntigravityTranscriptPath(handler.sessionId);
+        if (transcriptPath) {
+          const synchronizer = providerRegistry.resolveProvider('antigravity')?.sessionSynchronizer;
+          if (synchronizer) {
+            await synchronizer.synchronizeFile(transcriptPath);
           }
         }
       } catch (err) {
         console.warn('Antigravity session post-run sync warning:', err);
+      }
+      if (!childProcess.aborted && transcriptPath) {
+        scheduleAntigravityMetadataResync(handler.sessionId, transcriptPath);
       }
 
       if (childProcess.aborted) {
