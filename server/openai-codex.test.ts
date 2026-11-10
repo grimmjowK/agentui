@@ -52,7 +52,7 @@ test('app-server 回傳錯誤時只回報失敗，這一輪不受影響', async 
   assert.equal(isClosed(), false);
 });
 
-test('extractTitleFromCodexReply 容錯解析：標準 JSON、markdown 包裹、正則提取與純文本', () => {
+test('extractTitleFromCodexReply 只接受 title 欄位：標準 JSON、markdown 包裹、正則提取', () => {
   // 標準 JSON
   assert.equal(extractTitleFromCodexReply('{"title": "Review PR 14"}'), 'Review PR 14');
   // 帶額外空格與換行
@@ -61,8 +61,13 @@ test('extractTitleFromCodexReply 容錯解析：標準 JSON、markdown 包裹、
   assert.equal(extractTitleFromCodexReply('```json\n{"title": "優化佈局"}\n```'), '優化佈局');
   // 非標準 JSON 含有文字，正則提取
   assert.equal(extractTitleFromCodexReply('Here is the title:\n{"title": "修復登入問題"}\nHope it helps!'), '修復登入問題');
-  // 純文字降級（模型未輸出 json）
-  assert.equal(extractTitleFromCodexReply('只回覆純文字標題'), '只回覆純文字標題');
+  // 跳脫字元
+  assert.equal(extractTitleFromCodexReply('{"title": "說 \\"hi\\" 的測試"}'), '說 "hi" 的測試');
+  // 沒有 title 欄位的輸出（報錯、拒答、null）一律放棄，不拿來當標題
+  assert.equal(extractTitleFromCodexReply('Error: quota exceeded'), '');
+  assert.equal(extractTitleFromCodexReply('I cannot help with that.'), '');
+  assert.equal(extractTitleFromCodexReply('null'), '');
+  assert.equal(extractTitleFromCodexReply('{"title": 42}'), '');
   // 空文字或無效輸入
   assert.equal(extractTitleFromCodexReply(''), '');
   assert.equal(extractTitleFromCodexReply('   '), '');

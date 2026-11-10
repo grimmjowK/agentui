@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import test, { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -16,6 +17,7 @@ import {
 } from '@/modules/providers/tests/message-id-contract.js';
 import type { NormalizedMessage } from '@/shared/types.js';
 import { createNormalizedMessage } from '@/shared/utils.js';
+import { closeConnection, initializeDatabase } from '@/modules/database/index.js';
 
 const fixturesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../../docs/fixtures/antigravity');
 
@@ -48,6 +50,24 @@ async function historyMessages(name: string) {
     fs.rmSync(home, { recursive: true, force: true });
   }
 }
+
+
+// fetchHistory 會查 sessions 表；改用跑過 migration 的臨時資料庫，不碰開發者本機的 ~/.cloudcli/auth.db
+let previousDatabasePath: string | undefined;
+let databaseDirectory: string;
+before(async () => {
+  previousDatabasePath = process.env.DATABASE_PATH;
+  databaseDirectory = await mkdtemp(path.join(os.tmpdir(), 'agy-test-db-'));
+  closeConnection();
+  process.env.DATABASE_PATH = path.join(databaseDirectory, 'auth.db');
+  await initializeDatabase();
+});
+after(async () => {
+  closeConnection();
+  if (previousDatabasePath === undefined) delete process.env.DATABASE_PATH;
+  else process.env.DATABASE_PATH = previousDatabasePath;
+  await rm(databaseDirectory, { recursive: true, force: true });
+});
 
 test('即時與歷史：toolId、toolName、file_path/command 一致', async () => {
   const live = liveMessages('multistep').filter((m) => m.kind === 'tool_use');

@@ -617,18 +617,6 @@ export function normalizeSessionName(rawValue: string | undefined, fallback: str
   return normalized.slice(0, 120);
 }
 
-/** 從模型回覆中容錯解析標題：優先 JSON.parse，失敗退回正則提取或純文字清理。 */
-export function extractTitleFromModelReply(text: string): string {
-  let rawTitle: string | undefined;
-  try {
-    rawTitle = (JSON.parse(text) as { title?: string }).title;
-  } catch {
-    const match = text.match(/"title"\s*:\s*"([^"]+)"/);
-    rawTitle = match ? match[1] : text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
-  }
-  return normalizeSessionName(rawTitle, '');
-}
-
 /**
  * 同步程式判斷是否沿用資料庫裡的既有名稱：使用者手動命名（name_is_custom=1）一律保留；
  * 加欄位前的舊資料（NULL）只有在既有名稱能從 transcript 推導出來時才視為自動命名、允許更新。

@@ -9,7 +9,7 @@ import { mapPlanUpdate, mapThreadItem, notifySessionsChanged } from './modules/p
 import { terminateShellSessionsBySessionId } from './modules/websocket/index.js';
 import { getCodexRuntimeInfo } from './shared/codex-cli-path.js';
 import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
-import { createNormalizedMessage, extractTitleFromModelReply } from './shared/utils.js';
+import { createNormalizedMessage, normalizeSessionName } from './shared/utils.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import type { ProviderRuntimeWriter } from './shared/interfaces.js';
 import type { NormalizedMessage } from './shared/types.js';
@@ -75,7 +75,18 @@ const TITLE_SCHEMA = {
 };
 
 /** 從 Codex 回覆中容錯解析標題：優先 JSON.parse，失敗退回正則提取或純文字清理。 */
-export const extractTitleFromCodexReply = extractTitleFromModelReply;
+export function extractTitleFromCodexReply(text: string): string {
+  // 只接受帶 title 欄位的結構化輸出；outputSchema 已強制 JSON，拿不到 title 多半是報錯或拒答，不能當標題
+  const unfenced = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  let rawTitle: unknown;
+  try {
+    rawTitle = (JSON.parse(unfenced) as { title?: unknown } | null)?.title;
+  } catch {
+    const match = unfenced.match(/"title"\s*:\s*("(?:[^"\\]|\\.)*")/);
+    try { rawTitle = match ? JSON.parse(match[1]) : undefined; } catch { rawTitle = undefined; }
+  }
+  return typeof rawTitle === 'string' ? normalizeSessionName(rawTitle, '') : '';
+}
 
 /**
  * SDK/app-server 起的會話不會像 Codex Desktop 那樣寫 thread_name，這裡補上：

@@ -1,10 +1,32 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import test, { after, before } from 'node:test';
 
 import { AntigravitySessionsProvider } from '@/modules/providers/list/antigravity/antigravity-sessions.provider.js';
 import { parseAntigravitySessionPath } from '@/modules/providers/list/antigravity/antigravity-session-synchronizer.provider.js';
+import { closeConnection, initializeDatabase } from '@/modules/database/index.js';
 
 const provider = new AntigravitySessionsProvider();
+
+
+// fetchHistory 會查 sessions 表；改用跑過 migration 的臨時資料庫，不碰開發者本機的 ~/.cloudcli/auth.db
+let previousDatabasePath: string | undefined;
+let databaseDirectory: string;
+before(async () => {
+  previousDatabasePath = process.env.DATABASE_PATH;
+  databaseDirectory = await mkdtemp(path.join(tmpdir(), 'agy-test-db-'));
+  closeConnection();
+  process.env.DATABASE_PATH = path.join(databaseDirectory, 'auth.db');
+  await initializeDatabase();
+});
+after(async () => {
+  closeConnection();
+  if (previousDatabasePath === undefined) delete process.env.DATABASE_PATH;
+  else process.env.DATABASE_PATH = previousDatabasePath;
+  await rm(databaseDirectory, { recursive: true, force: true });
+});
 
 test('normalizeMessage parses text and kind records', () => {
   const [msg] = provider.normalizeMessage(
