@@ -4,11 +4,12 @@ import fs from 'node:fs';
 
 import { CodexAppServer, codexApprovals, codexOwnership } from './modules/codex-runtime/index.js';
 import type { ThreadItem, ThreadStartParams, TurnCompletedNotification } from './modules/codex-runtime/index.js';
-import { mapPlanUpdate, mapThreadItem } from './modules/providers/index.js';
+import { sessionsDb } from './modules/database/index.js';
+import { mapPlanUpdate, mapThreadItem, notifySessionsChanged } from './modules/providers/index.js';
 import { terminateShellSessionsBySessionId } from './modules/websocket/index.js';
 import { getCodexRuntimeInfo } from './shared/codex-cli-path.js';
 import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
-import { createNormalizedMessage } from './shared/utils.js';
+import { createNormalizedMessage, normalizeSessionName } from './shared/utils.js';
 import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 import type { ProviderRuntimeWriter } from './shared/interfaces.js';
 import type { NormalizedMessage } from './shared/types.js';
@@ -64,6 +65,78 @@ export function mapPermissionModeToCodexOptions(mode: unknown): Pick<ThreadStart
   return { sandbox: 'workspace-write', approvalPolicy: 'on-request' };
 }
 
+type TitleJob = {
+  threadId: string; cwd: string; executablePath: string; configRoot: string;
+  profile?: string; model?: string; prompt: string; reply: string;
+};
+
+const TITLE_SCHEMA = {
+  type: 'object', properties: { title: { type: 'string' } }, required: ['title'], additionalProperties: false,
+};
+
+/** 從 Codex 結構化回覆中解析字串 title；拒絕報錯、拒答與非字串值。 */
+export function extractTitleFromCodexReply(text: string): string {
+  // 只接受帶 title 欄位的結構化輸出；outputSchema 已強制 JSON，拿不到 title 多半是報錯或拒答，不能當標題
+  const unfenced = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  let rawTitle: unknown;
+  try {
+    rawTitle = (JSON.parse(unfenced) as { title?: unknown } | null)?.title;
+  } catch {
+    const match = unfenced.match(/"title"\s*:\s*("(?:[^"\\]|\\.)*")/);
+    try { rawTitle = match ? JSON.parse(match[1]) : undefined; } catch { rawTitle = undefined; }
+  }
+  return typeof rawTitle === 'string' ? normalizeSessionName(rawTitle, '') : '';
+}
+
+/**
+ * SDK/app-server 起的會話不會像 Codex Desktop 那樣寫 thread_name，這裡補上：
+ * 新會話第一輪結束後另起一個 app-server，用不落盤的 ephemeral thread 生成標題。
+ * 沿用主會話的模型/profile；只寫 DB（auto 名，不蓋手動命名），失敗靜默放棄。
+ */
+export async function generateCodexTitle(job: TitleJob): Promise<void> {
+  const rpc = new CodexAppServer(job.executablePath, job.cwd, job.configRoot, job.profile);
+  const timer = setTimeout(() => { void rpc.close(); }, 60000);
+  try {
+    let text = '';
+    const done = new Promise<void>((resolve, reject) => {
+      rpc.on('notification', (notification) => {
+        if (notification.method === 'item/completed' && notification.params.item?.type === 'agentMessage') {
+          text = notification.params.item.text || text;
+        } else if (notification.method === 'turn/completed') resolve();
+        else if (notification.method === 'error' && !notification.params.willRetry) reject(new Error(notification.params.error?.message));
+      });
+      rpc.on('failure', reject);
+      rpc.on('closed', () => reject(new Error('Codex app-server closed')));
+    });
+    void done.catch(() => {});
+    // 標題生成不需要任何工具或授權
+    rpc.on('request', (request) => rpc.send({ id: request.id, error: { code: -32601, message: 'Not supported' } }));
+    await rpc.initialize();
+    const { thread } = await rpc.request('thread/start', {
+      cwd: job.cwd, ephemeral: true, sandbox: 'read-only', approvalPolicy: 'never',
+      ...(job.model ? { model: job.model } : {}),
+    });
+    const instruction = [
+      'Write a short title (at most 8 words) for the conversation below.',
+      "Use the same language as the user's message. Do not use any tools. Respond with the title only.",
+      '', '<user>', job.prompt.slice(0, 2000), '</user>', '<assistant>', job.reply.slice(0, 1000), '</assistant>',
+    ].join('\n');
+    await rpc.request('turn/start', {
+      threadId: thread.id, input: [{ type: 'text', text: instruction, text_elements: [] }], outputSchema: TITLE_SCHEMA,
+    });
+    await done;
+    const title = extractTitleFromCodexReply(text);
+    if (!title) return;
+    sessionsDb.updateSessionCustomName(job.threadId, title, false);
+    notifySessionsChanged('codex', job.threadId);
+  } catch (error) {
+    console.warn('Codex title generation failed:', (error as Error).message);
+  } finally {
+    clearTimeout(timer);
+    await rpc.close();
+  }
+}
+
 function send(writer: CodexWriter, message: Emitted) {
   const normalized = createNormalizedMessage({ provider: 'codex', ...message });
   if (writer.isWebSocketWriter || writer.isSSEStreamWriter) writer.send(normalized);
@@ -94,6 +167,7 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
   let streaming = false;
   let tempImagePaths: string[] = [];
   let tempDir: string | null = null;
+  let titleJob: TitleJob | undefined;
   try {
     if (threadId && activeCodexSessions.has(threadId)) throw new Error('Codex session is already running');
     if (threadId) activeCodexSessions.set(threadId, state);
@@ -253,6 +327,13 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
       });
     }
     terminalMessage = { kind: 'complete', actualSessionId: threadId, aborted: state.interrupted };
+    const reply = [...items.values()].reverse().find((item) => item.type === 'agentMessage');
+    if (!options.sessionId && !state.interrupted && command.trim()) {
+      titleJob = {
+        threadId, cwd, executablePath: runtime.executablePath, configRoot: runtime.configRoot, profile, model,
+        prompt: command, reply: reply?.type === 'agentMessage' ? reply.text : '',
+      };
+    }
     notifySafely(notifyRunStopped, { userId: state.userId, provider: 'codex', sessionId: threadId,
       sessionName: options.sessionSummary, stopReason: state.interrupted ? 'aborted' : 'completed' });
   } catch (caught) {
@@ -287,6 +368,8 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
     if (lease) codexOwnership.release(lease);
     resolveReleased?.();
     if (terminalMessage) emit(terminalMessage);
+    // 主流程（含 rpc 關閉、ownership 釋放）完成後才在背景生成標題，不拖慢這一輪
+    if (titleJob) void generateCodexTitle(titleJob);
   }
 }
 

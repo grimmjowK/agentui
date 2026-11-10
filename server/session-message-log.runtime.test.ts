@@ -112,9 +112,11 @@ before(async () => {
     CODEX_HOME: process.env.CODEX_HOME,
     ANTIGRAVITY_CLI_PATH: process.env.ANTIGRAVITY_CLI_PATH,
     ANTIGRAVITY_HOME: process.env.ANTIGRAVITY_HOME,
+    ANTIGRAVITY_NATIVE_TITLE_RESYNC_DELAY_MS: process.env.ANTIGRAVITY_NATIVE_TITLE_RESYNC_DELAY_MS,
   };
   closeConnection();
   process.env.DATABASE_PATH = path.join(root, 'app.db');
+  process.env.ANTIGRAVITY_NATIVE_TITLE_RESYNC_DELAY_MS = '60000';
   await initializeDatabase();
 });
 

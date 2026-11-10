@@ -260,9 +260,10 @@ function mapCliOptionsToSDK(options = {}) {
  * @param {Array<string>} tempImagePaths - Temp image file paths for cleanup
  * @param {string} tempDir - Temp directory for cleanup
  */
-function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null, writer = null) {
+function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null, writer = null, input = null) {
   activeSessions.set(sessionId, {
     instance: queryInstance,
+    input,
     startTime: Date.now(),
     status: 'active',
     tempImagePaths,
@@ -294,6 +295,67 @@ function getSession(sessionId) {
  */
 function getAllSessions() {
   return Array.from(activeSessions.keys());
+}
+
+/**
+ * 串流輸入佇列：讓同一個 query 在生成中能追加 user message（插話）。
+ * 每則訊息帶 uuid；result 的 user_message_uuids 列出已消化的訊息，全部消化完才關閉輸入，
+ * 否則關太早會丟掉剛插入、還沒被讀進去的訊息。
+ */
+function createInputQueue() {
+  const buffer = [];
+  const pending = new Set();
+  let wake = null;
+  let closed = false;
+
+  const notify = () => { wake?.(); wake = null; };
+
+  return {
+    get closed() { return closed; },
+    push(text) {
+      if (closed) return false;
+      const uuid = createRequestId();
+      pending.add(uuid);
+      buffer.push({
+        type: 'user',
+        message: { role: 'user', content: text },
+        parent_tool_use_id: null,
+        uuid,
+      });
+      notify();
+      return true;
+    },
+    /** 收到 result 時呼叫；回傳是否已關閉（沒有待處理的插話）。 */
+    onResult(result) {
+      const consumed = result.user_message_uuids;
+      if (Array.isArray(consumed)) {
+        for (const id of consumed) pending.delete(id);
+        if (result.user_message_uuid) pending.delete(result.user_message_uuid);
+      } else if (!result.queued_turn_count) {
+        // 舊版 CLI 不回報 uuid：退回用 queued_turn_count 判斷，避免永遠不關閉
+        pending.clear();
+      }
+      if (pending.size === 0) this.close();
+      return closed;
+    },
+    /**
+     * 結束輸入。正常收尾時 buffer 必然已空（pending 歸零代表都被讀走並消化）；
+     * 中斷或出錯時丟掉尚未交給 CLI 的插話，避免停止後還被送進模型。
+     */
+    close() {
+      closed = true;
+      buffer.length = 0;
+      pending.clear();
+      notify();
+    },
+    async *[Symbol.asyncIterator]() {
+      while (true) {
+        if (buffer.length) { yield buffer.shift(); continue; }
+        if (closed) return;
+        await new Promise(resolve => { wake = resolve; });
+      }
+    },
+  };
 }
 
 /**
@@ -409,7 +471,11 @@ async function queryClaudeSDK(command, options = {}, ws) {
   let tempImagePaths = [];
   let tempDir = null;
   let queryInstance;
+  let input = null;
   let lastVisibleAssistantText = '';
+  // 最後一個 result 若是錯誤（error_during_execution、error_max_turns 等），收尾時回報為失敗。
+  // SDK 對這類 result 不會拋錯，迴圈照常結束。
+  let lastResultError = null;
 
   const emitNotification = (event) => {
     notifyUserIfEnabled({
@@ -538,9 +604,11 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const prevStreamTimeout = process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
     process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '300000';
 
+    input = createInputQueue();
+    input.push(finalCommand);
     try {
       queryInstance = query({
-        prompt: finalCommand,
+        prompt: input,
         options: sdkOptions
       });
     } catch (hookError) {
@@ -549,7 +617,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
       delete sdkOptions.hooks;
       queryInstance = query({
-        prompt: finalCommand,
+        prompt: input,
         options: sdkOptions
       });
     }
@@ -563,7 +631,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Track the query instance for abort capability
     if (capturedSessionId) {
-      addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws);
+      addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, input);
     }
 
     // Process streaming messages
@@ -575,7 +643,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       if (message.session_id && !capturedSessionId) {
 
         capturedSessionId = message.session_id;
-        addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws);
+        addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws, input);
 
         // Set session ID on writer
         if (ws.setSessionId && typeof ws.setSessionId === 'function') {
@@ -616,6 +684,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
       // Extract and send token budget updates from result messages
       if (message.type === 'result') {
+        input.onResult(message);
+        lastResultError = message.is_error ? message : null;
         const tokenBudgetData = extractTokenBudget(message, lastMainUsage, lastMainModel);
         if (tokenBudgetData) {
           ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
@@ -633,6 +703,24 @@ async function queryClaudeSDK(command, options = {}, ws) {
     await cleanupTempFiles(tempImagePaths, tempDir);
 
     if (abortedQueries.has(queryInstance)) return;
+
+    if (lastResultError) {
+      const errorContent = (Array.isArray(lastResultError.errors) && lastResultError.errors.filter(Boolean).join('\n'))
+        || (typeof lastResultError.result === 'string' && lastResultError.result.trim())
+        || `Claude run failed (${lastResultError.subtype || 'error'})`;
+      // 錯誤已以助理文字顯示過時不再重複一個錯誤泡泡，改送失敗的 complete；兩者前端都視為出錯
+      ws.send(createNormalizedMessage(shouldSuppressClaudeWrappedError(lastVisibleAssistantText, errorContent)
+        ? { kind: 'complete', exitCode: 1, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude' }
+        : { kind: 'error', content: errorContent, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
+      notifyRunFailed({
+        userId: ws?.userId || null,
+        provider: 'claude',
+        sessionId: capturedSessionId || sessionId || null,
+        sessionName: sessionSummary,
+        error: new Error(errorContent)
+      });
+      return;
+    }
 
     // Send completion event
     ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude' }));
@@ -700,6 +788,9 @@ async function queryClaudeSDK(command, options = {}, ws) {
       sessionName: sessionSummary,
       error
     });
+  } finally {
+    // 任何結束路徑（中斷提前返回、錯誤 result、CLI 未拋錯即結束）都釋放輸入迭代器
+    input?.close();
   }
 }
 
@@ -721,6 +812,8 @@ async function abortClaudeSDKSession(sessionId) {
 
     // 先標記再 interrupt：interrupt 期間迴圈就可能結束並走到收尾
     abortedQueries.add(session.instance);
+    // 中斷後不再接受插話，並結束輸入串流讓 query 迴圈收尾
+    session.input?.close();
     await session.instance.interrupt();
 
     // Update session status
@@ -739,6 +832,22 @@ async function abortClaudeSDKSession(sessionId) {
     abortedQueries.delete(session.instance);
     return false;
   }
+}
+
+/**
+ * 生成中插話：把訊息推進該會話的串流輸入，CLI 會在工具回合之間併入目前這一輪，來不及則排成下一輪。
+ */
+async function steerClaudeSDKSession(sessionId, userId, text) {
+  const session = getSession(sessionId);
+  if (!session || session.status !== 'active') return { ok: false, reason: 'not_running' };
+  const ownerId = session.writer?.userId;
+  if (userId === null || userId === undefined || ownerId === null || ownerId === undefined
+    || String(ownerId) !== String(userId)) {
+    return { ok: false, reason: 'not_owner' };
+  }
+  if (!text.trim()) return { ok: false, reason: 'empty' };
+  if (!session.input?.push(text)) return { ok: false, reason: 'not_running' };
+  return { ok: true };
 }
 
 /**
@@ -804,11 +913,13 @@ function reconnectSessionWriter(sessionId, newRawWs) {
 export {
   queryClaudeSDK,
   abortClaudeSDKSession,
+  steerClaudeSDKSession,
   isClaudeSDKSessionActive,
   getActiveClaudeSDKSessions,
   resolveToolApproval,
   getPendingApprovals,
   waitForToolApproval,
   reconnectSessionWriter,
-  extractTokenBudget
+  extractTokenBudget,
+  createInputQueue
 };

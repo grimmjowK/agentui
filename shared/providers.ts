@@ -47,7 +47,7 @@ function antigravityDefaultPermissionMode(): PermissionMode {
 
 export const PROVIDER_INFO: Record<LLMProvider, ProviderInfo> = {
   claude: {
-    capabilities: { midTurnSteer: false, images: true, effort: true, artifacts: false },
+    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false },
     permissionModes: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
     defaultPermissionMode: 'default',
     settingsStorageKey: 'claude-settings',

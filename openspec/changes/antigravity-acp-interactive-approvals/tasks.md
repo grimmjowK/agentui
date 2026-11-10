@@ -1,6 +1,7 @@
 ## 1. 實測與錄製（先於實作，結論記入 design.md）
 
-- [ ] 1.1 以真實 `agy acp` 錄製四段協議記錄到 `docs/fixtures/antigravity/acp-*.jsonl`：允許、拒絕、審批中 `session/cancel`、`session/resume` 續接；確認 `tool_call_update` 完成時的結果內容形狀，以及被拒絕後模型是繼續回覆還是結束這一輪
+- [ ] 1.0 以目前版本（≥ 1.5.3）重新驗證 research.md 中 agy acp 的已知問題，結果補進 research.md
+- [ ] 1.1 以真實 `agy acp` 錄製五段協議記錄（第五段：工具執行中插話，以及審批等待中插話）到 `docs/fixtures/antigravity/acp-*.jsonl`：允許、拒絕、審批中 `session/cancel`、`session/resume` 續接；確認 `tool_call_update` 完成時的結果內容形狀，以及被拒絕後模型是繼續回覆還是結束這一輪
 - [ ] 1.2 實測模型設定方式（`session/set_model`、`configOptions` 或 `--model`），以及 `agy acp --dangerously-skip-permissions` 是否有效；未登入時 `initialize` / `session/new` 的錯誤形狀（可用暫時的空設定目錄模擬）
 - [ ] 1.3 把 1.1–1.2 的結論寫進 design.md 的 Open Questions，並據此修正 D3、D6、D7
 
@@ -16,16 +17,17 @@
 
 ## 4. 執行層替換
 
-- [ ] 4.1 改寫 `server/antigravity-cli.js`：每輪啟動 `agy acp` → `initialize` → `session/new` 或 `session/resume` → 依權限模式 `session/set_mode`（或依 1.2 的結論處理 bypass）→ 設定模型 → `session/prompt`；`session/update` 經 `mapAcpUpdate` 轉送；`session/request_permission` 進審批池；收到 `stopReason` 後送一次 `complete` 並結束行程
+- [ ] 4.1 改寫 `server/antigravity-cli.js`：每輪啟動 `agy acp` → `initialize` → `session/new` 或 `session/resume` → 依權限模式 `session/set_mode`（或依 1.2 的結論處理 bypass）→ 設定模型 → `session/prompt`；`session/update` 經 `mapAcpUpdate` 轉送；`session/request_permission` 進審批池；所有 `session/prompt` 都返回後送一次 `complete` 並結束行程（插話計數見 4.4）
 - [ ] 4.2 中斷：`session/cancel` → 回覆未決審批為已取消 → 等待 `stopReason: cancelled`，7 秒內未返回就結束行程；`runtime.abort` 回傳 `emitsTerminal: true`
 - [ ] 4.3 錯誤處理：未登入、初始化失敗、行程意外退出、JSON-RPC 錯誤時送出明確 `error`、清除待審批、送出結束事件；移除臨時修正 `findPermissionDeniedNotice` 及其測試
-- [ ] 4.4 `antigravity-runtime.provider.ts` 接上 `getPendingApprovals` 與 `resolveApproval`；保留新會話的 `session_created`、結束後立即同步 transcript 的現有行為
+- [ ] 4.4 插話（design D8）：計算未返回的 `session/prompt`，全部返回才收尾；新增 `steerAntigravitySession`，收尾開始後回覆 `not_running`；以 1.1 第五段 fixture 寫測試（第一個 prompt 提前返回時不送 `complete`）
+- [ ] 4.5 `antigravity-runtime.provider.ts` 接上 `steer`、`getPendingApprovals` 與 `resolveApproval`；保留新會話的 `session_created`、結束後立即同步 transcript 的現有行為
 
 ## 5. WebSocket 與前端
 
 - [ ] 5.1 `chat-websocket.service.ts` 新增 `permission-decision { provider, requestId, sessionId, decision }`，分派到 `runtime.resolveApproval`；provider 未實作或被拒時回覆警告；新增測試
 - [ ] 5.2 前端審批卡片與送出邏輯改為依 `context.decisions` 判斷（不新增 `provider === 'antigravity'`），Antigravity 送 `permission-decision`，Codex 維持 `codex-permission-response`；補 Antigravity 決定的 i18n（允許／拒絕）
-- [ ] 5.3 `shared/providers.ts` 的 Antigravity `permissionModes` 改為 `default`、`acceptEdits`、`plan`、`bypassPermissions`，預設模式邏輯維持「明確同意才預設 bypass」；確認權限模式按鈕的說明文字與 i18n
+- [ ] 5.3 `shared/providers.ts` 的 Antigravity `midTurnSteer` 改為 `true`；`permissionModes` 改為 `default`、`acceptEdits`、`plan`、`bypassPermissions`，預設模式邏輯維持「明確同意才預設 bypass」；確認權限模式按鈕的說明文字與 i18n
 
 ## 6. 驗收（全部在瀏覽器實測，`npm run dev`；任一項不通過即不算完成）
 
@@ -37,5 +39,6 @@
 - [ ] 6.6 逾時：以縮短的逾時設定（環境變數）驗證自動拒絕、卡片消失
 - [ ] 6.7 續接既有 Antigravity 會話送出新訊息：舊訊息不重複出現；重新整理後歷史完整、沒有系統訊息
 - [ ] 6.8 `acceptEdits` 模式修改檔案不需審批、執行指令仍需審批；已同意時 `bypassPermissions` 不出現審批卡片
+- [ ] 6.9a 執行中插話：Antigravity 執行 `sleep 8` 時插入「結尾加上 PINEAPPLE」→ 工具未被中斷、最終只有一則回覆且遵循插話、頁面只收到一次 `complete`
 - [ ] 6.9 迴歸：Codex 審批（允許、拒絕各一次）卡片與結果與改動前相同；Claude 審批照常
 - [ ] 6.10 `npm run typecheck`、`npm run lint`（0 錯誤）、相關測試、`npm run build` 全部通過；更新 `server/SERVER.md` 與 `server/modules/providers/README.md` 中 Antigravity 執行層的說明

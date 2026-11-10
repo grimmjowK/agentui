@@ -234,7 +234,13 @@
     "jumpToMessage": "Bu mesaja atla"
   },
   "steer": {
-    "hint": "Şimdi gönderirsen talimat çalışan tura eklenir",
-    "rejected": "Talimat çalışan tura eklenemedi ({{reason}}). Metnin korundu, yeniden gönderebilirsin."
+    "hint": "Şimdi gönderilen mesaj sıraya alınır ve bu tur bitince gönderilir",
+    "rejected": "Çalışan tura eklenemedi ({{reason}}). Mesaj hâlâ sırada.",
+    "queued": "Sıradaki mesajlar",
+    "steerNow": "Şimdi yönlendir (çalışan tura durdurmadan ekle)",
+    "sendNow": "Şimdi gönder",
+    "remove": "Kaldır",
+    "steering": "Ekleniyor…",
+    "imageOnly": "(görsel)"
   }
 }

@@ -162,6 +162,24 @@ test('insertBetween renumbers when floating-point space is exhausted', async () 
   });
 });
 
+test('insertBetween does not collide with rows already inside the gap', async () => {
+  await withDatabase(() => {
+    for (const id of ['a', 'b', 'c']) {
+      sessionMessagesDb.append('session-1', message({ id }));
+    }
+    // 1 與 3 之間已有 seq=2，直接取中點會撞 UNIQUE(session_id, seq)
+    sessionMessagesDb.insertBetween('session-1', message({ id: 'x' }), 1, 3, 'import');
+    // 反向區間（歷史順序與日誌順序不一致）
+    sessionMessagesDb.insertBetween('session-1', message({ id: 'y' }), 3, 1, 'import');
+    // 只有右界，且右界之前已有資料
+    sessionMessagesDb.insertBetween('session-1', message({ id: 'z' }), null, 3, 'import');
+    assert.deepEqual(
+      sessionMessagesDb.list('session-1').messages.map((entry) => entry.id),
+      ['a', 'x', 'b', 'z', 'c', 'y'],
+    );
+  });
+});
+
 test('insertUserIfAbsent remains idempotent after updateProviderIds or when _logUserId was absent', async () => {
   await withDatabase(() => {
     const userId = 'user:44444444-4444-4444-8444-444444444444';

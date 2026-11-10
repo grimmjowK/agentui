@@ -68,7 +68,6 @@ function ChatInterface({
   const {
     chatMessages,
     addMessage,
-    removeMessage,
     clearMessages,
     rewindMessages,
     isLoading,
@@ -160,8 +159,14 @@ function ChatInterface({
     pendingCommand,
     clearPendingCommand,
     canSteer,
-    isSteerPending,
+    queuedItems,
+    isStartingTurn,
+    steerQueuedMessage,
+    sendQueuedMessage,
+    removeQueuedMessage,
     handleSteerResult,
+    handleTurnEnded,
+    reconcilePendingSteer,
     handleModelSwitch,
     currentModel,
     isModelMenuOpen,
@@ -189,7 +194,6 @@ function ChatInterface({
     pendingViewSessionRef,
     scrollToBottom,
     addMessage,
-    removeMessage,
     clearMessages,
     rewindMessages,
     setIsLoading,
@@ -204,7 +208,16 @@ function ChatInterface({
   // On WebSocket reconnect, re-fetch the current session's messages from the server
   // so missed streaming events are shown. Also re-check session status to fix stuck loading.
   const handleWebSocketReconnect = useCallback(async () => {
-    if (!selectedProject || !selectedSession) return;
+    if (!selectedProject) return;
+    await reconcilePendingSteer(async (sessionId, messageId, steerProvider) => {
+      await sessionStore.refreshFromServer(sessionId, {
+        provider: steerProvider,
+        projectId: selectedProject.projectId,
+        projectPath: selectedProject.fullPath || selectedProject.path || '',
+      });
+      return sessionStore.getMessages(sessionId).some((message) => message.id === messageId);
+    });
+    if (!selectedSession) return;
     const providerVal = (localStorage.getItem('selected-provider') as LLMProvider) || 'claude';
     const sessionProvider = selectedSession.__provider || providerVal;
     const afterSeq = sessionStore.getMessages(selectedSession.id).reduce<number | null>(
@@ -228,7 +241,7 @@ function ChatInterface({
       onSessionNotProcessing?.(selectedSession.id);
       sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider: sessionProvider, afterSeq });
     }
-  }, [selectedProject, selectedSession, sessionStore, setIsLoading, setCanAbortSession, onSessionNotProcessing, sendMessage]);
+  }, [selectedProject, selectedSession, sessionStore, setIsLoading, setCanAbortSession, onSessionNotProcessing, sendMessage, reconcilePendingSteer]);
 
   useChatRealtimeHandlers({
     latestMessage,
@@ -247,6 +260,7 @@ function ChatInterface({
     onNavigateToSession,
     onWebSocketReconnect: handleWebSocketReconnect,
     onSteerResult: handleSteerResult,
+    onTurnEnded: handleTurnEnded,
     sessionStore,
   });
 
@@ -365,9 +379,12 @@ function ChatInterface({
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
           claudeStatus={claudeStatus}
-          isLoading={isLoading}
+          isLoading={isLoading || isStartingTurn}
           canSteer={canSteer}
-          isSteerPending={isSteerPending}
+          queuedItems={queuedItems}
+          onSteerQueued={steerQueuedMessage}
+          onSendQueued={sendQueuedMessage}
+          onRemoveQueued={removeQueuedMessage}
           onAbortSession={handleAbortSession}
           provider={provider}
           permissionMode={permissionMode}

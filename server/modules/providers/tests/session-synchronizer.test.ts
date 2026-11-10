@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { appConfigDb, initializeDatabase, scanStateDb } from '@/modules/database/index.js';
+import {
+  appConfigDb,
+  getConnection,
+  initializeDatabase,
+  scanStateDb,
+} from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { sessionSynchronizerService } from '@/modules/providers/services/session-synchronizer.service.js';
 import type { IProvider } from '@/shared/interfaces.js';
@@ -16,6 +21,25 @@ test('首次讀取時以舊的 antigravity 游標初始化', async () => {
   await initializeDatabase();
   appConfigDb.set('antigravity_last_scanned_at', '2026-03-04 05:06:07');
   assert.equal(scanStateDb.getLastScannedAt('antigravity')?.toISOString(), '2026-03-04T05:06:07.000Z');
+});
+
+test('原生標題升級遷移只重設一次 Antigravity 全量掃描游標', async () => {
+  await initializeDatabase();
+  const db = getConnection();
+  const migrationKey = 'migration:antigravity-native-title-rescan:v1';
+  db.prepare('DELETE FROM app_config WHERE key = ?')
+    .run(migrationKey);
+  appConfigDb.set('scan_cursor:antigravity', '2026-03-04 05:06:07');
+  appConfigDb.set('antigravity_last_scanned_at', '2026-02-01 00:00:00');
+
+  await initializeDatabase();
+
+  assert.equal(scanStateDb.getLastScannedAt('antigravity'), null);
+  assert.equal(appConfigDb.get(migrationKey), '1');
+
+  scanStateDb.updateLastScannedAt(new Date('2026-04-01T00:00:00Z'), 'antigravity');
+  await initializeDatabase();
+  assert.equal(scanStateDb.getLastScannedAt('antigravity')?.toISOString(), '2026-04-01T00:00:00.000Z');
 });
 
 test('一個 provider 同步失敗時，其他 provider 照常推進各自的游標', async (t) => {

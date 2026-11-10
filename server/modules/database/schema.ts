@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT NOT NULL,
     provider TEXT NOT NULL DEFAULT 'claude',
     custom_name TEXT,
+    name_is_custom INTEGER,
     project_path TEXT,
     jsonl_path TEXT,
     isArchived BOOLEAN DEFAULT 0,

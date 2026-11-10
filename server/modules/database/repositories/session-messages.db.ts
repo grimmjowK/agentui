@@ -14,6 +14,9 @@ type CachedStatements = {
   selectIdsBySession: Statement;
   negateSeqBySession: Statement;
   updateSeqById: Statement;
+  nextSeqAfter: Statement;
+  prevSeqBefore: Statement;
+  idBySeq: Statement;
   listSizes: Statement;
   findToolUse: Statement;
 };
@@ -72,6 +75,15 @@ function stmts(): CachedStatements {
     ),
     updateSeqById: db.prepare(
       'UPDATE session_messages SET seq = ? WHERE session_id = ? AND id = ?',
+    ),
+    nextSeqAfter: db.prepare(
+      'SELECT MIN(seq) AS seq FROM session_messages WHERE session_id = ? AND seq > ?',
+    ),
+    prevSeqBefore: db.prepare(
+      'SELECT MAX(seq) AS seq FROM session_messages WHERE session_id = ? AND seq < ?',
+    ),
+    idBySeq: db.prepare(
+      'SELECT id FROM session_messages WHERE session_id = ? AND seq = ?',
     ),
     // 只在 SQLite 側定位 tool_use，避免每個 tool_result 都把整個會話 payload 解析一遍
     findToolUse: db.prepare(
@@ -382,36 +394,35 @@ export const sessionMessagesDb = {
     return db.transaction(() => {
       let left = beforeSeq;
       let right = afterSeq;
-      let seq: number;
 
-      if (left === null && right === null) {
-        seq = nextAppendSeq(sessionId);
-      } else if (left === null) {
-        seq = right! / 2;
-      } else if (right === null) {
-        seq = nextAppendSeq(sessionId);
-      } else {
-        seq = (left + right) / 2;
-      }
+      // 呼叫方給的 left/right 是「最近的已匹配行」，兩者之間可能還夾著未匹配行
+      // （未配對的 live 使用者訊息、中斷標記等），甚至 left > right。
+      // 因此以 left 為錨點緊貼插在其實際下一行之前；無 left 時緊貼 right 之前。
+      const pickGap = (): { seq: number; lo: number | null; hi: number | null } => {
+        if (left !== null) {
+          const hi = (stmts().nextSeqAfter.get(sessionId, left) as { seq: number | null }).seq;
+          return hi === null
+            ? { seq: nextAppendSeq(sessionId), lo: null, hi: null }
+            : { seq: (left + hi) / 2, lo: left, hi };
+        }
+        if (right !== null) {
+          const lo = (stmts().prevSeqBefore.get(sessionId, right) as { seq: number | null }).seq ?? 0;
+          return { seq: (lo + right) / 2, lo, hi: right };
+        }
+        return { seq: nextAppendSeq(sessionId), lo: null, hi: null };
+      };
 
-      if (
-        (left !== null && seq <= left)
-        || (right !== null && seq >= right)
-      ) {
-        const existingRows = this.listAll(sessionId);
-        const leftRow = left === null
-          ? null
-          : existingRows.find((row) => row.seq === left) ?? null;
-        const rightRow = right === null
-          ? null
-          : existingRows.find((row) => row.seq === right) ?? null;
+      let gap = pickGap();
+      if ((gap.lo !== null && gap.seq <= gap.lo) || (gap.hi !== null && gap.seq >= gap.hi)) {
+        // 浮點空間耗盡：重新編號後依 id 找回錨點
+        const leftId = left === null ? null : stmts().idBySeq.get(sessionId, left) as { id: string } | undefined;
+        const rightId = right === null ? null : stmts().idBySeq.get(sessionId, right) as { id: string } | undefined;
         this.renumber(sessionId);
-        left = leftRow?.id ? this.getById(sessionId, leftRow.id)?.seq ?? null : null;
-        right = rightRow?.id ? this.getById(sessionId, rightRow.id)?.seq ?? null : null;
-        if (left !== null && right !== null) seq = (left + right) / 2;
-        else if (right !== null) seq = right / 2;
-        else seq = nextAppendSeq(sessionId);
+        left = leftId ? this.getById(sessionId, leftId.id)?.seq ?? null : null;
+        right = rightId ? this.getById(sessionId, rightId.id)?.seq ?? null : null;
+        gap = pickGap();
       }
+      const seq = gap.seq;
 
       const stored = { ...message, sessionId, seq };
       writeRow(stored, message.providerIds ?? [], source);

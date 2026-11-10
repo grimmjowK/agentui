@@ -8,6 +8,7 @@ import { saveSessionModel } from '../utils/chatStorage';
 import { isEventForSession } from '../../../utils/pendingApprovals';
 import type { ProjectSession, LLMProvider } from '../../../types/app';
 import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
+import { queuedMessages } from '../../../stores/queuedMessagesStore';
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -51,6 +52,16 @@ type LatestChatMessage = {
   [key: string]: any;
 };
 
+export type TurnOutcome = 'completed' | 'aborted' | 'error';
+
+/** 一輪如何結束：中斷與出錯時不自動送出待送佇列（chat-queued-steer-composer design D3）。 */
+export function getTurnOutcome(msg: { kind?: string; aborted?: boolean; exitCode?: number }): TurnOutcome | null {
+  if (msg.kind === 'error') return 'error';
+  if (msg.kind !== 'complete') return null;
+  if (msg.aborted === true) return 'aborted';
+  return msg.exitCode === undefined || msg.exitCode === 0 ? 'completed' : 'error';
+}
+
 interface UseChatRealtimeHandlersArgs {
   latestMessage: LatestChatMessage | null;
   provider: LLMProvider;
@@ -69,6 +80,8 @@ interface UseChatRealtimeHandlersArgs {
   onWebSocketReconnect?: () => void;
   /** chat-steer 的結果，交給輸入區處理。 */
   onSteerResult?: (result: { type: string; clientId?: string | null; reason?: string }) => void;
+  /** 這一輪結束（complete / error），交給輸入區決定是否自動送出佇列。 */
+  onTurnEnded?: (outcome: TurnOutcome, isCurrentSession: boolean) => void;
   sessionStore: SessionStore;
 }
 
@@ -93,6 +106,7 @@ export function useChatRealtimeHandlers({
   onNavigateToSession,
   onWebSocketReconnect,
   onSteerResult,
+  onTurnEnded,
   sessionStore,
 }: UseChatRealtimeHandlersArgs) {
   const paletteOps = usePaletteOps();
@@ -241,6 +255,7 @@ export function useChatRealtimeHandlers({
           setCanAbortSession(false);
           setClaudeStatus(null);
         }
+        onTurnEnded?.(getTurnOutcome(msg) ?? 'completed', isCurrentSession);
         onSessionInactive?.(sid);
         onSessionNotProcessing?.(sid);
 
@@ -262,6 +277,7 @@ export function useChatRealtimeHandlers({
 
         if (actualSessionId && sid && actualSessionId !== sid) {
           sessionStore.replaceSessionId(sid, actualSessionId);
+          queuedMessages.renameSession(sid, actualSessionId);
 
           if (isVisibleSession) {
             setCurrentSessionId(actualSessionId);
@@ -313,6 +329,7 @@ export function useChatRealtimeHandlers({
           setCanAbortSession(false);
           setClaudeStatus(null);
         }
+        onTurnEnded?.('error', isCurrentSession);
         onSessionInactive?.(sid);
         onSessionNotProcessing?.(sid);
 
@@ -374,6 +391,7 @@ export function useChatRealtimeHandlers({
     onNavigateToSession,
     onWebSocketReconnect,
     onSteerResult,
+    onTurnEnded,
     sessionStore,
     paletteOps,
   ]);

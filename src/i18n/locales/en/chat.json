@@ -326,7 +326,13 @@
     "jumpToMessage": "Jump to this message"
   },
   "steer": {
-    "hint": "Send now to add this instruction to the running turn",
-    "rejected": "Could not add the instruction to the running turn ({{reason}}). Your text is kept so you can resend."
+    "hint": "Sending now queues the message; it goes out when this turn finishes",
+    "rejected": "Couldn't insert into the running turn ({{reason}}). The message is still in the queue.",
+    "queued": "Queued messages",
+    "steerNow": "Steer now (insert into the running turn without stopping it)",
+    "sendNow": "Send now",
+    "remove": "Remove",
+    "steering": "Steering…",
+    "imageOnly": "(image)"
   }
 }

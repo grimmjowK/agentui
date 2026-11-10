@@ -7,7 +7,14 @@ import test from 'node:test';
 
 import Database from 'better-sqlite3';
 
-import { spawnAntigravity, abortAntigravitySession, getActiveAntigravitySessions, isAntigravitySessionActive, reconnectAntigravitySession } from './antigravity-cli.js';
+import {
+  spawnAntigravity,
+  abortAntigravitySession,
+  getActiveAntigravitySessions,
+  isAntigravitySessionActive,
+  reconnectAntigravitySession,
+  resyncAntigravitySessionMetadata,
+} from './antigravity-cli.js';
 import { closeConnection } from './modules/database/connection.js';
 import { initializeDatabase } from './modules/database/init-db.js';
 import { sessionsDb, projectsDb, scanStateDb } from './modules/database/index.js';
@@ -18,13 +25,19 @@ import { getProjectsWithSessions, getProjectSessionsPage, getArchivedProjectsWit
 
 test('Antigravity native IDs survive runs, refresh, pagination and cancellation', { timeout: 20000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'agy-continuity-'));
-  const previous = { DATABASE_PATH: process.env.DATABASE_PATH, ANTIGRAVITY_HOME: process.env.ANTIGRAVITY_HOME, ANTIGRAVITY_CLI_PATH: process.env.ANTIGRAVITY_CLI_PATH };
+  const previous = {
+    DATABASE_PATH: process.env.DATABASE_PATH,
+    ANTIGRAVITY_HOME: process.env.ANTIGRAVITY_HOME,
+    ANTIGRAVITY_CLI_PATH: process.env.ANTIGRAVITY_CLI_PATH,
+    ANTIGRAVITY_NATIVE_TITLE_RESYNC_DELAY_MS: process.env.ANTIGRAVITY_NATIVE_TITLE_RESYNC_DELAY_MS,
+  };
   const workspace = path.join(root, 'workspace');
   const executable = path.join(root, 'agy');
   closeConnection();
   process.env.DATABASE_PATH = path.join(root, 'app.db');
   process.env.ANTIGRAVITY_HOME = root;
   process.env.ANTIGRAVITY_CLI_PATH = executable;
+  process.env.ANTIGRAVITY_NATIVE_TITLE_RESYNC_DELAY_MS = '60000';
   try {
     await mkdir(workspace);
     await writeFile(process.env.DATABASE_PATH!, '');
@@ -118,18 +131,43 @@ if (prompt === 'wait') {
     const backToDefaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
     assert.equal(backToDefaultArgs.includes('--dangerously-skip-permissions'), false, JSON.stringify(backToDefaultArgs));
 
-    // An offline CLI transcript gets its workspace from the native summary DB.
+    // An offline CLI transcript gets its workspace and title from the native summary DB.
     const externalLog = path.join(root, 'brain', 'offline-native', 'transcript.jsonl');
     await mkdir(path.dirname(externalLog), { recursive: true });
     await writeFile(externalLog, JSON.stringify({ type: 'USER_INPUT', content: '<USER_REQUEST>Offline</USER_REQUEST>' }) + '\n');
+    const lateLog = path.join(root, 'brain', 'late-native', 'transcript.jsonl');
+    await mkdir(path.dirname(lateLog), { recursive: true });
+    await writeFile(lateLog, JSON.stringify({ type: 'USER_INPUT', content: '<USER_REQUEST>Late prompt</USER_REQUEST>', workspacePath: workspace }) + '\n');
     const nativeDb = new Database(path.join(root, 'conversation_summaries.db'));
-    nativeDb.exec('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, workspace_uris TEXT)');
-    nativeDb.prepare('INSERT INTO conversation_summaries VALUES (?, ?)').run('offline-native', JSON.stringify([pathToFileURL(workspace).href]));
-    nativeDb.prepare('INSERT INTO conversation_summaries VALUES (?, ?)').run('native-session', JSON.stringify([pathToFileURL(path.join(root, 'canonical-alias')).href]));
+    nativeDb.exec('CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, title TEXT, workspace_uris TEXT)');
+    nativeDb.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?)').run(
+      'offline-native',
+      'Native offline title',
+      JSON.stringify([pathToFileURL(workspace).href]),
+    );
+    nativeDb.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?)').run(
+      'late-native',
+      '',
+      JSON.stringify([pathToFileURL(workspace).href]),
+    );
+    nativeDb.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?)').run(
+      'native-session',
+      null,
+      JSON.stringify([pathToFileURL(path.join(root, 'canonical-alias')).href]),
+    );
     nativeDb.close();
     const synchronizer = new AntigravitySessionSynchronizer();
     assert.equal(await synchronizer.synchronizeFile(externalLog), 'offline-native');
     assert.equal(sessionsDb.getSessionById('offline-native')?.project_path, workspace);
+    assert.equal(sessionsDb.getSessionById('offline-native')?.custom_name, 'Native offline title');
+    assert.equal(await synchronizer.synchronizeFile(lateLog), 'late-native');
+    assert.equal(sessionsDb.getSessionById('late-native')?.custom_name, 'Late prompt');
+    const lateDb = new Database(path.join(root, 'conversation_summaries.db'));
+    lateDb.prepare('UPDATE conversation_summaries SET title = ? WHERE conversation_id = ?')
+      .run('Late native title', 'late-native');
+    lateDb.close();
+    assert.equal(await resyncAntigravitySessionMetadata('late-native', lateLog), true);
+    assert.equal(sessionsDb.getSessionById('late-native')?.custom_name, 'Late native title');
     const oldLog = path.join(root, 'brain', 'old-native', 'transcript.jsonl');
     await mkdir(path.dirname(oldLog), { recursive: true });
     await writeFile(oldLog, JSON.stringify({ type: 'USER_INPUT', content: '<USER_REQUEST>Old</USER_REQUEST>', workspacePath: workspace }) + '\n');
