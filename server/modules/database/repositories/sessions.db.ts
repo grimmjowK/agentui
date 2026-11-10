@@ -73,7 +73,12 @@ export const sessionsDb = {
          updated_at = excluded.updated_at,
          project_path = excluded.project_path,
          jsonl_path = excluded.jsonl_path,
-         isArchived = 0,
+         -- 只在會話有新活動時才取消封存，重新掃描未變動的檔案不能把使用者封存的會話翻出來：
+         -- 沒帶時間的呼叫方是進行中的對話；同步程式帶 transcript 修改時間，時間前進才算新活動。
+         -- 封存操作不動 updated_at，所以它正好是「上次同步時的 transcript 時間」。
+         isArchived = CASE
+           WHEN ? IS NULL OR julianday(excluded.updated_at) > COALESCE(julianday(sessions.updated_at), 0) THEN 0
+           ELSE sessions.isArchived END,
          custom_name = CASE WHEN sessions.name_is_custom = 1 THEN sessions.custom_name
            ELSE COALESCE(excluded.custom_name, sessions.custom_name) END`
     ).run(
@@ -83,6 +88,7 @@ export const sessionsDb = {
       normalizedProjectPath,
       jsonlPath ?? null,
       createdAtValue,
+      updatedAtValue,
       updatedAtValue
     );
 

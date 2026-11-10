@@ -166,3 +166,38 @@ test('legacy names (name_is_custom NULL) are kept only when not derivable from t
   assert.equal(shouldKeepExistingSessionName(legacy('Untitled'), [], 'Untitled'), false);
   assert.equal(shouldKeepExistingSessionName({ custom_name: 'x', name_is_custom: 0 }, [], 'Untitled'), false);
 });
+
+test('legacy auto names truncated by the old code paths are not mistaken for manual renames', () => {
+  const legacy = (name: string) => ({ custom_name: name, name_is_custom: null });
+  const prompt = 'Run the shell command `ls -la` and tell me the output in one short sentence please';
+  // antigravity-cli.js 的 slice(0, 50)
+  assert.equal(shouldKeepExistingSessionName(legacy(prompt.slice(0, 50)), [prompt], 'Untitled'), false);
+  // 前端 sessionSummary 的「80 字 + ...」與全形省略號
+  assert.equal(shouldKeepExistingSessionName(legacy(`${prompt.slice(0, 80)}...`), [prompt], 'Untitled'), false);
+  assert.equal(shouldKeepExistingSessionName(legacy(`${prompt.slice(0, 80)}…`), [prompt], 'Untitled'), false);
+  // 不是任何推導名稱開頭的才當成手動命名
+  assert.equal(shouldKeepExistingSessionName(legacy('My renamed chat...'), [prompt], 'Untitled'), true);
+  assert.equal(shouldKeepExistingSessionName(legacy('...'), [prompt], 'Untitled'), true);
+});
+
+test('re-syncing an unchanged transcript keeps archived sessions archived; new activity restores them', async () => {
+  await withIsolatedDatabase(() => {
+    const project = '/workspace/demo-project';
+    const mtime = '2026-11-01T00:00:00.000Z';
+    sessionsDb.createSession('s-arch', 'antigravity', project, 'Name', mtime, mtime, '/tmp/t.jsonl');
+    sessionsDb.updateSessionIsArchived('s-arch', true);
+
+    // 完整重掃：transcript 修改時間沒變
+    sessionsDb.createSession('s-arch', 'antigravity', project, 'Name', mtime, mtime, '/tmp/t.jsonl');
+    assert.equal(sessionsDb.getSessionById('s-arch')?.isArchived, 1);
+
+    // transcript 有新內容（修改時間前進）
+    sessionsDb.createSession('s-arch', 'antigravity', project, 'Name', mtime, '2026-11-02T00:00:00.000Z', '/tmp/t.jsonl');
+    assert.equal(sessionsDb.getSessionById('s-arch')?.isArchived, 0);
+
+    // 進行中的對話（不帶時間）一律取消封存
+    sessionsDb.updateSessionIsArchived('s-arch', true);
+    sessionsDb.createSession('s-arch', 'antigravity', project, 'Name');
+    assert.equal(sessionsDb.getSessionById('s-arch')?.isArchived, 0);
+  });
+});
