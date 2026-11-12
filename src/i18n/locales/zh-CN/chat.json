@@ -13,6 +13,7 @@
   },
   "messageTypes": {
     "user": "U",
+    "injectedContext": "命令注入内容",
     "error": "错误",
     "warning": "警告",
     "tool": "工具",

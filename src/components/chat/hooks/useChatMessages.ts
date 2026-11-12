@@ -7,6 +7,7 @@ import type { NormalizedMessage } from '../../../stores/useSessionStore';
 import { stripImagePathNote } from '../../../stores/useSessionStore';
 import type { ChatMessage, SubagentChildTool } from '../types/types';
 import { decodeHtmlEntities, unescapeWithMathProtection, formatUsageLimitText } from '../utils/chatFormatting';
+import { splitCommandContext } from '../utils/commandContext';
 
 /**
  * Convert NormalizedMessage[] from the session store into ChatMessage[]
@@ -70,10 +71,14 @@ export function normalizedToChatMessages(messages: NormalizedMessage[]): ChatMes
           } else {
             // 已经有缩略图可渲染时，服务端追加的临时路径说明就是冗余噪声，隐藏掉；
             // 没有缩略图（刷新后历史不带图片数据）时保留，至少能看出当时带了图。
-            const display = renderableImages?.length ? stripImagePathNote(content) : content;
+            // 命令/skill 芯片注入的正文拆到 injectedContext，content 只保留用户输入
+            const commandContext = splitCommandContext(content);
+            const userText = commandContext?.text ?? content;
+            const display = renderableImages?.length ? stripImagePathNote(userText) : userText;
             converted.push({
               type: 'user',
               content: unescapeWithMathProtection(decodeHtmlEntities(display)),
+              injectedContext: commandContext?.injectedContext,
               timestamp: msg.timestamp,
               ...sharedMetadata,
             });

@@ -13,6 +13,7 @@
   },
   "messageTypes": {
     "user": "U",
+    "injectedContext": "Command context",
     "error": "Error",
     "warning": "Warning",
     "tool": "Tool",

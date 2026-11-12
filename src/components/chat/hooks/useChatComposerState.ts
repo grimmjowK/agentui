@@ -31,6 +31,7 @@ import type {
 } from '../types/types';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import { escapeRegExp } from '../utils/chatFormatting';
+import { splitCommandContext, wrapCommandContext } from '../utils/commandContext';
 
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
@@ -85,6 +86,7 @@ interface CommandExecutionResult {
   action?: string;
   data?: any;
   content?: string;
+  command?: string;
   hasBashCommands?: boolean;
   hasFileIncludes?: boolean;
 }
@@ -338,9 +340,8 @@ export function useChatComposerState({
     // the template has no $ARGUMENTS placeholder.
     const appendedText = pendingCommandAppendedTextRef.current;
     pendingCommandAppendedTextRef.current = '';
-    const finalContent = appendedText
-      ? `${commandContent}\n\n${appendedText}`
-      : commandContent;
+    // 命令正文用信封包起来，历史回放时才能和用户输入拆开（见 utils/commandContext.ts）
+    const finalContent = wrapCommandContext(result.command || '', commandContent, appendedText);
     setInput(finalContent);
     inputValueRef.current = finalContent;
 
@@ -685,10 +686,12 @@ export function useChatComposerState({
         currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
       const clientId = crypto.randomUUID();
 
+      const commandContext = splitCommandContext(currentInput);
       const userMessage: ChatMessage = {
         id: `user:${clientId}`,
         type: 'user',
-        content: displayTextOverrideRef.current ?? currentInput,
+        content: displayTextOverrideRef.current ?? commandContext?.text ?? currentInput,
+        injectedContext: commandContext?.injectedContext,
         images: uploadedImages as any,
         timestamp: new Date(),
       };
