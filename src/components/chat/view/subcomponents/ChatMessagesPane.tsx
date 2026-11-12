@@ -121,7 +121,8 @@ export default function ChatMessagesPane({
       ref={scrollContainerRef}
       onWheel={onWheel}
       onTouchMove={onTouchMove}
-      className="relative flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-0 py-3 sm:space-y-4 sm:p-4"
+      // 有消息时左侧预留 gutter 给 UserMessageIndex，避免索引条遮挡正文（宽度与索引条 w-9/sm:w-12 一致）
+      className={`relative flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-0 py-3 sm:space-y-4 sm:p-4 ${chatMessages.length > 0 ? 'pl-9 sm:pl-12' : ''}`}
     >
       {isLoadingSessionMessages && chatMessages.length === 0 ? (
         <div className="mt-8 text-center text-gray-500 dark:text-gray-400">
