@@ -104,8 +104,13 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
   const [fetchedSessions, setFetchedSessions] = useState<Project['sessionsByProvider'] | null>(null);
   const projectId = selectedProject?.projectId;
 
+  // 只在切換專案時清除快取；關閉下拉時清除會改變 sessionList，
+  // 使候選過濾 effect 再次開啟下拉，導致 Escape 無法關閉。
   useEffect(() => {
     setFetchedSessions(null);
+  }, [projectId]);
+
+  useEffect(() => {
     if (!showFileDropdown || !projectId) {
       return;
     }
