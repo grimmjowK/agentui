@@ -14,6 +14,8 @@ import {
   sendToClient,
 } from '@/modules/websocket/services/logging-writer.service.js';
 import { isSessionMessageLogEnabled } from '@/shared/session-message-log-flags.js';
+import { sessionsDb } from '@/modules/database/index.js';
+import { expandSessionMentions } from '@/modules/providers/index.js';
 import type { IProviderRuntime } from '@/shared/interfaces.js';
 import type {
   AnyRecord,
@@ -182,7 +184,10 @@ export function handleChatConnection(
           if (id !== 'codex') {
             warnOnConcurrentShellSession(requestedSessionId, id, loggingWriter);
           }
-          await runtime.start(data.command ?? '', data.options ?? {}, loggingWriter);
+          // 日志里记用户原文（含 @session:<id>），送给 agent 的才展开成 transcript 引用
+          const cwd = typeof data.options?.cwd === 'string' ? data.options.cwd : null;
+          const command = await expandSessionMentions(data.command ?? '', cwd);
+          await runtime.start(command, data.options ?? {}, loggingWriter);
         } finally {
           loggingWriter.finish();
         }
@@ -225,8 +230,12 @@ export function handleChatConnection(
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
         const text = typeof data.text === 'string' ? data.text : '';
         const clientId = resolveClientId(data.clientId);
+        const steerText = await expandSessionMentions(
+          text,
+          sessionsDb.getSessionById(sessionId)?.project_path ?? null,
+        );
         const result = runtime.steer
-          ? await runtime.steer(sessionId, writer.userId, text)
+          ? await runtime.steer(sessionId, writer.userId, steerText)
           : { ok: false, reason: 'unsupported' };
         if (result.ok) {
           const registeredWriter = getLoggingWriterForSession(sessionId);

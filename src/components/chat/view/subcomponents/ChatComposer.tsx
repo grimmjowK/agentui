@@ -39,6 +39,7 @@ import {
 interface MentionableFile {
   name: string;
   path: string;
+  detail?: string;
 }
 
 interface SlashCommand {
@@ -271,7 +272,7 @@ export default function ChatComposer({
                 }}
               >
                 <div className="text-sm font-medium">{file.name}</div>
-                <div className="font-mono text-xs text-muted-foreground">{file.path}</div>
+                <div className="font-mono text-xs text-muted-foreground">{file.detail ?? file.path}</div>
               </div>
             ))}
           </div>

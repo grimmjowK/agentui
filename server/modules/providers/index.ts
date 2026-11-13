@@ -5,6 +5,7 @@ export { sessionSynchronizerService } from './services/session-synchronizer.serv
 export { providerSkillsService } from './services/skills.service.js';
 export { sessionPinService } from './services/session-pin.service.js';
 export { sessionsService } from './services/sessions.service.js';
+export { expandSessionMentions } from './services/session-references.service.js';
 export { providerAuthService } from './services/provider-auth.service.js';
 
 export { initializeSessionsWatcher } from './services/sessions-watcher.service.js';

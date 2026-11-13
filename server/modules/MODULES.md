@@ -28,6 +28,8 @@
   Claude 工具形状，前端对话流不按 provider 分支。
 - `services/session-conversations-search.service.ts`：全文检索，提取交给各 facet 的
   `extractSearchableMessages`；`session-synchronizer.service.ts`：各 provider 独立的扫描游标。
+- `services/session-references.service.ts`：聊天框 `@session:<id>` 跨 provider 引用。送出时把被引用会话导出到
+  `<cwd>/.tmp/session-refs/<id>.md`，prompt 末尾只附引用清单与路径，由 agent 自行读取；日志里存用户原文。
 
 ### `codex-runtime/` — Codex app-server 连接
 `CodexAppServer`（JSON-RPC over stdio）、审批池 `codexApprovals`、线程占用锁 `codexOwnership`。
