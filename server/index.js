@@ -1281,13 +1281,14 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
             // Debug: log all entries including hidden files
 
 
-            // Skip heavy build directories and VCS directories
+            // Skip heavy build directories, VCS directories, and server temp folder
             if (entry.name === 'node_modules' ||
                 entry.name === 'dist' ||
                 entry.name === 'build' ||
                 entry.name === '.git' ||
                 entry.name === '.svn' ||
-                entry.name === '.hg') continue;
+                entry.name === '.hg' ||
+                entry.name === '.tmp') continue;
 
             const itemPath = path.join(dirPath, entry.name);
             const item = {

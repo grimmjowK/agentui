@@ -474,6 +474,7 @@ export function useChatComposerState({
     handleFileMentionsKeyDown,
   } = useFileMentions({
     selectedProject,
+    selectedSessionId: selectedSession?.id ?? currentSessionId,
     input,
     setInput,
     textareaRef,

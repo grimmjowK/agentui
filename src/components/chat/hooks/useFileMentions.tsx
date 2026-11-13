@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 import { api } from '../../../utils/api';
 import { escapeRegExp } from '../utils/chatFormatting';
@@ -23,6 +23,7 @@ export interface MentionableFile {
 
 interface UseFileMentionsOptions {
   selectedProject: Project | null;
+  selectedSessionId?: string | null;
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
   textareaRef: RefObject<HTMLTextAreaElement>;
@@ -53,7 +54,13 @@ const flattenFileTree = (files: ProjectFileNode[], basePath = ''): MentionableFi
 
 const SESSION_FETCH_LIMIT = 200;
 
-export function useFileMentions({ selectedProject, input, setInput, textareaRef }: UseFileMentionsOptions) {
+export function useFileMentions({
+  selectedProject,
+  selectedSessionId,
+  input,
+  setInput,
+  textareaRef,
+}: UseFileMentionsOptions) {
   const [fileList, setFileList] = useState<MentionableFile[]>([]);
   const [fileMentions, setFileMentions] = useState<string[]>([]);
   const [filteredFiles, setFilteredFiles] = useState<MentionableFile[]>([]);
@@ -61,6 +68,7 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
   const [selectedFileIndex, setSelectedFileIndex] = useState(-1);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [atSymbolPosition, setAtSymbolPosition] = useState(-1);
+  const dismissedAtPositionRef = useRef<number>(-1);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -135,18 +143,21 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
       return [];
     }
     const source = fetchedSessions ? { ...selectedProject, sessionsByProvider: fetchedSessions } : selectedProject;
-    return getAllSessions(source).map((session) => ({
-      name: String(session.summary || session.name || session.id),
-      path: `@session:${session.id}`,
-      detail: `${session.__provider ?? 'session'} · @session`,
-    }));
-  }, [selectedProject, fetchedSessions]);
+    return getAllSessions(source)
+      .filter((session) => !selectedSessionId || session.id !== selectedSessionId)
+      .map((session) => ({
+        name: String(session.summary || session.name || session.id),
+        path: `@session:${session.id}`,
+        detail: `${session.__provider ?? 'session'} · @session:${String(session.id).slice(0, 8)}`,
+      }));
+  }, [selectedProject, fetchedSessions, selectedSessionId]);
 
   useEffect(() => {
     const textBeforeCursor = input.slice(0, cursorPosition);
     const lastAtIndex = textBeforeCursor.lastIndexOf('@');
 
     if (lastAtIndex === -1) {
+      dismissedAtPositionRef.current = -1;
       setShowFileDropdown(false);
       setAtSymbolPosition(-1);
       return;
@@ -154,12 +165,21 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
 
     const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1);
     if (textAfterAt.includes(' ')) {
+      dismissedAtPositionRef.current = -1;
       setShowFileDropdown(false);
       setAtSymbolPosition(-1);
       return;
     }
 
+    if (lastAtIndex !== dismissedAtPositionRef.current) {
+      dismissedAtPositionRef.current = -1;
+    }
+
     setAtSymbolPosition(lastAtIndex);
+    if (dismissedAtPositionRef.current === lastAtIndex) {
+      setShowFileDropdown(false);
+      return;
+    }
     setShowFileDropdown(true);
     setSelectedFileIndex(-1);
 
@@ -291,13 +311,14 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
 
       if (event.key === 'Escape') {
         event.preventDefault();
+        dismissedAtPositionRef.current = atSymbolPosition;
         setShowFileDropdown(false);
         return true;
       }
 
       return false;
     },
-    [showFileDropdown, filteredFiles, selectedFileIndex, selectFile],
+    [showFileDropdown, filteredFiles, selectedFileIndex, selectFile, atSymbolPosition],
   );
 
   return {

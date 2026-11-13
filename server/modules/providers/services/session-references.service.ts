@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { sessionsDb } from '@/modules/database/index.js';
+import { sessionMessagesDb, sessionsDb } from '@/modules/database/index.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 import type { NormalizedMessage } from '@/shared/types.js';
 
@@ -94,7 +94,12 @@ export async function expandSessionMentions(command: string, cwd?: string | null
     const session = sessionsDb.getSessionById(id);
     if (!session) continue;
     try {
-      const { messages } = await sessionsService.fetchHistory(id);
+      // 优先读已落库的日志，避免每次发送都全量解析原生历史并触发对账事务；
+      // 尚未建过日志的旧会话再走 fetchHistory 导入。
+      const journal = sessionMessagesDb.listAll(id);
+      const messages = journal.length > 0
+        ? journal.map((row) => row.payload)
+        : (await sessionsService.fetchHistory(id)).messages;
       // 原始历史档已不存在等情况：给 agent 一个空 transcript 只会误导，直接不引用
       if (messages.length === 0) continue;
       const title = (session.custom_name || id).replace(/\s+/g, ' ').replace(/"/g, "'");

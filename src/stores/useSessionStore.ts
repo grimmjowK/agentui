@@ -159,7 +159,7 @@ export function stripImagePathNote(text: string): string {
 const SESSION_REFERENCE_NOTE_RE = /\n*\[Referenced sessions:[^\n]*\](?:\n\d+\. @session:[^\n]*)*/;
 
 export function stripSessionReferenceNote(text: string): string {
-  return text.replace(SESSION_REFERENCE_NOTE_RE, '');
+  return text.replace(SESSION_REFERENCE_NOTE_RE, '').trimEnd();
 }
 
 function userTextFingerprint(m: NormalizedMessage): string | null {
