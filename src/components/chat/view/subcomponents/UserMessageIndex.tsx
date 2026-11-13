@@ -59,6 +59,7 @@ export default function UserMessageIndex({
   // rect 实现（absolute 会跟着 scrollHeight 拉长）。
   const [barStyle, setBarStyle] = useState<CSSProperties | null>(null);
   const jumpRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -175,10 +176,23 @@ export default function UserMessageIndex({
 
   const scrollToAnchor = useCallback((target: Element) => {
     target.scrollIntoView({ block: 'center', behavior: 'auto' });
+    // .chat-message 启用了 content-visibility: auto，首次跳到视口外未渲染过的区域时
+    // 浏览器会在首帧滚动后按真实高度重新布局，下一帧再对齐一次可修正高度差导致的偏移。
+    window.requestAnimationFrame(() => {
+      target.scrollIntoView({ block: 'center', behavior: 'auto' });
+    });
     setActiveAnchorId(target.id);
     target.classList.add(HIGHLIGHT_CLASS);
     setTimeout(() => target.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_DURATION_MS);
   }, []);
+
+  // 条目极多、索引条自身出现滚动时，让当前高亮的刻度保持在索引条可视范围内。
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav || !activeAnchorId || nav.scrollHeight <= nav.clientHeight) return;
+    const activeBtn = nav.querySelector<HTMLElement>('[aria-current="location"]');
+    activeBtn?.scrollIntoView({ block: 'nearest' });
+  }, [activeAnchorId]);
 
   const handleJump = (anchorId: string) => {
     const container = scrollContainerRef.current;
@@ -225,6 +239,7 @@ export default function UserMessageIndex({
   return createPortal(
     <>
       <nav
+        ref={navRef}
         className="scrollbar-hide flex w-9 flex-col overflow-y-auto py-4 sm:w-12"
         style={barStyle}
         aria-label={t('messageMinimap.jumpToMessage', { defaultValue: 'Jump to this message' })}

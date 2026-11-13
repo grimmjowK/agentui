@@ -79,3 +79,31 @@ test('輸入佇列：只剩 ambient 背景任務時照常關閉', () => {
   input.onBackgroundTasksChanged([{ task_id: 'w', task_type: 'watcher', description: '', ambient: true }]);
   assert.equal(input.onResult({ queued_turn_count: 0 }), true);
 });
+
+test('背景任務清空後仍可在通知觸發的回合插話，直到後續 result 才關閉', async () => {
+  const input = createInputQueue();
+  const it = input[Symbol.asyncIterator]();
+  input.push('first');
+  const first = (await it.next()).value;
+  input.onBackgroundTasksChanged([{ task_id: 'bash', task_type: 'local_bash' }]);
+  assert.equal(input.onResult({ user_message_uuids: [first.uuid] }), false);
+
+  // level 事件可能早於 task-notification，此時沒有使用者插話 pending。
+  input.onBackgroundTasksChanged([]);
+  assert.equal(input.closed, false);
+  assert.equal(input.push('steer during notification turn'), true);
+  const steer = (await it.next()).value;
+  assert.equal(input.onResult({ user_message_uuids: [] }), false);
+  assert.equal(input.onResult({ user_message_uuids: [steer.uuid] }), true);
+  assert.equal((await it.next()).done, true);
+});
+
+test('背景任務通知回合沒有插話時，後續 result 仍正常關閉', () => {
+  const input = createInputQueue();
+  input.push('first');
+  input.onBackgroundTasksChanged([{ task_id: 'bash', task_type: 'local_bash' }]);
+  assert.equal(input.onResult({ queued_turn_count: 0 }), false);
+  input.onBackgroundTasksChanged([]);
+  assert.equal(input.closed, false);
+  assert.equal(input.onResult({ queued_turn_count: 0 }), true);
+});

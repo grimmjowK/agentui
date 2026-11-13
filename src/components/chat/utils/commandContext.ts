@@ -19,3 +19,10 @@ export function splitCommandContext(content: string): { text: string; injectedCo
   const text = content.slice(match[0].length).trim();
   return { text: text || match[1], injectedContext: match[2] };
 }
+
+/** 手動輸入與命令晶片共用：保留原始換行與空白，不從已展開的模板反推參數。 */
+export function getCommandUserText(commandName: string, rawInput: string): string {
+  if (!rawInput.startsWith(commandName)) return '';
+  const rest = rawInput.slice(commandName.length);
+  return rest && !/^\s/.test(rest) ? '' : rest.trim();
+}
