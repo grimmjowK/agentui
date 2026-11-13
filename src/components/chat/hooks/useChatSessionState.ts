@@ -315,12 +315,14 @@ export function useChatSessionState({
 
   const scrollToBottomAndReset = useCallback(() => {
     scrollToBottom();
-    if (allMessagesLoaded) {
-      setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
-      setAllMessagesLoaded(false);
-      allMessagesLoadedRef.current = false;
-    }
-  }, [allMessagesLoaded, scrollToBottom]);
+    // 只收窄渲染窗口；全量历史已在 store 里，不要再把 allMessagesLoaded 置回 false，
+    // 否则索引条会立刻静默重拉全部历史、替换整批消息，导致滚动位置被打乱。
+    setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
+    // handleScroll 只挂在 wheel/touchmove 上，程序滚动不会触发，需手动收起按钮。
+    setIsUserScrolledUp(false);
+    // 窗口收窄、content-visibility 按真实高度重排后再贴一次底。
+    requestAnimationFrame(scrollToBottom);
+  }, [scrollToBottom]);
 
   const isNearBottom = useCallback(() => {
     const container = scrollContainerRef.current;
