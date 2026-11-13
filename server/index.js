@@ -1281,14 +1281,14 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
             // Debug: log all entries including hidden files
 
 
-            // Skip heavy build directories, VCS directories, and server temp folder
+            // Skip heavy build directories and VCS directories
+            // （.tmp 不在这里排除：文件浏览器也用这棵树，@ 下拉的过滤在 useFileMentions 里做）
             if (entry.name === 'node_modules' ||
                 entry.name === 'dist' ||
                 entry.name === 'build' ||
                 entry.name === '.git' ||
                 entry.name === '.svn' ||
-                entry.name === '.hg' ||
-                entry.name === '.tmp') continue;
+                entry.name === '.hg') continue;
 
             const itemPath = path.join(dirPath, entry.name);
             const item = {
