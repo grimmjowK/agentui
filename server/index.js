@@ -1282,6 +1282,7 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
 
 
             // Skip heavy build directories and VCS directories
+            // （.tmp 不在这里排除：文件浏览器也用这棵树，@ 下拉的过滤在 useFileMentions 里做）
             if (entry.name === 'node_modules' ||
                 entry.name === 'dist' ||
                 entry.name === 'build' ||

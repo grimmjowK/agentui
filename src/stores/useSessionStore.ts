@@ -151,9 +151,20 @@ export function stripImagePathNote(text: string): string {
   return text.replace(IMAGE_PATH_NOTE_RE, '').trimEnd();
 }
 
+/**
+ * `@session:<id>` 引用在服务端展开时追加的引用说明（server/modules/providers/services/
+ * session-references.service.ts）。日志里存的是用户原文，但回退到 provider 历史时会带上它。
+ * 只剥这一段，后面若还有附图路径说明则保留。
+ */
+const SESSION_REFERENCE_NOTE_RE = /\n*\[Referenced sessions:[^\n]*\](?:\n\d+\. @session:[^\n]*)*/;
+
+export function stripSessionReferenceNote(text: string): string {
+  return text.replace(SESSION_REFERENCE_NOTE_RE, '').trimEnd();
+}
+
 function userTextFingerprint(m: NormalizedMessage): string | null {
   if (m.kind !== 'text' || m.role !== 'user') return null;
-  const t = stripImagePathNote(m.content || '').trim();
+  const t = stripImagePathNote(stripSessionReferenceNote(m.content || '')).trim();
   return t.length > 0 ? t : null;
 }
 

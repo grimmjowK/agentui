@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 import { api } from '../../../utils/api';
 import { escapeRegExp } from '../utils/chatFormatting';
+import { filterMentionCandidates } from '../utils/mentionCandidates';
 import type { Project } from '../../../types/app';
+import { getAllSessions } from '../../sidebar/utils/utils';
 
 interface ProjectFileNode {
   name: string;
@@ -15,10 +17,13 @@ export interface MentionableFile {
   name: string;
   path: string;
   relativePath?: string;
+  /** 下拉第二行的说明；session 候选用来显示 provider，缺省显示 path */
+  detail?: string;
 }
 
 interface UseFileMentionsOptions {
   selectedProject: Project | null;
+  selectedSessionId?: string | null;
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
   textareaRef: RefObject<HTMLTextAreaElement>;
@@ -34,7 +39,8 @@ const flattenFileTree = (files: ProjectFileNode[], basePath = ''): MentionableFi
       return;
     }
 
-    if (file.type === 'file') {
+    // .tmp/ 是服务端给 agent 放临时附件的目录（附图、@session transcript），不作为候选
+    if (file.type === 'file' && !fullPath.startsWith('.tmp/')) {
       flattened.push({
         name: file.name,
         path: fullPath,
@@ -46,7 +52,15 @@ const flattenFileTree = (files: ProjectFileNode[], basePath = ''): MentionableFi
   return flattened;
 };
 
-export function useFileMentions({ selectedProject, input, setInput, textareaRef }: UseFileMentionsOptions) {
+const SESSION_FETCH_LIMIT = 200;
+
+export function useFileMentions({
+  selectedProject,
+  selectedSessionId,
+  input,
+  setInput,
+  textareaRef,
+}: UseFileMentionsOptions) {
   const [fileList, setFileList] = useState<MentionableFile[]>([]);
   const [fileMentions, setFileMentions] = useState<string[]>([]);
   const [filteredFiles, setFilteredFiles] = useState<MentionableFile[]>([]);
@@ -54,6 +68,7 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
   const [selectedFileIndex, setSelectedFileIndex] = useState(-1);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [atSymbolPosition, setAtSymbolPosition] = useState(-1);
+  const dismissedAtPositionRef = useRef<number>(-1);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -92,11 +107,57 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
     };
   }, [selectedProject?.projectId]);
 
+  // 当前项目下所有 provider 的会话，选中后插入 `@session:<id>`，由服务端展开为 transcript 引用。
+  // 侧边栏只载入了前 20 笔，所以每次打开下拉都向后端拉一次（未拉到前先用侧边栏已有的）。
+  const [fetchedSessions, setFetchedSessions] = useState<Project['sessionsByProvider'] | null>(null);
+  const projectId = selectedProject?.projectId;
+
+  // 只在切換專案時清除快取；關閉下拉時清除會改變 sessionList，
+  // 使候選過濾 effect 再次開啟下拉，導致 Escape 無法關閉。
+  useEffect(() => {
+    setFetchedSessions(null);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!showFileDropdown || !projectId) {
+      return;
+    }
+    let cancelled = false;
+    // ponytail: 后端单页上限 200 笔，更老的会话要靠搜尋；需要时再接 /search/sessions
+    api
+      .projectSessions(projectId, { limit: SESSION_FETCH_LIMIT })
+      .then((response: Response) => (response.ok ? response.json() : null))
+      .then((page: Pick<Project, 'sessionsByProvider'> | null) => {
+        if (!cancelled && page?.sessionsByProvider) {
+          setFetchedSessions(page.sessionsByProvider);
+        }
+      })
+      .catch((error: unknown) => console.error('Error fetching sessions for mentions:', error));
+    return () => {
+      cancelled = true;
+    };
+  }, [showFileDropdown, projectId]);
+
+  const sessionList = useMemo<MentionableFile[]>(() => {
+    if (!selectedProject) {
+      return [];
+    }
+    const source = fetchedSessions ? { ...selectedProject, sessionsByProvider: fetchedSessions } : selectedProject;
+    return getAllSessions(source)
+      .filter((session) => !selectedSessionId || session.id !== selectedSessionId)
+      .map((session) => ({
+        name: String(session.summary || session.name || session.id),
+        path: `@session:${session.id}`,
+        detail: `${session.__provider ?? 'session'} · @session:${String(session.id).slice(0, 8)}`,
+      }));
+  }, [selectedProject, fetchedSessions, selectedSessionId]);
+
   useEffect(() => {
     const textBeforeCursor = input.slice(0, cursorPosition);
     const lastAtIndex = textBeforeCursor.lastIndexOf('@');
 
     if (lastAtIndex === -1) {
+      dismissedAtPositionRef.current = -1;
       setShowFileDropdown(false);
       setAtSymbolPosition(-1);
       return;
@@ -104,25 +165,26 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
 
     const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1);
     if (textAfterAt.includes(' ')) {
+      dismissedAtPositionRef.current = -1;
       setShowFileDropdown(false);
       setAtSymbolPosition(-1);
       return;
     }
 
+    if (lastAtIndex !== dismissedAtPositionRef.current) {
+      dismissedAtPositionRef.current = -1;
+    }
+
     setAtSymbolPosition(lastAtIndex);
+    if (dismissedAtPositionRef.current === lastAtIndex) {
+      setShowFileDropdown(false);
+      return;
+    }
     setShowFileDropdown(true);
     setSelectedFileIndex(-1);
 
-    const matchingFiles = fileList
-      .filter(
-        (file) =>
-          file.name.toLowerCase().includes(textAfterAt.toLowerCase()) ||
-          file.path.toLowerCase().includes(textAfterAt.toLowerCase()),
-      )
-      .slice(0, 10);
-
-    setFilteredFiles(matchingFiles);
-  }, [input, cursorPosition, fileList]);
+    setFilteredFiles(filterMentionCandidates(textAfterAt, fileList, sessionList));
+  }, [input, cursorPosition, fileList, sessionList]);
 
   const activeFileMentions = useMemo(() => {
     if (!input || fileMentions.length === 0) {
@@ -249,13 +311,14 @@ export function useFileMentions({ selectedProject, input, setInput, textareaRef 
 
       if (event.key === 'Escape') {
         event.preventDefault();
+        dismissedAtPositionRef.current = atSymbolPosition;
         setShowFileDropdown(false);
         return true;
       }
 
       return false;
     },
-    [showFileDropdown, filteredFiles, selectedFileIndex, selectFile],
+    [showFileDropdown, filteredFiles, selectedFileIndex, selectFile, atSymbolPosition],
   );
 
   return {
