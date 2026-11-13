@@ -57,6 +57,8 @@ export interface ChatMessage {
   // （见 openspec/changes/fix-chat-sync-and-transcript-coverage/design.md D4）。
   // 下次再加新变体前，先收敛成一个 `variant?: string` 字段。
   isInterrupted?: boolean;
+  /** 命令/skill 芯片注入的正文（非用户输入），仅在「显示原始参数」开启时展示。 */
+  injectedContext?: string;
   attachmentKind?: string;
   attachmentPath?: string;
   attachmentDetail?: string;

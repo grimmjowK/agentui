@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useMemo } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -88,40 +88,26 @@ export default function ChatMessagesPane({
   selectedProject,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
-  const messageKeyMapRef = useRef<WeakMap<ChatMessage, string>>(new WeakMap());
-  const allocatedKeysRef = useRef<Set<string>>(new Set());
-  const generatedMessageKeyCounterRef = useRef(0);
-
-  // Keep keys stable across prepends so existing MessageComponent instances retain local state.
-  const getMessageKey = useCallback((message: ChatMessage) => {
-    const existingKey = messageKeyMapRef.current.get(message);
-    if (existingKey) {
-      return existingKey;
-    }
-
-    const intrinsicKey = getIntrinsicMessageKey(message);
-    let candidateKey = intrinsicKey;
-
-    if (!candidateKey || allocatedKeysRef.current.has(candidateKey)) {
-      do {
-        generatedMessageKeyCounterRef.current += 1;
-        candidateKey = intrinsicKey
-          ? `${intrinsicKey}-${generatedMessageKeyCounterRef.current}`
-          : `message-generated-${generatedMessageKeyCounterRef.current}`;
-      } while (allocatedKeysRef.current.has(candidateKey));
-    }
-
-    allocatedKeysRef.current.add(candidateKey);
-    messageKeyMapRef.current.set(message, candidateKey);
-    return candidateKey;
-  }, []);
+  // key 只由消息自身的 id 推导，不能按对象身份分配：store 每次变化（流式追加、静默
+  // 补全历史）都会重建全部 ChatMessage 对象，按对象分配会让所有消息换 key 整体重挂载，
+  // 既卡顿又会让 content-visibility 记住的高度失效、滚动位置跳动。
+  const messageKeys = useMemo(() => {
+    const seen = new Map<string, number>();
+    return visibleMessages.map((message, index) => {
+      const base = getIntrinsicMessageKey(message) ?? `message-index-${index}`;
+      const count = seen.get(base) ?? 0;
+      seen.set(base, count + 1);
+      return count ? `${base}#${count}` : base;
+    });
+  }, [visibleMessages]);
 
   return (
     <div
       ref={scrollContainerRef}
       onWheel={onWheel}
       onTouchMove={onTouchMove}
-      className="relative flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-0 py-3 sm:space-y-4 sm:p-4"
+      // 有消息时左侧预留 gutter 给 UserMessageIndex，避免索引条遮挡正文（宽度与索引条 w-9/sm:w-12 一致）
+      className={`relative flex-1 space-y-3 overflow-y-auto overflow-x-hidden px-0 py-3 sm:space-y-4 sm:p-4 ${chatMessages.length > 0 ? 'pl-9 sm:pl-12' : ''}`}
     >
       {isLoadingSessionMessages && chatMessages.length === 0 ? (
         <div className="mt-8 text-center text-gray-500 dark:text-gray-400">
@@ -219,7 +205,7 @@ export default function ChatMessagesPane({
             const prevMessage = index > 0 ? visibleMessages[index - 1] : null;
             return (
               <MessageComponent
-                key={getMessageKey(message)}
+                key={messageKeys[index]}
                 message={message}
                 prevMessage={prevMessage}
                 createDiff={createDiff}

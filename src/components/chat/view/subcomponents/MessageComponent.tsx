@@ -159,6 +159,12 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
         /* User message bubble on the right */
         <div className="flex w-full items-end space-x-0 sm:w-auto sm:max-w-[85%] sm:space-x-3 md:max-w-md lg:max-w-lg xl:max-w-xl">
           <div className="group flex-1 rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-white shadow-sm sm:flex-initial sm:px-4">
+            {showRawParameters && message.injectedContext && (
+              <details className="mb-2 rounded-lg bg-blue-700/60 px-2 py-1 text-xs">
+                <summary className="cursor-pointer select-none text-blue-100">{t('messageTypes.injectedContext', { defaultValue: 'Command context' })}</summary>
+                <div className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-blue-50">{message.injectedContext}</div>
+              </details>
+            )}
             <div className="whitespace-pre-wrap break-words text-sm">
               {message.content}
             </div>

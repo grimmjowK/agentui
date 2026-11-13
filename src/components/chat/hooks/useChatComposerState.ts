@@ -30,7 +30,7 @@ import type {
   PermissionMode,
 } from '../types/types';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
-import { escapeRegExp } from '../utils/chatFormatting';
+import { getCommandUserText, splitCommandContext, wrapCommandContext } from '../utils/commandContext';
 
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
@@ -85,6 +85,7 @@ interface CommandExecutionResult {
   action?: string;
   data?: any;
   content?: string;
+  command?: string;
   hasBashCommands?: boolean;
   hasFileIncludes?: boolean;
 }
@@ -203,7 +204,6 @@ export function useChatComposerState({
   const inputValueRef = useRef(input);
   const selectedProjectId = selectedProject?.projectId;
   const displayTextOverrideRef = useRef<string | null>(null);
-  const pendingCommandAppendedTextRef = useRef<string>('');
 
   // 从已有会话导航到新会话时，同步清除输入框内容，
   // 防止旧会话的草稿文本残留
@@ -316,7 +316,7 @@ export function useChatComposerState({
     [onFileOpen, onShowSettings, addMessage, clearMessages, rewindMessages, handleModelSwitch],
   );
 
-  const handleCustomCommand = useCallback(async (result: CommandExecutionResult) => {
+  const handleCustomCommand = useCallback(async (result: CommandExecutionResult, appendedText: string) => {
     const { content, hasBashCommands } = result;
 
     if (hasBashCommands) {
@@ -336,11 +336,8 @@ export function useChatComposerState({
     const commandContent = content || '';
     // Append the user's original text so the AI has the full context even when
     // the template has no $ARGUMENTS placeholder.
-    const appendedText = pendingCommandAppendedTextRef.current;
-    pendingCommandAppendedTextRef.current = '';
-    const finalContent = appendedText
-      ? `${commandContent}\n\n${appendedText}`
-      : commandContent;
+    // 命令正文用信封包起来，历史回放时才能和用户输入拆开（见 utils/commandContext.ts）
+    const finalContent = wrapCommandContext(result.command || '', commandContent, appendedText);
     setInput(finalContent);
     inputValueRef.current = finalContent;
 
@@ -360,11 +357,10 @@ export function useChatComposerState({
 
       try {
         const effectiveInput = rawInput ?? input;
-        // 使用 `s`（dotAll）标志，使追加文本中的换行也能被捕获，
-        // 否则换行后的内容会被丢弃、无法作为参数发送给 CLI。
-        const commandMatch = effectiveInput.match(new RegExp(`${escapeRegExp(command.name)}\\s*([\\s\\S]*)`));
-        const args =
-          commandMatch && commandMatch[1] ? commandMatch[1].trim().split(/\s+/) : [];
+        // 兩種命令入口都從本次輸入取參數，避免手動輸入的文字被藏進模板；
+        // 原始換行留給顯示與 prompt，只有 API 的 args 按空白拆分。
+        const userText = getCommandUserText(command.name, effectiveInput);
+        const args = userText ? userText.split(/\s+/) : [];
 
         // The `/api/commands/execute` context sends `projectId` now instead of
         // a folder-derived project name; the path is still included verbatim.
@@ -408,7 +404,7 @@ export function useChatComposerState({
           setInput('');
           inputValueRef.current = '';
         } else if (result.type === 'custom') {
-          await handleCustomCommand(result);
+          await handleCustomCommand(result, userText);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
@@ -608,13 +604,9 @@ export function useChatComposerState({
           ? `${pendingCommand.name} ${appendedText}`
           : pendingCommand.name;
         displayTextOverrideRef.current = appendedText || pendingCommand.name;
-        pendingCommandAppendedTextRef.current = appendedText;
         setPendingCommand(null);
         setInput('');
         inputValueRef.current = '';
-        setAttachedImages([]);
-        setUploadingImages(new Map());
-        setImageErrors(new Map());
         resetCommandMenuState();
         setIsTextareaExpanded(false);
         if (textareaRef.current) {
@@ -632,12 +624,18 @@ export function useChatComposerState({
       // Intercept slash commands only when "/" is the first input character.
       const commandInput = currentInput.trimEnd();
       if (commandInput.startsWith('/')) {
-        const firstSpace = commandInput.indexOf(' ');
+        const firstSpace = commandInput.search(/\s/);
         const commandName = firstSpace > 0 ? commandInput.slice(0, firstSpace) : commandInput;
         const matchedCommand = slashCommands.find((cmd: SlashCommand) => cmd.name === commandName);
         if (matchedCommand && matchedCommand.type !== 'skill') {
           executeCommand(matchedCommand, commandInput);
-          clearComposer();
+          setInput('');
+          inputValueRef.current = '';
+          resetCommandMenuState();
+          setIsTextareaExpanded(false);
+          if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+          }
           return;
         }
       }
@@ -685,10 +683,12 @@ export function useChatComposerState({
         currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
       const clientId = crypto.randomUUID();
 
+      const commandContext = splitCommandContext(currentInput);
       const userMessage: ChatMessage = {
         id: `user:${clientId}`,
         type: 'user',
-        content: displayTextOverrideRef.current ?? currentInput,
+        content: displayTextOverrideRef.current ?? commandContext?.text ?? currentInput,
+        injectedContext: commandContext?.injectedContext,
         images: uploadedImages as any,
         timestamp: new Date(),
       };

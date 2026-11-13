@@ -307,6 +307,10 @@ function createInputQueue() {
   const pending = new Set();
   let wake = null;
   let closed = false;
+  // 一輪 result 之後仍有存活的背景任務（Bash 逾時自動轉背景、背景 agent 等）時，CLI 行程
+  // 不會結束，會在任務完成時以 task-notification 喚起新一輪；此時關掉輸入會讓插話全部
+  // 回 not_running，而前端仍顯示執行中。所以有背景任務時延後關閉，等任務清空後的 result 才關。
+  let liveBackgroundTasks = 0;
 
   const notify = () => { wake?.(); wake = null; };
 
@@ -335,8 +339,14 @@ function createInputQueue() {
         // 舊版 CLI 不回報 uuid：退回用 queued_turn_count 判斷，避免永遠不關閉
         pending.clear();
       }
-      if (pending.size === 0) this.close();
+      if (pending.size === 0 && liveBackgroundTasks === 0) this.close();
       return closed;
+    },
+    /** 收到 system/background_tasks_changed 時呼叫（REPLACE 語意，ambient 任務不算活動）。 */
+    onBackgroundTasksChanged(tasks) {
+      liveBackgroundTasks = Array.isArray(tasks) ? tasks.filter((task) => !task?.ambient).length : 0;
+      // 清單清空可能早於 task-notification；通知還會觸發下一輪，不能沿用上一輪
+      // result 的閒置狀態關閉輸入。等後續 result 確認沒有待處理訊息時再關閉。
     },
     /**
      * 結束輸入。正常收尾時 buffer 必然已空（pending 歸零代表都被讀走並消化）；
@@ -683,6 +693,10 @@ async function queryClaudeSDK(command, options = {}, ws) {
       }
 
       // Extract and send token budget updates from result messages
+      if (message.type === 'system' && message.subtype === 'background_tasks_changed') {
+        input.onBackgroundTasksChanged(message.tasks);
+      }
+
       if (message.type === 'result') {
         input.onResult(message);
         lastResultError = message.is_error ? message : null;

@@ -60,3 +60,50 @@ test('輸入佇列：只有單數 uuid 且還有排隊中的一輪時不關閉',
   input.push('b');
   assert.equal(input.onResult({ user_message_uuid: 'x', queued_turn_count: 1 }), false);
 });
+
+test('輸入佇列：result 後仍有背景任務時不關閉，可繼續插話；任務清空且閒置才關閉', () => {
+  const input = createInputQueue();
+  input.push('first');
+  input.onBackgroundTasksChanged([{ task_id: 'bbjpcm257', task_type: 'local_bash', description: 'rollout' }]);
+  assert.equal(input.onResult({ queued_turn_count: 0 }), false, '背景任務還在跑，CLI 行程未結束');
+  assert.equal(input.push('steer'), true, '此時插話必須被接受');
+  // steer 尚未消化：背景任務結束也不能關
+  input.onBackgroundTasksChanged([]);
+  assert.equal(input.closed, false);
+  assert.equal(input.onResult({ queued_turn_count: 0 }), true);
+});
+
+test('輸入佇列：只剩 ambient 背景任務時照常關閉', () => {
+  const input = createInputQueue();
+  input.push('a');
+  input.onBackgroundTasksChanged([{ task_id: 'w', task_type: 'watcher', description: '', ambient: true }]);
+  assert.equal(input.onResult({ queued_turn_count: 0 }), true);
+});
+
+test('背景任務清空後仍可在通知觸發的回合插話，直到後續 result 才關閉', async () => {
+  const input = createInputQueue();
+  const it = input[Symbol.asyncIterator]();
+  input.push('first');
+  const first = (await it.next()).value;
+  input.onBackgroundTasksChanged([{ task_id: 'bash', task_type: 'local_bash' }]);
+  assert.equal(input.onResult({ user_message_uuids: [first.uuid] }), false);
+
+  // level 事件可能早於 task-notification，此時沒有使用者插話 pending。
+  input.onBackgroundTasksChanged([]);
+  assert.equal(input.closed, false);
+  assert.equal(input.push('steer during notification turn'), true);
+  const steer = (await it.next()).value;
+  assert.equal(input.onResult({ user_message_uuids: [] }), false);
+  assert.equal(input.onResult({ user_message_uuids: [steer.uuid] }), true);
+  assert.equal((await it.next()).done, true);
+});
+
+test('背景任務通知回合沒有插話時，後續 result 仍正常關閉', () => {
+  const input = createInputQueue();
+  input.push('first');
+  input.onBackgroundTasksChanged([{ task_id: 'bash', task_type: 'local_bash' }]);
+  assert.equal(input.onResult({ queued_turn_count: 0 }), false);
+  input.onBackgroundTasksChanged([]);
+  assert.equal(input.closed, false);
+  assert.equal(input.onResult({ queued_turn_count: 0 }), true);
+});
