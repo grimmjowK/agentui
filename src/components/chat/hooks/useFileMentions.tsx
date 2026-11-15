@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, KeyboardEvent, RefObject, SetStateAction } from 'react';
 import { api } from '../../../utils/api';
+import { createSessionMentionLabel, extractKnownSessionMentionLabels } from '../utils/sessionMentionLabels';
 import { escapeRegExp } from '../utils/chatFormatting';
 import { filterMentionCandidates } from '../utils/mentionCandidates';
 import type { Project } from '../../../types/app';
@@ -107,7 +108,7 @@ export function useFileMentions({
     };
   }, [selectedProject?.projectId]);
 
-  // 当前项目下所有 provider 的会话，选中后插入 `@session:<id>`，由服务端展开为 transcript 引用。
+  // 會話候選保留 ID；選取後顯示標題，送出時還原成服務端的引用格式。
   // 侧边栏只载入了前 20 笔，所以每次打开下拉都向后端拉一次（未拉到前先用侧边栏已有的）。
   const [fetchedSessions, setFetchedSessions] = useState<Project['sessionsByProvider'] | null>(null);
   const projectId = selectedProject?.projectId;
@@ -187,10 +188,12 @@ export function useFileMentions({
   }, [input, cursorPosition, fileList, sessionList]);
 
   const activeFileMentions = useMemo(() => {
-    if (!input || fileMentions.length === 0) {
+    if (!input) {
       return [];
     }
-    return fileMentions.filter((path) => input.includes(path));
+    const matchedFiles = fileMentions.filter((path) => input.includes(path));
+    const matchedSessionLabels = extractKnownSessionMentionLabels(input);
+    return [...matchedFiles, ...matchedSessionLabels];
   }, [fileMentions, input]);
 
   const sortedFileMentions = useMemo(() => {
@@ -244,8 +247,11 @@ export function useFileMentions({
       const spaceIndex = textAfterAtQuery.indexOf(' ');
       const textAfterQuery = spaceIndex !== -1 ? textAfterAtQuery.slice(spaceIndex) : '';
 
-      const newInput = `${textBeforeAt}${file.path} ${textAfterQuery}`;
-      const newCursorPosition = textBeforeAt.length + file.path.length + 1;
+      const mention = file.path.startsWith('@session:')
+        ? createSessionMentionLabel(file.name, file.path)
+        : file.path;
+      const newInput = `${textBeforeAt}${mention} ${textAfterQuery}`;
+      const newCursorPosition = textBeforeAt.length + mention.length + 1;
 
       if (textareaRef.current && !textareaRef.current.matches(':focus')) {
         textareaRef.current.focus();
@@ -254,7 +260,7 @@ export function useFileMentions({
       setInput(newInput);
       setCursorPosition(newCursorPosition);
       setFileMentions((previousMentions) =>
-        previousMentions.includes(file.path) ? previousMentions : [...previousMentions, file.path],
+        previousMentions.includes(mention) ? previousMentions : [...previousMentions, mention],
       );
 
       setShowFileDropdown(false);

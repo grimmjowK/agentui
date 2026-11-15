@@ -32,6 +32,7 @@ import type {
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import { getCommandUserText, splitCommandContext, wrapCommandContext } from '../utils/commandContext';
 
+import { resolveSessionMentionLabels } from '../utils/sessionMentionLabels';
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
 import type { TurnOutcome } from './useChatRealtimeHandlers';
@@ -356,7 +357,7 @@ export function useChatComposerState({
       }
 
       try {
-        const effectiveInput = rawInput ?? input;
+        const effectiveInput = resolveSessionMentionLabels(rawInput ?? input);
         // 兩種命令入口都從本次輸入取參數，避免手動輸入的文字被藏進模板；
         // 原始換行留給顯示與 prompt，只有 API 的 args 按空白拆分。
         const userText = getCommandUserText(command.name, effectiveInput);
@@ -641,7 +642,7 @@ export function useChatComposerState({
         }
       }
 
-      const messageContent = currentInput;
+      const messageContent = resolveSessionMentionLabels(currentInput);
       const effort = resolveEffort(provider, thinkingMode);
       const effortOption = effort === 'default' ? {} : { effort };
 
@@ -684,11 +685,14 @@ export function useChatComposerState({
         currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
       const clientId = crypto.randomUUID();
 
-      const commandContext = splitCommandContext(currentInput);
+      const commandContext = splitCommandContext(messageContent);
+      const displayOverride = displayTextOverrideRef.current
+        ? resolveSessionMentionLabels(displayTextOverrideRef.current)
+        : null;
       const userMessage: ChatMessage = {
         id: `user:${clientId}`,
         type: 'user',
-        content: displayTextOverrideRef.current ?? commandContext?.text ?? currentInput,
+        content: displayOverride ?? commandContext?.text ?? messageContent,
         injectedContext: commandContext?.injectedContext,
         images: uploadedImages as any,
         timestamp: new Date(),
@@ -1097,9 +1101,10 @@ export function useChatComposerState({
   const steerQueuedMessage = useCallback(
     (item: QueuedMessage) => {
       if (!canSteer || !steerSessionId || pendingSteerRef.current || item.steering || item.images.length > 0) return;
-      pendingSteerRef.current = { itemId: item.id, queueKey, text: item.text, sessionId: steerSessionId, provider };
+      const resolvedText = resolveSessionMentionLabels(item.text);
+      pendingSteerRef.current = { itemId: item.id, queueKey, text: resolvedText, sessionId: steerSessionId, provider };
       queuedMessages.setSteering(queueKey, item.id, true);
-      const sent = sendMessage({ type: 'chat-steer', provider, sessionId: steerSessionId, text: item.text, clientId: item.id });
+      const sent = sendMessage({ type: 'chat-steer', provider, sessionId: steerSessionId, text: resolvedText, clientId: item.id });
       if (!sent) {
         pendingSteerRef.current = null;
         queuedMessages.setSteering(queueKey, item.id, false);
