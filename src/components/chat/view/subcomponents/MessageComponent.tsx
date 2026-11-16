@@ -14,6 +14,7 @@ import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import type { Project } from '../../../../types/app';
 import { ToolRenderer, shouldHideToolResult } from '../../tools';
 import { Reasoning, ReasoningTrigger, ReasoningContent } from '../../../../shared/view/ui';
+import { formatSessionMentionsForDisplay } from '../../utils/sessionMentionLabels';
 
 import { Markdown } from './Markdown';
 import MessageCopyControl from './MessageCopyControl';
@@ -166,7 +167,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
               </details>
             )}
             <div className="whitespace-pre-wrap break-words text-sm">
-              {message.content}
+              {formatSessionMentionsForDisplay(String(message.content ?? ''))}
             </div>
             {message.images && message.images.length > 0 && (
               <div className="mt-2 grid grid-cols-2 gap-2">

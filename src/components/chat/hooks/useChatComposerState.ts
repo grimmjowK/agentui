@@ -31,8 +31,8 @@ import type {
 } from '../types/types';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import { getCommandUserText, splitCommandContext, wrapCommandContext } from '../utils/commandContext';
+import { findUnresolvedSessionMentionLabels, resolveSessionMentionLabels } from '../utils/sessionMentionLabels';
 
-import { resolveSessionMentionLabels } from '../utils/sessionMentionLabels';
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
 import type { TurnOutcome } from './useChatRealtimeHandlers';
@@ -586,6 +586,20 @@ export function useChatComposerState({
         }
       };
 
+      // 引用對應已失效（localStorage 被清除或淘汰）時擋下，保留輸入讓使用者重新選擇會話；
+      // 在入佇列前檢查，佇列項目與立即引導就不必再查。
+      if (!queued) {
+        const unresolved = findUnresolvedSessionMentionLabels(currentInput);
+        if (unresolved.length > 0) {
+          addMessage({
+            type: 'error',
+            content: t('input.sessionMentionUnresolved', { labels: unresolved.join(', ') }),
+            timestamp: new Date(),
+          });
+          return;
+        }
+      }
+
       // 生成中送出：先進佇列，這一輪結束後再送（或由使用者按立即引導）
       const busy = isLoading || startingTurnRef.current;
       if (queued && busy) {
@@ -835,6 +849,7 @@ export function useChatComposerState({
       pendingCommand,
       queueKey,
       setStartingTurn,
+      t,
     ],
   );
 
