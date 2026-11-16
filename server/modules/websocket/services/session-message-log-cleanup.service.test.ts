@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,7 +12,7 @@ import {
   sessionsDb,
 } from '@/modules/database/index.js';
 import { LoggingWriter } from '@/modules/websocket/services/logging-writer.service.js';
-import { runSessionMessageLogCleanup } from '@/modules/websocket/services/session-message-log-cleanup.service.js';
+import { pruneExpiredSessions, runSessionMessageLogCleanup } from '@/modules/websocket/services/session-message-log-cleanup.service.js';
 import type { NormalizedMessage } from '@/shared/types.js';
 
 function message(sessionId: string, bytes: number): NormalizedMessage {
@@ -99,5 +99,27 @@ test('size cleanup deletes oldest unprotected sessions until below 90 percent', 
     });
     assert.deepEqual(result.deletedSessionIds, ['a', 'b', 'c']);
     assert.ok(result.remainingBytes <= 315);
+  });
+});
+
+test('prune removes sessions whose transcript and log are both gone', async () => {
+  await withDatabase(async () => {
+    const directory = path.dirname(process.env.DATABASE_PATH!);
+    const alivePath = path.join(directory, 'alive.jsonl');
+    await writeFile(alivePath, '{}\n');
+    const old = '2026-01-01T00:00:00.000Z';
+    sessionsDb.createSession('gone', 'claude', '/w', undefined, old, old, path.join(directory, 'missing.jsonl'));
+    sessionsDb.createSession('alive', 'claude', '/w', undefined, old, old, alivePath);
+    sessionsDb.createSession('logged', 'claude', '/w', undefined, old, old, null);
+    sessionMessagesDb.append('logged', message('logged', 10));
+    sessionsDb.createSession('starred', 'claude', '/w', undefined, old, old, null);
+    sessionsDb.updateSessionIsStarred('starred', true);
+    sessionsDb.createSession('fresh', 'claude', '/w', undefined, old, '2026-06-01T00:00:00.000Z', null);
+
+    const deleted = await pruneExpiredSessions({ now: Date.UTC(2026, 5, 1, 12) });
+    assert.deepEqual(deleted, ['gone']);
+    for (const id of ['alive', 'logged', 'starred', 'fresh']) {
+      assert.ok(sessionsDb.getSessionById(id), id);
+    }
   });
 });

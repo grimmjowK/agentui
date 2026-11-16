@@ -271,6 +271,19 @@ export const sessionsDb = {
     ).run(isStarred ? 1 : 0, sessionId);
   },
 
+  /** 未收藏且没有任何聊天日志的会话；是否还有转录文件交给调用方判断 */
+  listUnloggedUnstarredSessions(): Pick<SessionRow, 'session_id' | 'created_at' | 'updated_at'>[] {
+    const db = getConnection();
+    return db
+      .prepare(
+        `SELECT session_id, created_at, updated_at
+         FROM sessions s
+         WHERE isStarred = 0
+           AND NOT EXISTS (SELECT 1 FROM session_messages sm WHERE sm.session_id = s.session_id)`
+      )
+      .all() as Pick<SessionRow, 'session_id' | 'created_at' | 'updated_at'>[];
+  },
+
   deleteSessionById(sessionId: string): boolean {
     const db = getConnection();
     return db.transaction(() => {

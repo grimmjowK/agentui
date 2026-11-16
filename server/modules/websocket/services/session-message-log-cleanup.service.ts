@@ -1,4 +1,5 @@
-import { sessionMessagesDb } from '@/modules/database/index.js';
+import { sessionMessagesDb, sessionsDb } from '@/modules/database/index.js';
+import { sessionPinService } from '@/modules/providers/index.js';
 import { isSessionLogActive } from '@/modules/websocket/services/logging-writer.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -59,18 +60,47 @@ export function runSessionMessageLogCleanup(options: {
   return { deletedSessionIds, remainingBytes };
 }
 
+/** 刚建的会话可能还没写入 jsonl_path 或日志，给一天缓冲 */
+const PRUNE_GRACE_MS = DAY_MS;
+
+/**
+ * 把已经读不到任何历史的会话从列表里删掉：provider 转录被 CLI 过期清理
+ * （Claude cleanupPeriodDays / Codex 删除）、没有收藏备份、聊天日志也已清空。
+ * 收藏与执行中的会话不动。
+ */
+export async function pruneExpiredSessions(options: { now?: number } = {}): Promise<string[]> {
+  const cutoff = (options.now ?? Date.now()) - PRUNE_GRACE_MS;
+  const deleted: string[] = [];
+  for (const row of sessionsDb.listUnloggedUnstarredSessions()) {
+    if (isSessionLogActive(row.session_id)) continue;
+    const touchedAt = Date.parse(row.updated_at ?? row.created_at);
+    if (!(touchedAt < cutoff)) continue;
+    if (await sessionPinService.resolveTranscriptPath(row.session_id)) continue;
+    if (sessionsDb.deleteSessionById(row.session_id)) deleted.push(row.session_id);
+  }
+  if (deleted.length > 0) {
+    console.log(`[session-cleanup] pruned ${deleted.length} sessions without history`);
+  }
+  return deleted;
+}
+
+function runAllCleanup(): void {
+  try {
+    runSessionMessageLogCleanup();
+  } catch (error) {
+    console.warn('[session-message-log] cleanup failed', error);
+  }
+  pruneExpiredSessions().catch((error) => {
+    console.warn('[session-cleanup] prune failed', error);
+  });
+}
+
 let cleanupTimer: NodeJS.Timeout | null = null;
 
 export function startSessionMessageLogCleanup(): void {
   if (cleanupTimer) return;
-  runSessionMessageLogCleanup();
-  cleanupTimer = setInterval(() => {
-    try {
-      runSessionMessageLogCleanup();
-    } catch (error) {
-      console.warn('[session-message-log] cleanup failed', error);
-    }
-  }, DAY_MS);
+  runAllCleanup();
+  cleanupTimer = setInterval(runAllCleanup, DAY_MS);
   cleanupTimer.unref();
 }
 
