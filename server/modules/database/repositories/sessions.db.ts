@@ -271,17 +271,21 @@ export const sessionsDb = {
     ).run(isStarred ? 1 : 0, sessionId);
   },
 
-  /** 未收藏且没有任何聊天日志的会话；是否还有转录文件交给调用方判断 */
-  listUnloggedUnstarredSessions(): Pick<SessionRow, 'session_id' | 'created_at' | 'updated_at'>[] {
+  /**
+   * 未收藏、没有任何聊天日志、且记录过转录路径的会话；转录是否还在交给调用方判断。
+   * jsonl_path 为空的会话不列出：无法确认转录已消失（Antigravity 可按 sessionId 在 brain 目录找回）。
+   */
+  listUnloggedUnstarredSessions(): Pick<SessionRow, 'session_id' | 'jsonl_path' | 'created_at' | 'updated_at'>[] {
     const db = getConnection();
     return db
       .prepare(
-        `SELECT session_id, created_at, updated_at
+        `SELECT session_id, jsonl_path, created_at, updated_at
          FROM sessions s
          WHERE isStarred = 0
+           AND jsonl_path IS NOT NULL AND jsonl_path != ''
            AND NOT EXISTS (SELECT 1 FROM session_messages sm WHERE sm.session_id = s.session_id)`
       )
-      .all() as Pick<SessionRow, 'session_id' | 'created_at' | 'updated_at'>[];
+      .all() as Pick<SessionRow, 'session_id' | 'jsonl_path' | 'created_at' | 'updated_at'>[];
   },
 
   deleteSessionById(sessionId: string): boolean {

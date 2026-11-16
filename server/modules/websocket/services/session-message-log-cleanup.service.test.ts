@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -110,15 +110,21 @@ test('prune removes sessions whose transcript and log are both gone', async () =
     const old = '2026-01-01T00:00:00.000Z';
     sessionsDb.createSession('gone', 'claude', '/w', undefined, old, old, path.join(directory, 'missing.jsonl'));
     sessionsDb.createSession('alive', 'claude', '/w', undefined, old, old, alivePath);
-    sessionsDb.createSession('logged', 'claude', '/w', undefined, old, old, null);
+    sessionsDb.createSession('logged', 'claude', '/w', undefined, old, old, path.join(directory, 'missing-logged.jsonl'));
     sessionMessagesDb.append('logged', message('logged', 10));
-    sessionsDb.createSession('starred', 'claude', '/w', undefined, old, old, null);
+    sessionsDb.createSession('starred', 'claude', '/w', undefined, old, old, path.join(directory, 'missing-starred.jsonl'));
     sessionsDb.updateSessionIsStarred('starred', true);
-    sessionsDb.createSession('fresh', 'claude', '/w', undefined, old, '2026-06-01T00:00:00.000Z', null);
+    sessionsDb.createSession('fresh', 'claude', '/w', undefined, old, '2026-06-01T00:00:00.000Z', path.join(directory, 'fresh.jsonl'));
+    // 没记录转录路径：无法确认已消失（Antigravity 可按 ID 找回）
+    sessionsDb.createSession('no-path', 'antigravity', '/w', undefined, old, old, null);
+    // 整个目录读不到（volume 未挂载等）：可能只是暂时的，不删
+    sessionsDb.createSession('dir-missing', 'claude', '/w', undefined, old, old, path.join(directory, 'unmounted', 'x.jsonl'));
+    await mkdir(path.join(directory, 'project'));
+    sessionsDb.createSession('gone-in-dir', 'codex', '/w', undefined, old, old, path.join(directory, 'project', 'y.jsonl'));
 
     const deleted = await pruneExpiredSessions({ now: Date.UTC(2026, 5, 1, 12) });
-    assert.deepEqual(deleted, ['gone']);
-    for (const id of ['alive', 'logged', 'starred', 'fresh']) {
+    assert.deepEqual(deleted.sort(), ['gone', 'gone-in-dir']);
+    for (const id of ['alive', 'logged', 'starred', 'fresh', 'no-path', 'dir-missing']) {
       assert.ok(sessionsDb.getSessionById(id), id);
     }
   });
