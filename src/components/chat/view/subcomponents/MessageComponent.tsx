@@ -91,7 +91,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
   const [isExpanded, setIsExpanded] = useState(false);
   const permissionSuggestion = getClaudePermissionSuggestion(message, provider);
   const [permissionGrantState, setPermissionGrantState] = useState<PermissionGrantState>('idle');
-  const userCopyContent = String(message.content || '');
+  const userCopyContent = formatSessionMentionsForDisplay(String(message.content || ''));
   const formattedMessageContent = useMemo(
     () => formatUsageLimitText(String(message.content || '')),
     [message.content]
@@ -167,7 +167,7 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
               </details>
             )}
             <div className="whitespace-pre-wrap break-words text-sm">
-              {formatSessionMentionsForDisplay(String(message.content ?? ''))}
+              {userCopyContent}
             </div>
             {message.images && message.images.length > 0 && (
               <div className="mt-2 grid grid-cols-2 gap-2">

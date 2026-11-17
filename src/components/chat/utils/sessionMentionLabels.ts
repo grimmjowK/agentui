@@ -58,11 +58,25 @@ export function resolveSessionMentionLabels(text: string): string {
   return text.replace(SESSION_LABEL_RE, (label) => labels.get(label) ?? label);
 }
 
+/** 发送前一次性解析，并返回其中无法还原成 session ID 的标签。 */
+export function resolveSessionMentionLabelsForSend(text: string): {
+  resolvedText: string;
+  unresolvedLabels: string[];
+} {
+  if (!text?.includes(LABEL_PREFIX)) {
+    return { resolvedText: text, unresolvedLabels: [] };
+  }
+  loadLabels();
+  const matchedLabels = text.match(SESSION_LABEL_RE) ?? [];
+  return {
+    resolvedText: text.replace(SESSION_LABEL_RE, (label) => labels.get(label) ?? label),
+    unresolvedLabels: [...new Set(matchedLabels.filter((label) => !labels.has(label)))],
+  };
+}
+
 /** 找不到對應 ID 的標籤（對應被清除或淘汰）；送出前用來擋下，避免 agent 收到無法展開的引用。 */
 export function findUnresolvedSessionMentionLabels(text: string): string[] {
-  if (!text?.includes(LABEL_PREFIX)) return [];
-  loadLabels();
-  return (text.match(SESSION_LABEL_RE) ?? []).filter((label) => !labels.has(label));
+  return resolveSessionMentionLabelsForSend(text).unresolvedLabels;
 }
 
 /** 訊息氣泡顯示用：把 `@session:<id>` 換回本機記得的標題標籤，找不到則保留 ID。 */

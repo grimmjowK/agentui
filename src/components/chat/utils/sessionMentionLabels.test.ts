@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+
 import {
   createSessionMentionLabel,
   extractKnownSessionMentionLabels,
   findUnresolvedSessionMentionLabels,
   formatSessionMentionsForDisplay,
   resolveSessionMentionLabels,
+  resolveSessionMentionLabelsForSend,
 } from './sessionMentionLabels';
 
 test('標題包含空白及特殊字元、同名引用仍對應各自的 ID', () => {
@@ -47,6 +49,32 @@ test('標題包含空白及特殊字元、同名引用仍對應各自的 ID', ()
     assert.equal(resolveSessionMentionLabels(third), '@session:third');
     // 氣泡顯示使用最近一次的標題
     assert.equal(formatSessionMentionsForDisplay('@session:first'), renamed);
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});
+
+test('發送前解析會回報已因上限淘汰的標籤', () => {
+  const saved = new Map<string, string>();
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => saved.get(key) ?? null,
+      setItem: (key: string, value: string) => saved.set(key, value),
+    },
+  });
+  try {
+    const evicted = createSessionMentionLabel('Evicted session', '@session:evicted');
+    for (let index = 0; index < 205; index++) {
+      createSessionMentionLabel(`Recent session ${index}`, `@session:recent-${index}`);
+    }
+
+    assert.deepEqual(resolveSessionMentionLabelsForSend(`看 ${evicted}`), {
+      resolvedText: `看 ${evicted}`,
+      unresolvedLabels: [evicted],
+    });
   } finally {
     if (original) Object.defineProperty(globalThis, 'localStorage', original);
     else Reflect.deleteProperty(globalThis, 'localStorage');

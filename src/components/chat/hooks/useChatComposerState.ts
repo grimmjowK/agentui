@@ -31,7 +31,10 @@ import type {
 } from '../types/types';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 import { getCommandUserText, splitCommandContext, wrapCommandContext } from '../utils/commandContext';
-import { findUnresolvedSessionMentionLabels, resolveSessionMentionLabels } from '../utils/sessionMentionLabels';
+import {
+  resolveSessionMentionLabels,
+  resolveSessionMentionLabelsForSend,
+} from '../utils/sessionMentionLabels';
 
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
@@ -586,18 +589,20 @@ export function useChatComposerState({
         }
       };
 
-      // 引用對應已失效（localStorage 被清除或淘汰）時擋下，保留輸入讓使用者重新選擇會話；
-      // 在入佇列前檢查，佇列項目與立即引導就不必再查。
-      if (!queued) {
-        const unresolved = findUnresolvedSessionMentionLabels(currentInput);
-        if (unresolved.length > 0) {
-          addMessage({
-            type: 'error',
-            content: t('input.sessionMentionUnresolved', { labels: unresolved.join(', ') }),
-            timestamp: new Date(),
-          });
-          return;
-        }
+      const rejectUnresolvedMentions = (labelsToShow: string[]) => {
+        if (queued) requeue();
+        addMessage({
+          type: 'error',
+          content: t('input.sessionMentionUnresolved', { labels: labelsToShow.join(', ') }),
+          timestamp: new Date(),
+        });
+      };
+
+      // 入隊列前先擋一次；真正送出前還會再檢查，避免等待期間映射被 200 筆上限淘汰。
+      const initialMentionResolution = resolveSessionMentionLabelsForSend(currentInput);
+      if (initialMentionResolution.unresolvedLabels.length > 0) {
+        rejectUnresolvedMentions(initialMentionResolution.unresolvedLabels);
+        return;
       }
 
       // 生成中送出：先進佇列，這一輪結束後再送（或由使用者按立即引導）
@@ -656,7 +661,13 @@ export function useChatComposerState({
         }
       }
 
-      const messageContent = resolveSessionMentionLabels(currentInput);
+      const finalMentionResolution = resolveSessionMentionLabelsForSend(currentInput);
+      if (finalMentionResolution.unresolvedLabels.length > 0) {
+        setStartingTurn(false);
+        rejectUnresolvedMentions(finalMentionResolution.unresolvedLabels);
+        return;
+      }
+      const messageContent = finalMentionResolution.resolvedText;
       const effort = resolveEffort(provider, thinkingMode);
       const effortOption = effort === 'default' ? {} : { effort };
 
@@ -1116,7 +1127,18 @@ export function useChatComposerState({
   const steerQueuedMessage = useCallback(
     (item: QueuedMessage) => {
       if (!canSteer || !steerSessionId || pendingSteerRef.current || item.steering || item.images.length > 0) return;
-      const resolvedText = resolveSessionMentionLabels(item.text);
+      const resolution = resolveSessionMentionLabelsForSend(item.text);
+      if (resolution.unresolvedLabels.length > 0) {
+        addMessage({
+          type: 'error',
+          content: t('input.sessionMentionUnresolved', {
+            labels: resolution.unresolvedLabels.join(', '),
+          }),
+          timestamp: new Date(),
+        });
+        return;
+      }
+      const resolvedText = resolution.resolvedText;
       pendingSteerRef.current = { itemId: item.id, queueKey, text: resolvedText, sessionId: steerSessionId, provider };
       queuedMessages.setSteering(queueKey, item.id, true);
       const sent = sendMessage({ type: 'chat-steer', provider, sessionId: steerSessionId, text: resolvedText, clientId: item.id });
