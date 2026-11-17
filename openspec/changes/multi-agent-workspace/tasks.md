@@ -1,12 +1,12 @@
 ## 1. 共用型別與校驗
 
 - [ ] 1.1 新增 `shared/multiAgent.ts`：`WorkflowNode`/`WorkflowDef`/`ChatMember`/`ChatRules`/`ChatroomDef`/`MultiAgent` 型別與預設群規常數
-- [ ] 1.2 實作 `validateDefinition(kind, def)`：節點 1–12、成員 1–8、id 唯一、依賴存在且無環、provider/模型在 `shared/modelConstants.js` 清單中；回傳錯誤列表
+- [ ] 1.2 實作 `validateDefinition(kind, def)`：節點 1–12、成員 1–8、id 唯一、依賴存在且無環、provider 合法、成員名稱唯一且非「所有人」、群規整數範圍與 unmentionedBehavior 合法；結構驗證與注入模型清單的驗證分開；回傳錯誤列表
 - [ ] 1.3 實作 `layerWorkflow(def)`（Kahn 分層），附單元測試覆蓋：線性、分叉、匯合、環、缺失依賴
 
 ## 2. 後端持久化
 
-- [ ] 2.1 `server/modules/database/schema.ts` 新增 `multi_agents`、`multi_agent_runs`、`multi_agent_messages` 三張表（`CREATE TABLE IF NOT EXISTS`）並在 init 中建立
+- [ ] 2.1 `server/modules/database/schema.ts` 新增 `multi_agents`、`multi_agent_runs`、`multi_agent_messages` 與 `multi_agent_turns` 四張表（`CREATE TABLE IF NOT EXISTS`）並在 init 中建立
 - [ ] 2.2 新增 `repositories/multi-agents.db.ts`：CRUD（依 user_id 隔離）、run 讀寫、訊息追加/分頁讀取、刪除時級聯清除
 - [ ] 2.3 repository 整合測試（建立、更新定義、列表排序、刪除級聯）
 
@@ -21,7 +21,7 @@
 - [ ] 4.1 實作 `WorkflowRunner`：建立 run、就緒節點並行（上限 3）、組裝節點提示（instruction + 上游輸出截斷）、經 `providerRegistry` runtime 執行
 - [ ] 4.2 自訂收集 writer：累積 assistant 文字、計算階段式/漸近式進度、`complete`/錯誤時判定成功或失敗；失敗節點下游標記 skipped
 - [ ] 4.3 狀態變化寫入 `node_states_json`，並經聊天 WS 推送 `multi-agent-run` 事件給該使用者所有連線
-- [ ] 4.4 `POST /:id/runs`、`POST /:id/runs/:runId/stop`、`GET /:id/runs/latest`；停止時對執行中節點呼叫 `runtime.abort`
+- [ ] 4.4 `POST /:id/runs`、`POST /:id/runs/:runId/stop`、`GET /:id/runs/latest`、`GET /:id/runs`、`GET /:id/runs/:runId`；停止時對執行中節點呼叫 `runtime.abort`
 - [ ] 4.5 服務啟動時把 `running` 的 run/節點標記為失敗（已中斷）
 - [ ] 4.6 runner 單元測試（mock runtime）：依序執行、並行上限、失敗傳播、停止
 
@@ -30,7 +30,7 @@
 - [ ] 5.1 實作 `@` 解析（成員名稱、所有人、未 @ 預設行為），附單元測試
 - [ ] 5.2 實作 `ChatroomDispatcher`：依序讓目標成員發言，組裝 persona + 群規 + 硬限制說明 + 最近紀錄；每成員保存並 resume 自己的 provider sessionId
 - [ ] 5.3 後端強制限制：`maxReplyChars` 截斷、`allowAiMentions` 佇列擴展、`maxAiRepliesPerTurn` 達上限插入系統訊息；成員以禁用工具模式執行
-- [ ] 5.4 `POST /:id/messages`、`POST /:id/messages/stop`、`GET /:id/messages`；串流經 WS 推送 `multi-agent-message`
+- [ ] 5.4 `POST /:id/messages`、`POST /:id/messages/stop { turnId }`、`GET /:id/messages`；串流經 WS 推送 `multi-agent-message`
 - [ ] 5.5 dispatcher 單元測試（mock runtime）：@ 單人、@所有人、截斷、AI 互 @ 上限、停止
 
 ## 6. 側邊欄
@@ -74,3 +74,15 @@
 - [ ] 11.2 更新 `src/components/COMPONENTS.md`、`server/modules/MODULES.md`
 - [ ] 11.3 `npm run typecheck`、`npm run lint`、`npm run build`、相關測試全部通過
 - [ ] 11.4 瀏覽器實測深淺色主題與行動版：建立工作流 → 編輯節點 → 執行看到進度與 ✓/✗；建立聊天室 → @角色 / @所有人 → 群規限制生效
+
+## 12. 執行隔離、歷史一致性與 Provider 契約測試
+
+- [ ] 12.1 擴充 runtime supportsNoTools/toolPolicy 契約；逐一評估 Claude、Codex、Cursor、Antigravity 的原生禁用機制，不支援即拒絕；工作流與聊天室共用政策，至少一個 adapter 通過真實整合測試
+- [ ] 12.2 Provider 契約測試覆蓋內建讀／寫／命令、MCP、子 agent 均不得執行，以及啟動階段可取消、abort emitsTerminal 與僅一次終止事件；不得只靠 mock 證明工具隔離
+- [ ] 12.3 串接現有 providerModelsService/API；前後端共用清單語意與 fallback 來源提示；測試動態新增模型可保存、查詢失敗不清除輸入、不在 fallback 時可重試、啟動前再驗證
+- [ ] 12.4 保存 definition_version、builder_session_json、member_sessions_json、run 完整定義快照及訊息作者快照；測試刪除／重用節點 id、修改模型後舊 run 仍正確；提供歷史 run 列表／詳情 UI
+- [ ] 12.5 實作回合表、每聊天室活動回合唯一約束、clientRequestId 去重與 seq 唯一性；測試兩分頁並行送出、重送冪等、忙碌時編輯拒絕、同工作流重複開始拒絕
+- [ ] 12.6 WS 加入聊天室／回合／訊息識別與 eventSeq，保存部分內容與回合狀態；測試跨聊天室隔離、同成員多次發言、重連補取及去重
+- [ ] 12.7 成員 session 保存設定指紋與 last_delivered_seq；設定變更／取消／截斷／失敗重建與有界重播；測試 Cursor 同 provider 改模型也取得新 session
+- [ ] 12.8 串流字數限制含截斷標記、120 秒超時、可用時 4,096 token 預算、取消後確認終止再調度；測試無文字超時、非法限制、截斷不觸發 mentions、失敗嘗試計入上限
+- [ ] 12.9 停止以 turnId 冪等操作，忽略遲到事件；測試舊 stop 不影響新 turn、取消未確認持續鎖定、重啟 interrupted、刪除前終止及級聯回合資料

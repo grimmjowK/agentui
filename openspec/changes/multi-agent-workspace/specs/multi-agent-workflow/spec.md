@@ -50,3 +50,25 @@
 #### Scenario: 服務重啟
 - **WHEN** 工作流執行中服務重啟
 - **THEN** 重啟後該執行的進行中節點顯示為失敗（已中斷），使用者可重新開始
+
+### Requirement: 不可變的執行快照
+每個 run SHALL 以交易保存完整定義與版本（包含節點 id、標題、指令、模型、provider、依賴）；調度與歷史詳情 SHALL 依該快照顯示。系統 SHALL 提供執行列表與指定 run 詳情。同一工作流 SHALL 最多一個 running/stopping run。
+
+#### Scenario: 修改或刪除舊節點
+- **WHEN** 工作流執行完成後使用者修改模型、刪除節點或重用節點 id
+- **THEN** 舊 run 仍顯示當時的節點、指令、模型、依賴與輸出，不套用目前定義
+
+#### Scenario: 重複開始
+- **WHEN** 另一分頁在工作流已有 running/stopping run 時要求開始
+- **THEN** 後端回傳 409，不建立第二個 run 或呼叫模型
+
+### Requirement: 第一版工作流禁用工具
+工作流節點 SHALL 使用 `toolPolicy: none`，不得繼承 provider 的預設工具權限；此版只處理輸入文字。後端 SHALL 在啟動前驗證 `supportsNoTools`；該能力必須由 adapter 原生工具禁用機制與整合測試證明，覆蓋內建工具、MCP 與子 agent 工具。
+
+#### Scenario: Provider 無法完整禁用工具
+- **WHEN** 任一節點的 provider 不支援禁用全部工具
+- **THEN** 開始請求回傳 tools_disabled_unsupported，沒有節點開始執行，UI 顯示不支援原因
+
+#### Scenario: 停止後收到遲到完成事件
+- **WHEN** run 停止後仍收到節點 complete 事件
+- **THEN** 已停止狀態不被改寫，不啟動下游，依 runtime emitsTerminal 契約只產生一次終止結果
