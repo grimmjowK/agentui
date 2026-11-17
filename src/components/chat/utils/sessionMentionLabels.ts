@@ -74,11 +74,6 @@ export function resolveSessionMentionLabelsForSend(text: string): {
   };
 }
 
-/** 找不到對應 ID 的標籤（對應被清除或淘汰）；送出前用來擋下，避免 agent 收到無法展開的引用。 */
-export function findUnresolvedSessionMentionLabels(text: string): string[] {
-  return resolveSessionMentionLabelsForSend(text).unresolvedLabels;
-}
-
 /** 訊息氣泡顯示用：把 `@session:<id>` 換回本機記得的標題標籤，找不到則保留 ID。 */
 export function formatSessionMentionsForDisplay(text: string): string {
   if (!text?.includes('@session:')) return text;

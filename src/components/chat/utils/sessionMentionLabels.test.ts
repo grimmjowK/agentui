@@ -4,7 +4,6 @@ import { test } from 'node:test';
 import {
   createSessionMentionLabel,
   extractKnownSessionMentionLabels,
-  findUnresolvedSessionMentionLabels,
   formatSessionMentionsForDisplay,
   resolveSessionMentionLabels,
   resolveSessionMentionLabelsForSend,
@@ -37,7 +36,7 @@ test('標題包含空白及特殊字元、同名引用仍對應各自的 ID', ()
       '@session:legacy @session["未知"]');
     assert.ok(saved.get('session_mention_labels')?.includes('@session:first'));
 
-    assert.deepEqual(findUnresolvedSessionMentionLabels(`${first} @session["未知"]`), ['@session["未知"]']);
+    assert.deepEqual(resolveSessionMentionLabelsForSend(`${first} @session["未知"]`).unresolvedLabels, ['@session["未知"]']);
     assert.equal(formatSessionMentionsForDisplay('看 @session:first 和 @session:legacy'), `看 ${first} 和 @session:legacy`);
 
     // 改名後舊標籤仍指向原 ID，且不會被分給同名的其他會話（避免草稿/佇列中的舊標籤指錯）

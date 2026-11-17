@@ -589,19 +589,23 @@ export function useChatComposerState({
         }
       };
 
-      const rejectUnresolvedMentions = (labelsToShow: string[]) => {
-        if (queued) requeue();
+      // 引用對應已失效（被清除或淘汰）時擋下。佇列項目每次真正送出都會重新走這裡；
+      // 它無法在佇列中編輯，放回佇列會在每輪結束時反覆被擋、卡住後面的項目，所以退回輸入框讓使用者重選會話。
+      const mentionResolution = resolveSessionMentionLabelsForSend(currentInput);
+      if (mentionResolution.unresolvedLabels.length > 0) {
+        if (queued) {
+          const restored = inputValueRef.current ? `${inputValueRef.current}\n${queued.text}` : queued.text;
+          setInput(restored);
+          inputValueRef.current = restored;
+          if (queued.images.length > 0) {
+            setAttachedImages((previous) => [...previous, ...queued.images].slice(0, 5));
+          }
+        }
         addMessage({
           type: 'error',
-          content: t('input.sessionMentionUnresolved', { labels: labelsToShow.join(', ') }),
+          content: t('input.sessionMentionUnresolved', { labels: mentionResolution.unresolvedLabels.join(', ') }),
           timestamp: new Date(),
         });
-      };
-
-      // 入隊列前先擋一次；真正送出前還會再檢查，避免等待期間映射被 200 筆上限淘汰。
-      const initialMentionResolution = resolveSessionMentionLabelsForSend(currentInput);
-      if (initialMentionResolution.unresolvedLabels.length > 0) {
-        rejectUnresolvedMentions(initialMentionResolution.unresolvedLabels);
         return;
       }
 
@@ -661,13 +665,7 @@ export function useChatComposerState({
         }
       }
 
-      const finalMentionResolution = resolveSessionMentionLabelsForSend(currentInput);
-      if (finalMentionResolution.unresolvedLabels.length > 0) {
-        setStartingTurn(false);
-        rejectUnresolvedMentions(finalMentionResolution.unresolvedLabels);
-        return;
-      }
-      const messageContent = finalMentionResolution.resolvedText;
+      const messageContent = mentionResolution.resolvedText;
       const effort = resolveEffort(provider, thinkingMode);
       const effortOption = effort === 'default' ? {} : { effort };
 
