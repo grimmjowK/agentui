@@ -62,12 +62,20 @@
 - **WHEN** 另一分頁在工作流已有 running/stopping run 時要求開始
 - **THEN** 後端回傳 409，不建立第二個 run 或呼叫模型
 
-### Requirement: 第一版工作流禁用工具
-工作流節點 SHALL 使用 `toolPolicy: none`，不得繼承 provider 的預設工具權限；此版只處理輸入文字。後端 SHALL 在啟動前驗證 `supportsNoTools`；該能力必須由 adapter 原生工具禁用機制與整合測試證明，覆蓋內建工具、MCP 與子 agent 工具。
+### Requirement: 節點工具權限
+工作流節點 SHALL 允許使用工具，並以節點層級的權限模式執行；權限模式選項 SHALL 取自該 provider 支援的模式，預設為 provider 預設模式。需審批的工具請求 SHALL 進入全域審批收件匣，節點顯示「等待審批」。四家 provider 都 SHALL 可用於節點。
 
-#### Scenario: Provider 無法完整禁用工具
-- **WHEN** 任一節點的 provider 不支援禁用全部工具
-- **THEN** 開始請求回傳 tools_disabled_unsupported，沒有節點開始執行，UI 顯示不支援原因
+#### Scenario: 節點需要審批
+- **WHEN** 節點以 default 權限模式執行並請求寫檔
+- **THEN** 節點卡片顯示等待審批，使用者在審批收件匣核准後節點繼續執行
+
+#### Scenario: 切換節點權限模式
+- **WHEN** 使用者在節點詳情把 Codex 節點的權限模式改為 acceptEdits
+- **THEN** 下次執行該節點以 acceptEdits 模式啟動
+
+#### Scenario: 並行節點提示
+- **WHEN** 使用者開始一個含同層並行節點的工作流
+- **THEN** 確認彈窗提示並行節點共用工作目錄
 
 #### Scenario: 停止後收到遲到完成事件
 - **WHEN** run 停止後仍收到節點 complete 事件

@@ -12,7 +12,7 @@
 
 #### Scenario: 切換成員模型
 - **WHEN** 使用者在成員側欄將「審稿人」的模型改為另一個模型
-- **THEN** 清除該成員舊 session 與紀錄游標，下一次以新模型建立 session 並重播有上限的已保存群聊；同 provider 切換模型也適用
+- **THEN** 該成員之後的回覆使用新模型；provider 支援跨模型續接時沿用 session，否則重建 session 並重播有上限的群聊紀錄
 
 ### Requirement: @ 角色與 @ 所有人
 輸入框 SHALL 在輸入 `@` 時彈出成員候選（含「所有人」）。送出時：@ 指定成員則只有被 @ 的成員依序回覆；@所有人則所有成員依序回覆；未 @ 任何人時依群聊設定的預設行為處理（預設為所有人）。
@@ -34,7 +34,7 @@
 
 #### Scenario: 超出字數
 - **WHEN** 成員回覆超過最大字數
-- **THEN** 後端在串流階段限長（含「…」不超過上限），立即取消生成，保存一次 finish_reason=length 的截斷回覆；確認 runtime 終止後才讓下一位發言，並清除被截斷成員的 session
+- **THEN** 後端在串流階段限長（含「…」不超過上限），立即取消生成，保存一次 finish_reason=length 的截斷回覆；確認 runtime 終止後才讓下一位發言，下一輪提示該成員上次回覆被截斷，不清除 session
 
 #### Scenario: AI 互相 @ 達上限
 - **WHEN** 允許 AI 互相 @ 且本輪 AI 回覆數達到上限
@@ -44,34 +44,42 @@
 - **WHEN** 允許 AI 互相 @ 為關閉，且某成員回覆中 @ 了其他成員
 - **THEN** 被 @ 的成員不會因此發言
 
-### Requirement: 成員純對話執行
-聊天室成員 SHALL 以 `toolPolicy: none` 執行，後端 SHALL 先驗證 adapter 的 `supportsNoTools`。全部內建讀寫工具、命令、MCP 與子 agent 工具均須在執行前禁用；提示詞、plan 或唯讀模式不視為禁用工具。不支援時 SHALL 回傳 tools_disabled_unsupported，且不啟動回合。
+### Requirement: 成員工具權限
+聊天室成員 SHALL 預設以該 provider 最保守的現有權限模式執行（Claude/Cursor 為 plan，Codex 與 Antigravity 為 default），並 SHALL 允許在成員設定中調整。審批請求 SHALL 進入全域審批收件匣。四家 provider 都 SHALL 可作為成員。
 
-#### Scenario: 成員嘗試使用工具
-- **WHEN** 成員模型嘗試呼叫寫檔工具
-- **THEN** 工具呼叫被拒絕，成員只以文字回覆
+#### Scenario: 預設權限
+- **WHEN** 建立一個 Claude 成員
+- **THEN** 該成員以 plan 模式執行
 
-#### Scenario: Provider 無法禁用工具
-- **WHEN** 目標成員 provider 未通過禁用工具能力驗證
-- **THEN** 後端拒絕送出、不保存使用者訊息或啟動模型，UI 說明不支援原因
+#### Scenario: 成員請求審批
+- **WHEN** Codex 成員在 default 模式下請求執行命令
+- **THEN** 請求出現在全域審批收件匣，未核准前該成員發言計時暫停
 
-### Requirement: 回合隔離與事件識別
-每個聊天室 SHALL 最多有一個 running/stopping 回合，以資料庫約束與交易保證；忙碌時新的送出與定義／群規修改 SHALL 回傳 409，不保存訊息或排隊。送出 SHALL 帶 clientRequestId，同聊天室重試相同識別 SHALL 回傳原 turn。事件 SHALL 包含 multiAgentId、turnId、messageId、memberId、eventSeq；只發給擁有者，前端 SHALL 按識別過濾、去重並以 final 完整內容為準。
+### Requirement: 回合隔離與排隊
+每個聊天室 SHALL 同時最多一個 running/stopping 回合。回合進行中使用者送出的訊息 SHALL 被保存並標記為排隊中，不回傳錯誤；本輪結束後 SHALL 依送出順序逐則開啟新回合。使用者 SHALL 能取消尚未開始的排隊訊息。回合期間修改成員或群規 SHALL 照常保存並於下一回合生效。事件 SHALL 帶 multiAgentId、turnId、messageId、memberId，只發給擁有者；前端 SHALL 依識別歸檔串流。
+
+#### Scenario: 忙碌時送出
+- **WHEN** 成員正在回覆時使用者送出新訊息
+- **THEN** 新訊息顯示為排隊中，本輪結束後自動開始新回合處理它
 
 #### Scenario: 兩個分頁同時送出
-- **WHEN** 同一聊天室收到兩個不同 clientRequestId 的並行請求
-- **THEN** 僅一個請求建立回合與訊息，另一個回傳 409，不並行 resume 同一成員 session
+- **WHEN** 同一聊天室幾乎同時收到兩則使用者訊息
+- **THEN** 兩則都被保存，依順序分屬兩個回合，不並行續接同一成員 session
 
-#### Scenario: 同一成員多次發言與跨聊天室串流
-- **WHEN** 同名或同 id 成員出現在兩個聊天室，或一輪中同一成員回覆兩次
-- **THEN** 前端依聊天室、回合與訊息識別將串流送入正確訊息，不混合輸出
+#### Scenario: 取消排隊訊息
+- **WHEN** 使用者取消一則排隊中的訊息
+- **THEN** 該訊息被移除，不觸發任何成員回覆
+
+#### Scenario: 跨聊天室串流
+- **WHEN** 兩個聊天室同時有成員在串流
+- **THEN** 前端依 multiAgentId 與 messageId 將串流送入正確訊息，不混合輸出
 
 #### Scenario: 重連
 - **WHEN** 使用者在成員串流時重新連線
-- **THEN** GET 還原已保存訊息、活動回合及部分內容快照，補取事件缺口，重複事件不重複追加
+- **THEN** 重新取得訊息列表，執行中的訊息顯示目前已累積內容並繼續接收串流
 
 ### Requirement: 回合停止與復原
-停止 SHALL 帶 turnId 且冪等；後端先標記 stopping 並清空佇列，取消目前 runtime，確認終止後才標記 stopped 並接受新回合。停止後 SHALL 忽略遲到輸出與 AI mentions。無法確認終止 SHALL 維持 stopping。重啟 SHALL 將活動回合標記 interrupted 並清除 session 游標，不續跑。刪除 SHALL 先停止回合，再級聯刪除。
+停止 SHALL 帶 turnId，重複呼叫無副作用；後端先標記 stopping 並清空本輪待發言成員，取消目前 runtime，終止後標記 stopped，再處理排隊訊息。停止後 SHALL 忽略遲到輸出與 AI mentions。重啟 SHALL 將活動回合標記 interrupted，不續跑，排隊訊息保留。刪除 SHALL 先停止回合，再級聯刪除。
 
 #### Scenario: 舊停止請求晚到
 - **WHEN** 舊回合已終止且新回合已開始，後端再次收到舊 turnId 的停止請求
@@ -79,21 +87,33 @@
 
 #### Scenario: 重啟中斷
 - **WHEN** 服務在成員發言途中重啟
-- **THEN** 原回合顯示 interrupted，不再調度其佇列；下一次送出建立新 session
+- **THEN** 原回合顯示 interrupted，不再調度其待發言成員
 
-### Requirement: 成員 session 與歷史一致
-後端 SHALL 在定義外持久化各成員的 provider/model/sessionId、設定指紋與 last_delivered_seq；完整成功後才更新游標。續接 SHALL 只傳入增量紀錄；首次或重建 SHALL 重播最近 50 則、最多 20,000 Unicode code points 並標記截斷。模型、provider、人設、群規、工具政策變更，或發生取消、截斷、錯誤、resume 失敗時 SHALL 清除相關 session，從已保存群聊重建。歷史訊息 SHALL 保存發言當時的名稱/provider/model。
+### Requirement: 成員 session 依變更類型處理
+後端 SHALL 在定義外持久化各成員的 provider、model、sessionId 與 last_delivered_seq；完整成功後才更新游標。續接 SHALL 只傳入增量紀錄。session SHALL 只在以下情況重建：更換 provider；同 provider 換模型且 provider 不支援跨模型續接；續接失敗。改人設、名稱、群規 SHALL 不重建，下一輪提示設定已更新；截斷、停止、錯誤、超時 SHALL 不重建。重建時 SHALL 重播最近 50 則、最多 20,000 Unicode code points 並標記截斷。歷史訊息 SHALL 保存發言當時的名稱/provider/model。
 
-#### Scenario: 更換 provider 或人設
-- **WHEN** 使用者在回合結束後更換成員 provider 或人設
-- **THEN** 下一輪使用新設定與新 session，不向新 provider 傳入舊 sessionId，歷史訊息仍顯示原發言者設定
+#### Scenario: 更換 provider
+- **WHEN** 使用者把成員從 Claude 改為 Codex
+- **THEN** 下一輪建立新 Codex session 並重播有上限的群聊紀錄，不傳入舊 sessionId，歷史訊息仍顯示原設定
+
+#### Scenario: 修改人設
+- **WHEN** 使用者修改成員人設
+- **THEN** 下一輪沿用原 session，提示開頭附上設定已更新的說明
+
+#### Scenario: 同 provider 換模型
+- **WHEN** 使用者把 Codex 成員換成另一個 Codex 模型
+- **THEN** 因 Codex 不支援跨模型續接，下一輪重建 session
+
+#### Scenario: 續接失敗
+- **WHEN** 成員 session 續接時 provider 回報錯誤
+- **THEN** 清除該 session，以重播紀錄重建後重試一次
 
 ### Requirement: 生成限制與費用提示
-最大字數 SHALL 為 1–8,000 的整數（預設 800，按 Unicode code points 計且包含截斷標記）；回覆次數 SHALL 為 1–32 的整數（預設成員數），失敗與截斷嘗試也計入。每位成員 SHALL 從啟動起有 120 秒期限，支援原生輸出 token 預算時額外設為 4,096。達限或超時 SHALL 取消 runtime 並等待終止；UI SHALL 說明這些不是精確費用上限。只有完整成功且未截斷的回覆可觸發 AI mentions。
+最大字數 SHALL 為 1–8,000 的整數（預設 800，按 Unicode code points 計且包含截斷標記）；回覆次數 SHALL 為 1–32 的整數（預設成員數），失敗與截斷嘗試也計入。每位成員 SHALL 從啟動起有 120 秒期限（等待審批不計時）。達限或超時 SHALL 取消 runtime 並等待終止；UI SHALL 說明這些不是精確費用上限。只有完整成功且未截斷的回覆可觸發 AI mentions。
 
 #### Scenario: 持續推理但沒有輸出文字
 - **WHEN** 成員執行達 120 秒仍未完成
-- **THEN** 後端取消 runtime、保存超時狀態、清除該 session；確認終止後才繼續其餘成員，該嘗試計入本輪上限
+- **THEN** 後端取消 runtime、保存超時狀態，確認終止後才繼續其餘成員，該嘗試計入本輪上限
 
 #### Scenario: 非法限制
 - **WHEN** 保存的群規含負數、非整數或超出範圍的字數／次數上限

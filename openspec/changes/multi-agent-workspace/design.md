@@ -18,7 +18,7 @@
 - 拖拽式流程圖編輯器（新增/刪除節點、連線）——第一版只能透過再次對話 AI 修改結構，畫布上只編輯節點內容與模型。
 - 工作流條件分支、迴圈、定時觸發。
 - 跨使用者共享聊天室/工作流。
-- 聊天室成員使用工具（讀寫檔、執行指令）——第一版成員純文字對話。
+- 並行節點／成員共用工作目錄的寫入隔離——第一版只提示，不隔離。
 
 ## Decisions
 
@@ -30,7 +30,7 @@
 ```
 multi_agents(id TEXT PK, user_id, kind 'chatroom'|'workflow', name, definition_json, definition_version, builder_session_json, member_sessions_json, workspace_path, created_at, updated_at)
 multi_agent_runs(id TEXT PK, multi_agent_id, status, definition_version, definition_snapshot_json, node_states_json, started_at, finished_at)   -- 工作流執行
-multi_agent_turns(id TEXT PK, multi_agent_id, client_request_id, status, definition_snapshot_json, started_at, finished_at)
+multi_agent_turns(id TEXT PK, multi_agent_id, trigger_message_id, status, definition_snapshot_json, started_at, finished_at)
 multi_agent_messages(id TEXT PK, multi_agent_id, turn_id, seq, author_kind 'user'|'member'|'system', member_id, author_snapshot_json, content, status, finish_reason, created_at) -- 聊天室
 ```
 `definition_json` 以 TypeScript 型別約束，前後端共用（放 `shared/multiAgent.ts`）：
@@ -43,8 +43,8 @@ type ChatroomDef  = { members: ChatMember[]; rules: ChatRules };
 ```
 節點/成員各自綁 provider+model。選單與後端驗證都經現有 `providerModelsService` / provider models API 取得同一份有效清單；`shared/modelConstants.js` 僅作服務既有的 fallback，不作另一套硬編碼白名單。共用 validator 負責結構，另注入清單進行模型校驗；後端保存與啟動前再次校驗。查詢失敗時使用服務回傳的 fallback 並顯示來源；不在 fallback 的模型顯示「暫時無法驗證」，保留輸入／既有定義但拒絕該次保存或啟動，允許重新整理清單後重試。
 - `definition_version` 每次保存遞增；run 建立時以交易保存完整定義快照（含節點 id、標題、指令、provider、model、依賴），runner 與歷史檢視只讀快照。修改目前定義不重新解釋舊 run；提供 run 列表及指定 run 詳情 API。
-- `builder_session_json` 保存 provider/sessionId。`member_sessions_json` 以 memberId 為鍵保存 provider、model、sessionId、設定指紋（人設、群規、工具政策）與 `last_delivered_seq`。此欄位由後端管理，不接受定義 JSON 覆寫。
-- 群聊 `seq` 在同一聊天室唯一且遞增；訊息保存當時名稱/provider/model 快照，避免修改或移除成員破壞歷史。`client_request_id` 在同一聊天室唯一，用於送出重試去重；每聊天室最多一個 running/stopping 回合，以資料庫唯一性約束與交易保護。
+- `builder_session_json` 保存 provider/sessionId。`member_sessions_json` 以 memberId 為鍵保存 provider、model、sessionId 與 `last_delivered_seq`。此欄位由後端管理，不接受定義 JSON 覆寫。
+- 群聊 `seq` 在同一聊天室唯一且遞增；訊息保存當時名稱/provider/model 快照，避免修改或移除成員破壞歷史。每聊天室同時最多一個 running/stopping 回合（由 dispatcher 以 per-chatroom 互斥保證）；回合期間新送出的使用者訊息照常落庫並標記 `queued`，本輪結束後依序開啟新回合。
 - 替代方案：每節點一個表 → 定義整體讀寫較簡單，但執行必須保存不可變快照。
 
 ### D3 建立器：ChatInterface 加 `builder` 模式，AI 輸出 fenced JSON
@@ -63,26 +63,41 @@ type ChatroomDef  = { members: ChatMember[]; rules: ChatRules };
 
 ### D5 工作流執行：後端 runner，按層並行，WS 推送節點狀態
 `POST /api/multi-agent/:id/runs` 以交易建立定義快照與 run；同一工作流已有 running/stopping run 時回傳 409，`WorkflowRunner` 在後端記憶體中執行：
-- 就緒節點（依賴全部 succeeded）並行啟動，每個節點一次 `runtime.start(prompt, { cwd, model, toolPolicy, permissionMode })`，prompt = 節點 instruction + 各上游節點最終輸出摘要（截斷至固定長度）。
+- 就緒節點（依賴全部 succeeded）並行啟動，每個節點一次 `runtime.start(prompt, { cwd, model, permissionMode })`，prompt = 節點 instruction + 各上游節點最終輸出摘要（截斷至固定長度）。
 - writer 為自訂收集器：累積 assistant 文字作為節點輸出；收到 `complete`/錯誤時標記 succeeded/failed。
 - **進度**：provider 不回報百分比，進度條採「階段式」：等待 0%、啟動 10%、每收到一個串流事件逐步逼近 90%（漸近式）、完成 100%。失敗節點的所有下游標記 `skipped`。
 - 狀態變化透過聊天 WS 推送 `{ type: 'multi-agent-run', runId, nodeId, state, progress, output? }` 給該使用者所有連線，並寫入 `node_states_json`，重新整理頁面可還原。
 - `POST /:id/runs/:runId/stop` 對所有執行中節點呼叫 `runtime.abort(sessionId, writer)`；writer 帶入 userId 並記錄 runtime 的 session 識別。依 `emitsTerminal` 補齊一次終止事件，停止後不得再啟動下游，遲到 complete 不得覆寫停止狀態。
-- 權限：第一版工作流節點與聊天室都使用 D6 的 `toolPolicy: none`；不繼承 provider 預設工具權限。建立器仍為一般聊天會話並沿用原有權限 UI。此版工作流僅處理傳入文字，抓取 issue、讀寫檔案與命令執行不在範圍；需工具的模型選項不可執行。
+- 權限：節點允許使用工具。每個節點有 `permissionMode`（選項取自 `PROVIDER_INFO[provider].permissionModes`，預設為該 provider 的 `defaultPermissionMode`），可在節點詳情中修改；需審批的工具請求沿用現有全域審批收件匣（`get-pending-permissions`），節點卡片顯示「等待審批」狀態。四家 provider 都可用。
+- 並行寫入：同層並行節點共用工作目錄，可能互相覆蓋檔案。第一版不做隔離，只在開始確認彈窗提示「並行節點共用工作目錄」；使用者可透過依賴關係讓寫檔節點串行。
 - 替代方案：前端驅動執行 → 關掉頁面即中斷，且需多連線協調；後端驅動更可靠。
 
 ### D6 聊天室調度：後端 dispatcher + 硬性限制
-`POST /api/multi-agent/:id/messages { content, clientRequestId }`：
-1. 先驗證目標成員模型與禁用工具能力（失敗不保存訊息或啟動回合），再在同一交易中查重並取得聊天室回合鎖、保存使用者訊息與 running turn。重送相同 clientRequestId 回傳原 turn；不同請求在 running/stopping 期間回傳 409，不落訊息、不排隊。定義／成員／群規修改在此期間也回傳 409。
-2. 解析 `@名稱` / `@所有人`，未 @ 時依 `unmentionedBehavior` 處理。成員名稱必須唯一，不得為保留名稱「所有人」。目標成員依序發言，整個回合使用建立時的定義快照；失敗成員保存錯誤系統訊息並繼續其餘佇列，發言嘗試也計入上限。
-3. prompt = persona + 群規 + 硬限制說明 + 群聊紀錄。首次／重建 session 重播最近 50 則、合計至多 20,000 Unicode code points（取最新內容並標記截斷）；續接只送 `last_delivered_seq` 之後的紀錄，套用相同上限。成功完成後才推進游標；provider/model/人設/群規/工具政策改變、resume 失敗、字數截斷、停止或錯誤時，清除該成員 session 及游標，下次以已保存群聊重建，不沿用隱藏或未完成輸出。切換模型即使 provider 不變也重建，避免 Cursor resume 忽略 model。
-4. `maxReplyChars` 是顯示／保存上限（Unicode code points，包含結尾「…」），預設 800、範圍 1–8,000；`maxAiRepliesPerTurn` 預設成員數、範圍 1–32，後端拒絕非整數與越界值。串流輸出保留一個字元位置給截斷標記，不得先送出超限文字。達上限立即 abort，目前訊息只保存一次且 `finish_reason=length`，該次發言計入上限；等待 runtime 真正結束後才啟動下一位。超時也 abort：每位從啟動起最多 120 秒，等待審批或沒有文字仍計時。若 provider 支援輸出 token 預算，額外傳入 4,096 上限；字數與時間限制不宣稱是精確 token／費用上限，取消傳播前仍可能產生費用。
-5. `allowAiMentions` 為真時，僅完整成功、未截斷的已保存回覆可擴展佇列。達 `maxAiRepliesPerTurn` 後不再呼叫模型並插入一次上限系統訊息。
-6. 串流事件帶 `{ type: 'multi-agent-message', multiAgentId, turnId, messageId, memberId, eventSeq, kind: 'delta'|'final', content, finishReason? }`；回合另推送帶 multiAgentId/turnId 的狀態事件。只發給擁有者的連線；前端按識別過濾並以 eventSeq 去重，final 為權威完整內容。GET 訊息回傳持久化訊息與活動 turn／部分內容快照，重連依快照還原並補取缺口。
-7. `POST /:id/messages/stop { turnId }` 只停止指定回合，重試冪等，不影響後來的新回合。先標記 stopping、清除待發言佇列，再 abort 執行中的 runtime；確認終止後標記 stopped。停止／達限後的遲到事件不得追加內容、擴展佇列或改寫終態。無法確認終止時維持 stopping 並拒絕新回合。服務重啟將活動回合標記 interrupted、清除 session 游標，不續跑；刪除聊天室先走相同停止流程再級聯刪除。
+`POST /api/multi-agent/:id/messages { content }`：
+1. 保存使用者訊息。若該聊天室有 running/stopping 回合，訊息標記 `queued` 並推送給前端（顯示「排隊中」），不回傳錯誤；本輪結束（完成／停止／達限）後 dispatcher 依 seq 順序為每則排隊訊息各開一個新回合。使用者可在前端取消尚未開始的排隊訊息（`DELETE /messages/:msgId`，僅限 queued）。回合期間修改成員／群規照常保存，於下一回合生效（回合使用建立時的定義快照）。
+2. 解析 `@名稱` / `@所有人`，未 @ 時依 `unmentionedBehavior` 處理。成員名稱必須唯一，不得為保留名稱「所有人」。目標成員依序發言；失敗成員保存錯誤系統訊息並繼續其餘佇列，發言嘗試也計入上限。
+3. prompt = persona + 群規 + 硬限制說明 + 群聊紀錄。續接只送 `last_delivered_seq` 之後的紀錄；只有 session 需重建時才重播最近 50 則、合計至多 20,000 Unicode code points（取最新內容並標記截斷）。成功完成後才推進游標。session 依變更類型分情況處理，見下方「成員 session 規則」。
+4. `maxReplyChars` 是顯示／保存上限（Unicode code points，包含結尾「…」），預設 800、範圍 1–8,000；`maxAiRepliesPerTurn` 預設成員數、範圍 1–32，後端拒絕非整數與越界值。串流超過上限時立即截斷並 abort，訊息保存一次且 `finish_reason=length`，該次發言計入上限；等待 runtime 結束後才啟動下一位。每位成員從啟動起最多 120 秒（等待審批不計時），超時 abort。字數與時間限制不是精確 token／費用上限。
+5. `allowAiMentions` 為真時，僅完整成功、未截斷的回覆可擴展佇列。達 `maxAiRepliesPerTurn` 後不再呼叫模型並插入一次上限系統訊息。
+6. 串流事件 `{ type: 'multi-agent-message', multiAgentId, turnId, messageId, memberId, kind: 'delta'|'final', content, finishReason? }`，回合另推送帶 multiAgentId/turnId 的狀態事件，只發給擁有者的連線。前端按 multiAgentId/messageId 歸檔，final 為權威完整內容。重連時重新 GET 訊息列表即可還原（執行中的訊息回傳目前已累積的內容）。
+7. `POST /:id/messages/stop { turnId }` 只停止指定回合，重複呼叫無副作用。先標記 stopping、清空本輪待發言成員，再 abort 執行中的 runtime；終止後標記 stopped，接著處理排隊訊息。停止後的遲到事件不得追加內容或擴展佇列。服務重啟將活動回合標記 interrupted、排隊訊息保留為 queued（下次使用者送出時一併處理），不續跑；刪除聊天室先停止再級聯刪除。
 
-**工具政策契約**：擴充 runtime 能力 `supportsNoTools` 與 start 選項 `toolPolicy: 'none'|'default'`。`none` 必須在模型開始前禁止全部內建工具、MCP 與子 agent 工具；不能以提示詞、`plan`、唯讀 sandbox 或事後丟棄 tool event 代替。支援的 adapter 必須透過原生空工具清單／完整 deny 政策落實，並通過讀取、寫入、命令與 MCP 呼叫均未執行的契約測試。無法證明完整禁用時 `supportsNoTools=false`，後端回傳 `tools_disabled_unsupported` 且不啟動模型；選單顯示不支援原因。Claude、Codex、Cursor、Antigravity 各自驗證能力，第一版不承諾四家都可用；至少一個 adapter 通過實際整合測試才可交付。所有新 orchestrator 都必須持有可取消的 runtime session 識別（包含啟動階段），遵循 abort 的 `emitsTerminal` 語意。
-- 替代方案：只靠提示詞或回覆後截斷 → 無法限制工具執行與持續生成，故採工具能力檢查、即時限長取消與超時。
+**成員權限**：成員使用工具，預設採各 provider 最保守的現有模式——Claude/Cursor 用 `plan`，Codex 用 `default`（`workspace-write` + `on-request` 審批），Antigravity 用 `default`。屬於軟限制，可在成員設定中調整；審批請求沿用全域收件匣。四家 provider 都可用。
+
+**成員 session 規則**（只在必要時重建，重建時才重播群聊紀錄）：
+
+| 變更 | 處理 |
+| --- | --- |
+| 換 provider | 清除 session 並重建（sessionId 不能跨 provider） |
+| 同 provider 換模型 | 依 provider 能力：Claude 直接續接新模型；Codex、Antigravity 重建（跨模型 resume 會報錯）；Cursor 先實測，不確定則重建 |
+| 改人設、名稱、群規 | 不清除；下一輪 prompt 開頭附「你的設定已更新：…」 |
+| 回覆被截斷 | 不清除；下一輪附「你上次的回覆在第 N 字被截斷」 |
+| 使用者停止、執行錯誤、超時 | 不清除，下次照常續接；續接失敗才清除並重建 |
+
+「同 provider 換模型是否可續接」以 `PROVIDER_INFO` 新增的 `capabilities.resumeAcrossModels` 表示，與 per-session-model-selection 的既有經驗一致。
+
+- 替代方案：只靠提示詞約束 → 無法真正防止 token 浪費；字數、次數、超時必須在後端執行。
+- 替代方案：忙碌時回 409 → 與一般聊天 App 體驗不符，改用排隊。
 
 ### D7 工作目錄
 每個多 Agent 有 `workspace_path`：建立時若側邊欄當前有選中專案則綁定該專案路徑，否則使用 `~/.cloudcli/multi-agent/<id>/`（自動建立）。建立器 session、工作流節點、聊天室成員都在此 cwd 執行。
@@ -112,4 +127,5 @@ type ChatroomDef  = { members: ChatMember[]; rules: ChatRules };
 ## Open Questions
 
 - 建立時沒有選中專案時，是否需要讓使用者在建立器中指定工作目錄？（目前預設專屬目錄）
-- 後續版本若開放工作流工具，需要另提共用工作目錄的並行寫入隔離與審批設計；第一版已決定禁用。
+- 並行節點共用工作目錄的寫入隔離（例如每節點 git worktree）留待後續版本。
+- Cursor 同 provider 換模型是否能續接需實測後填入 `resumeAcrossModels`。

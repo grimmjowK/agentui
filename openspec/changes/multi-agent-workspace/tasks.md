@@ -29,7 +29,7 @@
 
 - [ ] 5.1 實作 `@` 解析（成員名稱、所有人、未 @ 預設行為），附單元測試
 - [ ] 5.2 實作 `ChatroomDispatcher`：依序讓目標成員發言，組裝 persona + 群規 + 硬限制說明 + 最近紀錄；每成員保存並 resume 自己的 provider sessionId
-- [ ] 5.3 後端強制限制：`maxReplyChars` 截斷、`allowAiMentions` 佇列擴展、`maxAiRepliesPerTurn` 達上限插入系統訊息；成員以禁用工具模式執行
+- [ ] 5.3 後端強制限制：`maxReplyChars` 截斷、`allowAiMentions` 佇列擴展、`maxAiRepliesPerTurn` 達上限插入系統訊息；成員以各自設定的權限模式執行
 - [ ] 5.4 `POST /:id/messages`、`POST /:id/messages/stop { turnId }`、`GET /:id/messages`；串流經 WS 推送 `multi-agent-message`
 - [ ] 5.5 dispatcher 單元測試（mock runtime）：@ 單人、@所有人、截斷、AI 互 @ 上限、停止
 
@@ -77,12 +77,12 @@
 
 ## 12. 執行隔離、歷史一致性與 Provider 契約測試
 
-- [ ] 12.1 擴充 runtime supportsNoTools/toolPolicy 契約；逐一評估 Claude、Codex、Cursor、Antigravity 的原生禁用機制，不支援即拒絕；工作流與聊天室共用政策，至少一個 adapter 通過真實整合測試
-- [ ] 12.2 Provider 契約測試覆蓋內建讀／寫／命令、MCP、子 agent 均不得執行，以及啟動階段可取消、abort emitsTerminal 與僅一次終止事件；不得只靠 mock 證明工具隔離
-- [ ] 12.3 串接現有 providerModelsService/API；前後端共用清單語意與 fallback 來源提示；測試動態新增模型可保存、查詢失敗不清除輸入、不在 fallback 時可重試、啟動前再驗證
+- [ ] 12.1 `PROVIDER_INFO.capabilities` 新增 `resumeAcrossModels`（Claude=true、Codex/Antigravity=false、Cursor 實測後填入）；節點與成員的 `permissionMode` 欄位、預設值（成員：Claude/Cursor=plan，Codex/Antigravity=default）與 UI 選擇器
+- [ ] 12.2 Provider 契約測試：四家在工作流節點與聊天室成員中都能啟動、串流、abort（emitsTerminal 只產生一次終止事件）、審批請求進入全域收件匣；節點卡片顯示等待審批
+- [ ] 12.3 串接現有 providerModelsService/API；測試動態新增模型可保存、查詢失敗不清除輸入、不在 fallback 時可重試、啟動前再驗證
 - [ ] 12.4 保存 definition_version、builder_session_json、member_sessions_json、run 完整定義快照及訊息作者快照；測試刪除／重用節點 id、修改模型後舊 run 仍正確；提供歷史 run 列表／詳情 UI
-- [ ] 12.5 實作回合表、每聊天室活動回合唯一約束、clientRequestId 去重與 seq 唯一性；測試兩分頁並行送出、重送冪等、忙碌時編輯拒絕、同工作流重複開始拒絕
-- [ ] 12.6 WS 加入聊天室／回合／訊息識別與 eventSeq，保存部分內容與回合狀態；測試跨聊天室隔離、同成員多次發言、重連補取及去重
-- [ ] 12.7 成員 session 保存設定指紋與 last_delivered_seq；設定變更／取消／截斷／失敗重建與有界重播；測試 Cursor 同 provider 改模型也取得新 session
-- [ ] 12.8 串流字數限制含截斷標記、120 秒超時、可用時 4,096 token 預算、取消後確認終止再調度；測試無文字超時、非法限制、截斷不觸發 mentions、失敗嘗試計入上限
-- [ ] 12.9 停止以 turnId 冪等操作，忽略遲到事件；測試舊 stop 不影響新 turn、取消未確認持續鎖定、重啟 interrupted、刪除前終止及級聯回合資料
+- [ ] 12.5 dispatcher per-chatroom 互斥與排隊：忙碌時訊息標記 queued、本輪結束依序開新回合、`DELETE /messages/:msgId` 取消排隊訊息；測試兩分頁並行送出、忙碌時編輯於下一回合生效、同工作流重複開始回 409
+- [ ] 12.6 WS 事件帶 multiAgentId/turnId/messageId/memberId；GET 訊息回傳執行中訊息的已累積內容；測試跨聊天室隔離、同成員多次發言、重連後繼續串流
+- [ ] 12.7 成員 session 依變更類型處理：換 provider 重建、同 provider 換模型依 `resumeAcrossModels`、改人設／名稱／群規附「設定已更新」提示、截斷附提示、續接失敗才重建並重試一次；重建時有界重播；逐項測試
+- [ ] 12.8 串流字數限制含截斷標記、120 秒超時（等待審批不計時）、取消後確認終止再調度；測試無文字超時、非法限制、截斷不觸發 mentions、失敗嘗試計入上限
+- [ ] 12.9 停止以 turnId 操作且重複呼叫無副作用，忽略遲到事件，停止後繼續處理排隊訊息；測試舊 stop 不影響新 turn、重啟 interrupted 且排隊訊息保留、刪除前終止及級聯回合資料
