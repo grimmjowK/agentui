@@ -11,6 +11,7 @@
   - 聊天頁對「由工作流執行器持有的執行中會話」只旁觀：讀取已保存的訊息、接收之後的即時推送，**不**改送輸出（不呼叫 `runtime.reconnect`），工作流執行器照常收到完整事件。
   - 頁首顯示「工作流節點」標記與返回流程圖的連結。
 - **節點輸出經 LoggingWriter 持久化**：節點的 runtime writer 改包一層 `LoggingWriter`，事件寫入 `session_messages` 並推送給擁有者的所有連線，聊天頁因此能看到完整過程與歷史。
+- **工作流會話不進側邊欄**：新增持久化的「工作流會話」登記（sessionId → 多 Agent／執行／節點），側邊欄專案下的聊天列表、會話計數、封存列表與全文檢索一律排除這些會話；工作流的聊天頁只從節點詳情的「打開對話」進入。
 - **執行中插話**：在節點會話的聊天頁送出訊息時走現有 `chat-steer`，不打斷這一輪；插話後的回覆計入節點輸出（節點輸出 = 這一輪結束時累積的完整助理文字）。
 - **中斷後修正**：聊天頁可中斷該節點這一輪，再送出新訊息續接同一會話；節點維持「執行中」，以新一輪結束的結果作為節點結果。工作流層級的「停止」仍會結束整個節點。
 - **Antigravity 改走 ACP**：吸收 `antigravity-acp-interactive-approvals` 的全部範圍（互動審批、權限模式、`session/resume` 續接、`session/cancel` 中斷、逾時、錯誤處理、執行中插話），該提案標記為被本 change 取代。**BREAKING**（內部）：移除 headless 執行路徑。
@@ -29,6 +30,7 @@
 
 - 後端：
   - `server/modules/multi-agent/services/agent-call.ts`、`workflow-runner.ts`：writer 改用 `LoggingWriter` 包裝並推送；支援「這一輪被使用者從聊天頁中斷後由新一輪接續」的完成判定；節點會話登記為「工作流持有」。
+  - `server/modules/database`：新增 `workflow_sessions` 表與 repository；`sessions.db.ts` 的專案會話列表、計數、封存列表與 `getAllSessions`（全文檢索來源）排除登記中的會話。
   - `server/modules/websocket/services/chat-websocket.service.ts`：`check-session-status` 對工作流持有的會話只重播日誌、不呼叫 `runtime.reconnect`；`chat-command` 對執行中的節點會話改為插話或拒絕；`abort-session` 對節點會話標記為「使用者中斷、可續接」。
   - `server/antigravity-cli.js`（改寫為 ACP）、`modules/providers/list/antigravity/*`（`steer`、`getPendingApprovals`、`resolveApproval`、`mapAcpUpdate`）。
   - `shared/providers.ts`：Antigravity `midTurnSteer: true`、`permissionModes` 改為 `default`、`acceptEdits`、`plan`、`bypassPermissions`。
