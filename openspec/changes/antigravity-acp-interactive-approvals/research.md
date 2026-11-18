@@ -68,3 +68,10 @@
 ## 暫緩期間的現況
 
 Antigravity 仍為 headless 非互動模式。需要審批的工具會被自動拒絕，頁面會顯示警告（commit `0bc00cc6`），建議使用者改用跳過權限或在 `settings.json` 的 `permissions.allow` 加允許規則。
+
+## 2026-11-18 以 agy 1.5.11 重新驗證
+
+- skills 不出現在 `available_commands_update`：**仍存在**（只有 goal、compact、schedule 等內建指令）。
+- `authenticate` 逾時、部分模型串流卡住：本次 7 段錄製（允許、拒絕、取消、續接、插話、審批中插話、設定模型）**未重現**。
+- 新增：模式多了 `auto`；`agy acp --dangerously-skip-permissions` 可用；審批等待中送第二個 `session/prompt` 會被拒（-32603）。
+- 詳見 `node-live-session-and-agy-acp/design.md` 的「實測結論」。

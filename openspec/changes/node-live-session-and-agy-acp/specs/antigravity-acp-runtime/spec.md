@@ -42,7 +42,7 @@
 - **THEN** 系統以 `session/cancel` 中斷這一輪並回覆未決的審批請求為已取消，審批卡片與收件匣項目消失，頁面收到一次中斷完成
 
 ### Requirement: 權限模式與 ACP 一致
-系統 SHALL 讓 Antigravity 的權限模式選項為 `default`、`acceptEdits`、`plan` 與 `bypassPermissions`。前三者 MUST 以 ACP 的 `session/set_mode` 套用；`bypassPermissions` MUST 只在使用者明確同意後才可作為預設值，啟用時審批請求自動允許、不顯示審批卡片。
+系統 SHALL 讓 Antigravity 的權限模式選項為 `default`、`acceptEdits`、`auto`、`plan` 與 `bypassPermissions`。前四者 MUST 以 ACP 的 `session/set_mode` 套用（`acceptEdits` 對應 `accept-edits`）；`bypassPermissions` MUST 以 `agy acp --dangerously-skip-permissions` 啟動，且只在使用者明確同意後才可作為預設值，啟用時不顯示審批卡片。
 
 #### Scenario: 接受編輯模式
 - **WHEN** 使用者選擇 `acceptEdits` 後請 Antigravity 修改工作區內的檔案
@@ -76,6 +76,10 @@ Antigravity 的一輪執行中，發起者送出插話時，系統 SHALL 在同�
 #### Scenario: 工具執行中插話
 - **WHEN** Antigravity 正在執行 `sleep 8`，使用者插話「結尾加上 PINEAPPLE」
 - **THEN** 工具照常跑完，最終只產生一則回覆且結尾為 PINEAPPLE，頁面只收到一次 `complete`
+
+#### Scenario: 審批等待中的插話被拒
+- **WHEN** Antigravity 正在等待工具審批，使用者送出插話
+- **THEN** 系統不送出 prompt，回覆 `steer-rejected`（`waiting_approval`），訊息保留在佇列；使用者完成審批後可再送出
 
 #### Scenario: 收尾後的插話被拒
 - **WHEN** 這一輪的所有 `session/prompt` 都已返回、行程正在結束時，使用者送出插話

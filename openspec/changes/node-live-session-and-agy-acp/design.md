@@ -111,7 +111,7 @@ runtime.start(prompt, opts, loggingWriter)
 - **整體沿用**：每輪一個 `agy acp` 行程（ACP D1）、JSON-RPC 類別（D2）、`mapAcpUpdate`（D3）、審批池與 `permission-decision`（D4）、逾時與中斷（D5）、權限模式（D6）、模型與登入（D7）、插話計數（D8）。
 - **補充 1：reconnect**：ACP 執行層的 writer 也要支援 `reconnect`（一般聊天斷線重連），行為與現有 `createReconnectableWriter` 相同；工作流節點依 D2 不會呼叫它。
 - **補充 2：中斷後續接（D4）**：ACP 下續接用 `session/resume`，與一般續接相同，不需特例。
-- **補充 3：版本**：本機 agy 1.5.11，ACP 提案的實測基於 1.5.0/1.5.3，實測任務需以 1.5.11 重錄 fixture（任務 1.x）。
+- **補充 3：版本與實測**：以 agy 1.5.11 重錄，結論見下方「實測結論」，其中三點修正 ACP 提案：權限模式多一個 `auto`；`bypassPermissions` 改用 `--dangerously-skip-permissions` 旗標；審批等待中不能插話（`steer` 回 `waiting_approval`）。
 - ACP 提案標記為「已被 `node-live-session-and-agy-acp` 取代」，research.md 與 fixture 計畫沿用。
 
 ## Risks / Trade-offs
@@ -131,7 +131,24 @@ runtime.start(prompt, opts, loggingWriter)
 - 已存在的工作流執行紀錄不需遷移；舊 run 的節點沒有 session_messages，打開對話時只看得到 provider 歷史（同步器讀取原生 transcript）。
 - `antigravity-acp-interactive-approvals` 不歸檔，於 proposal 頂部標註被取代，本 change 歸檔時一併移除。
 
+## 實測結論（agy 1.5.11，2026-11-18，fixture：`docs/fixtures/antigravity/acp-*.jsonl`）
+
+| 項目 | 結論 | 對設計的影響 |
+| --- | --- | --- |
+| `initialize` | `protocolVersion: 1`；`agentInfo.version: 1.5.11`；`sessionCapabilities` 含 `resume/close/load/list/additionalDirectories` | 照 ACP D1 |
+| 模式 | `default`、`accept-edits`、**`auto`**（新）、`plan`；`session/set_mode` 回 `{}` 並推 `current_mode_update` | Antigravity `permissionModes` 增加 `auto` |
+| 模型 | `session/new` 回 `models.availableModels`（`gemini-4-argon-low` 等完整 id，與現有模型清單相同）；`session/set_model { modelId }` 回 `{}` | 用 `session/set_model`，不用 `--model` |
+| 審批請求 | `session/request_permission` 的 JSON-RPC **id 是字串**（`"1"`）；`options: allow(allow_once) / deny(reject_once)` | 連線類別的請求 id 型別不可假設數字 |
+| 允許後 | `tool_call_update` `pending → in_progress → completed`；結果在 `rawOutput.output`（含 `Command exited with code N` 前綴）與 `content[].content.text`，另有 `rawOutput.exit_code` | `tool_result.content` 取 `content` 文字，`isError` 依 `status` |
+| 拒絕後 | `tool_call_update` `failed`、輸出空字串；**模型不再回覆**，`session/prompt` 以 `end_turn` 返回 | 被拒工具卡片顯示錯誤（內容補「已拒絕」）；這一輪正常結束 |
+| 審批中 `session/cancel` | 回覆未決審批 `cancelled` 後，工具 `failed`，prompt 以 `stopReason: cancelled` 返回 | 照 ACP D5 |
+| `session/resume` | 不重播歷史（只有 `available_commands_update` 等少量 update），續接後模型記得前文 | 照 ACP D1 |
+| `--dangerously-skip-permissions` | `agy acp` 接受；不再發出 `session/request_permission` | `bypassPermissions` 改傳旗標，不由客戶端代答（ACP D6 的優先方案） |
+| 工具執行中插話 | 第一個 prompt **立刻**以 `{stopReason: end_turn}`（無 usage）返回；工具照常跑完；模型最後產生一則回覆並遵循插話；第二個 prompt 最後返回（帶 usage） | 照 ACP D8 的計數收尾 |
+| **審批等待中插話** | **被拒**：`-32603 "the running prompt is waiting for a permission or question answer; answer it or send session/cancel, then send this prompt again"` | `steer` 遇到有未決審批時回覆 `waiting_approval`，不送 prompt；前端把訊息留在佇列，審批後可再「立即引導」 |
+| 未登入 | `initialize` 成功，`session/new`／`session/prompt` 回 `-32000 "Authentication required"` | 映射為「請先在終端執行 `agy` 完成登入」 |
+| 已知問題（research.md） | skills：`available_commands_update` 只列內建指令，**不含** `~/.agents/skills` 等自訂 skills（仍存在）；串流與 `authenticate` 逾時在本次未重現 | 斜線指令仍沿用現有 skills 掃描（provider 的 skills facet），不依賴 ACP 指令清單 |
+
 ## Open Questions
 
-- agy 1.5.11 下 ACP 提案 Open Questions（`tool_call_update` 結果形狀、模型設定方式、`--dangerously-skip-permissions`、拒絕後行為、審批等待中插話）的答案，以任務 1.x 實測決定。
 - `waiting_input` 中使用者改從聊天頁送出的是「新的一輪」，Claude 會在 transcript 留下中斷標記；歷史顯示是否需要特別處理，實作時以實際畫面判斷。

@@ -1,9 +1,9 @@
 ## 1. Antigravity ACP：實測與錄製（以 agy 1.5.11 為準）
 
-- [ ] 1.0 重新驗證 `antigravity-acp-interactive-approvals/research.md` 中 agy acp 的已知問題（skills 不出現、`authenticate` 逾時、串流卡住），結果補進該 research.md
-- [ ] 1.1 錄製協議 fixture 到 `docs/fixtures/antigravity/acp-*.jsonl`：允許、拒絕、審批中 `session/cancel`、`session/resume` 續接、工具執行中插話、審批等待中插話；確認 `tool_call_update` 完成時的結果形狀與被拒後的行為
-- [ ] 1.2 實測模型設定方式（`session/set_model`／`configOptions`／`--model`）、`--dangerously-skip-permissions` 是否有效、未登入時的錯誤形狀
-- [ ] 1.3 把 1.1–1.2 結論寫進本 change design.md 的 Open Questions，必要時修正 D7
+- [x] 1.0 重新驗證 `antigravity-acp-interactive-approvals/research.md` 中 agy acp 的已知問題（skills 不出現、`authenticate` 逾時、串流卡住），結果補進該 research.md
+- [x] 1.1 錄製協議 fixture 到 `docs/fixtures/antigravity/acp-*.jsonl`：允許、拒絕、審批中 `session/cancel`、`session/resume` 續接、工具執行中插話、審批等待中插話；確認 `tool_call_update` 完成時的結果形狀與被拒後的行為
+- [x] 1.2 實測模型設定方式（`session/set_model`／`configOptions`／`--model`）、`--dangerously-skip-permissions` 是否有效、未登入時的錯誤形狀
+- [x] 1.3 把 1.1–1.2 結論寫進本 change design.md 的 Open Questions，必要時修正 D7
 
 ## 2. Antigravity ACP：協議與事件映射
 
@@ -27,7 +27,7 @@
 
 - [ ] 5.1 `chat-websocket.service.ts` 新增 `permission-decision { provider, requestId, sessionId, decision }` 分派到 `runtime.resolveApproval`；測試
 - [ ] 5.2 前端審批卡片與送出依 `context.decisions` 判斷，Antigravity 送 `permission-decision`，Codex 維持原訊息；多 Agent 節點詳情的工具審批（`NodeToolApprovals`）同步支援；補 i18n
-- [ ] 5.3 `shared/providers.ts`：Antigravity `midTurnSteer: true`、`permissionModes` 改為 `default`、`acceptEdits`、`plan`、`bypassPermissions`；多 Agent 成員預設權限表同步檢查
+- [ ] 5.3 `shared/providers.ts`：Antigravity `midTurnSteer: true`、`permissionModes` 改為 `default`、`acceptEdits`、`auto`、`plan`、`bypassPermissions`；多 Agent 成員預設權限表同步檢查
 - [ ] 5.4 `antigravity-acp-interactive-approvals/proposal.md` 頂部標註「已被 node-live-session-and-agy-acp 取代」
 
 ## 6. 節點會話：持久化、推送與側邊欄排除
