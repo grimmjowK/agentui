@@ -52,7 +52,8 @@ export type MultiAgent = {
   name: string;
   definition: MultiAgentDefinition | null;
   definitionVersion: number;
-  builderSession: { provider: LLMProvider; sessionId: string } | null;
+  /** promptVersion：該會話最後收到的建立器說明版本 */
+  builderSession: { provider: LLMProvider; sessionId: string; promptVersion?: number } | null;
   workspacePath: string;
   createdAt: string;
   updatedAt: string;
@@ -79,6 +80,8 @@ export type WorkflowRun = {
   definitionVersion: number;
   definition: WorkflowDef;
   nodeStates: Record<string, NodeRunStatus>;
+  /** 啟動時輸入，附在沒有依賴的節點提示前 */
+  startInput: string | null;
   startedAt: string;
   finishedAt: string | null;
 };

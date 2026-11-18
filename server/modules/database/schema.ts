@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS multi_agent_runs (
     definition_version INTEGER NOT NULL,
     definition_snapshot_json TEXT NOT NULL,
     node_states_json TEXT NOT NULL DEFAULT '{}',
+    start_input TEXT,
     started_at TEXT NOT NULL,
     finished_at TEXT
 );

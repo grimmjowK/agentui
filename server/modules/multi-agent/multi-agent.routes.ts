@@ -2,7 +2,8 @@
  * 多 Agent REST API（multi-agent-workspace design D2–D7）。掛在 `/api/multi-agent`，走 JWT 驗證。
  */
 import crypto from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import express, { type Request, type Response } from 'express';
@@ -10,7 +11,7 @@ import express, { type Request, type Response } from 'express';
 import { multiAgentsDb, projectsDb } from '@/modules/database/index.js';
 import { providerModelsService } from '@/modules/providers/index.js';
 import { MULTI_AGENT_WORKSPACE_ROOT } from '@/shared/multi-agent-workspace.js';
-import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
+import { AppError, asyncHandler, createApiSuccessResponse, validateWorkspacePath } from '@/shared/utils.js';
 
 import {
   isApprovalNode,
@@ -66,6 +67,18 @@ async function assertValid(kind: MultiAgentKind, def: unknown): Promise<MultiAge
   return valid;
 }
 
+/** 校驗並解析工作目錄：必須是存在的目錄，且不是系統目錄 */
+async function resolveWorkspace(input: string): Promise<string> {
+  const trimmed = input.trim();
+  if (!trimmed) throw badRequest('workspacePath is required');
+  const expanded = trimmed.startsWith('~') ? path.join(os.homedir(), trimmed.slice(1)) : trimmed;
+  const validation = await validateWorkspacePath(expanded);
+  if (!validation.valid || !validation.resolvedPath) throw badRequest(validation.error ?? 'Invalid workspace path');
+  const info = await stat(validation.resolvedPath).catch(() => null);
+  if (!info?.isDirectory()) throw badRequest('Workspace path must be an existing directory');
+  return validation.resolvedPath;
+}
+
 const isBusy = (agent: MultiAgent) =>
   agent.kind === 'workflow' ? workflowRunner.isActive(agent.id) : false;
 
@@ -80,8 +93,10 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim().slice(0, 100) : null;
   const projectId = typeof req.body?.projectId === 'string' ? req.body.projectId : null;
 
-  // 綁定目前選中的專案路徑，否則用專屬目錄
-  const projectPath = projectId ? projectsDb.getProjectPathById(projectId) : null;
+  // 優先使用明確指定的目錄，其次綁定目前選中的專案路徑，否則用專屬目錄
+  const projectPath = typeof req.body?.workspacePath === 'string' && req.body.workspacePath.trim()
+    ? await resolveWorkspace(req.body.workspacePath)
+    : projectId ? projectsDb.getProjectPathById(projectId) : null;
   const id = crypto.randomUUID();
   const workspacePath = projectPath ?? path.join(MULTI_AGENT_WORKSPACE_ROOT, id);
   if (!projectPath) await mkdir(workspacePath, { recursive: true });
@@ -111,9 +126,20 @@ router.patch('/:id', asyncHandler(async (req: Request, res: Response) => {
   const agent = requireAgent(req);
   const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '';
   if (name) multiAgentsDb.rename(agent.userId, agent.id, name);
+  if (typeof req.body?.workspacePath === 'string') {
+    if (workflowRunner.isActive(agent.id) || chatroomDispatcher.isBusy(agent.id)) {
+      throw new AppError('Cannot change workspace while running', { statusCode: 409, code: 'BUSY' });
+    }
+    const workspacePath = await resolveWorkspace(req.body.workspacePath);
+    multiAgentsDb.setWorkspacePath(agent.userId, agent.id, workspacePath);
+  }
   const builderSession = req.body?.builderSession;
   if (builderSession && typeof builderSession.sessionId === 'string' && typeof builderSession.provider === 'string') {
-    multiAgentsDb.setBuilderSession(agent.userId, agent.id, { provider: builderSession.provider, sessionId: builderSession.sessionId });
+    multiAgentsDb.setBuilderSession(agent.userId, agent.id, {
+      provider: builderSession.provider,
+      sessionId: builderSession.sessionId,
+      ...(Number.isInteger(builderSession.promptVersion) ? { promptVersion: builderSession.promptVersion } : {}),
+    });
   }
   res.json(createApiSuccessResponse(multiAgentsDb.get(agent.userId, agent.id)));
 }));
@@ -143,7 +169,8 @@ router.post('/:id/runs', asyncHandler(async (req: Request, res: Response) => {
   if (agent.kind !== 'workflow' || !agent.definition) throw badRequest('Not a workflow with a definition');
   // 啟動前再次以模型服務驗證
   await assertValid('workflow', agent.definition);
-  const started = workflowRunner.start(agent);
+  const input = typeof req.body?.input === 'string' ? req.body.input.slice(0, 20_000) : '';
+  const started = workflowRunner.start(agent, input);
   if (!started) throw new AppError('Workflow is already running', { statusCode: 409, code: 'BUSY' });
   res.status(201).json(createApiSuccessResponse(started.run));
 }));

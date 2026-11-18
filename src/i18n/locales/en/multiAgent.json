@@ -94,7 +94,9 @@
       "planTitle": "The model finished planning and wants to proceed",
       "allow": "Allow",
       "deny": "Deny"
-    }
+    },
+    "startInput": "Input for this run (optional)",
+    "startInputPlaceholder": "Passed to the entry steps, e.g. only process ticket 18350"
   },
   "chatroom": {
     "placeholder": "Message the group, @ a role or @everyone",
@@ -137,5 +139,9 @@
     "loadFailed": "Failed to load",
     "saveFailed": "Failed to save",
     "busy": "It is running; try again when it finishes."
+  },
+  "workspace": {
+    "title": "Working directory",
+    "default": "Default directory (no project)"
   }
 }

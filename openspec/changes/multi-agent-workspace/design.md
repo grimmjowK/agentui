@@ -106,6 +106,10 @@ type ChatroomDef  = { members: ChatMember[]; rules: ChatRules };
 ### D7 工作目錄
 每個多 Agent 有 `workspace_path`：建立時若側邊欄當前有選中專案則綁定該專案路徑，否則使用 `~/.cloudcli/multi-agent/<id>/`（自動建立）。建立器 session、工作流節點、聊天室成員都在此 cwd 執行。
 
+### D7.1 工作目錄與啟動輸入
+工作目錄決定 provider 讀取的專案設定（Claude：CLAUDE.md、.claude/skills；Codex：AGENTS.md）。頁首可更換，`PATCH /:id { workspacePath }` 以 `validateWorkspacePath` 校驗並要求目錄存在。
+節點收到的提示 = 節點標題 + （入口節點才有）本次執行輸入 + 直接上游輸出 + 執行內容；執行內容是使用者訊息，不是系統提示。
+
 ### D8 路由與頁面
 新增 `/multi-agent/:id`。`AppContent` 依路由決定主內容：一般專案/會話照舊；多 Agent 時渲染 `MultiAgentPage`，依 `kind` 與 `definition` 是否為空分派到 `BuilderView`（包 ChatInterface）/ `WorkflowCanvas` / `ChatroomView`。頁首沿用 `MainContentHeader` 樣式（標題、類型徽章、重新命名、刪除、「用 AI 修改」）。
 

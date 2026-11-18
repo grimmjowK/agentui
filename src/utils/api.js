@@ -116,7 +116,8 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ definition }),
       }),
-    startRun: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs`, { method: 'POST' }),
+    startRun: (id, input = '') =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs`, { method: 'POST', body: JSON.stringify({ input }) }),
     listRuns: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs`),
     latestRun: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs/latest`),
     confirmNode: (id, runId, nodeId, approved, note) =>

@@ -2,7 +2,7 @@
  * 建立器：直接複用聊天頁（ChatInterface），以 builder 模式運行（design D3）。
  * 建立器會話不導向 /session/:id，而是保存為該多 Agent 的 builderSession。
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { PROVIDER_IDS, isLLMProvider, type LLMProvider } from '../../../../../shared/providers';
@@ -12,7 +12,7 @@ import { useWebSocket } from '../../../../contexts/WebSocketContext';
 import { useUiPreferences } from '../../../../hooks/useUiPreferences';
 import type { Project, ProjectSession } from '../../../../types/app';
 import { api } from '../../../../utils/api';
-import { buildBuilderPrompt, DEFINITION_LANGUAGE } from '../../constants/builderPrompts';
+import { BUILDER_PROMPT_VERSION, buildBuilderPrompt, DEFINITION_LANGUAGE } from '../../constants/builderPrompts';
 import { upsertMultiAgentLocal } from '../../hooks/useMultiAgents';
 import { useProviderModels } from '../../hooks/useProviderModels';
 import type { MultiAgent, MultiAgentDefinition, MultiAgentDetail } from '../../types/types';
@@ -22,17 +22,24 @@ import DefinitionPreviewCard from './DefinitionPreviewCard';
 
 type BuilderViewProps = {
   agent: MultiAgentDetail;
+  /** 從已建立的多 Agent 點「用 AI 修改」進入：下一則訊息附上目前定義與最新格式說明 */
+  editing?: boolean;
   /** 定義保存成功後回呼（頁面切換到流程圖／群聊） */
   onDefinitionSaved: (agent: MultiAgent) => void;
 };
 
-export default function BuilderView({ agent, onDefinitionSaved }: BuilderViewProps) {
+export default function BuilderView({ agent, editing = false, onDefinitionSaved }: BuilderViewProps) {
   const { t } = useTranslation('multiAgent');
   const { ws, sendMessage, latestMessage } = useWebSocket();
   const { preferences } = useUiPreferences();
   const models = useProviderModels();
   const [builderSession, setBuilderSession] = useState(agent.builderSession);
   const [inputRequest, setInputRequest] = useState<ChatBuilderConfig['inputRequest']>(null);
+  // 進入建立器後，若既有會話收到的說明已過時，或是「用 AI 修改」，下一則訊息重新附上說明
+  const [resendPrompt, setResendPrompt] = useState(
+    () => Boolean(agent.builderSession) && (editing || (agent.builderSession?.promptVersion ?? 1) < BUILDER_PROMPT_VERSION),
+  );
+  const deliveredVersionRef = useRef<number | null>(null);
 
   const project = useMemo<Project | null>(() => (agent.projectId ? {
     projectId: agent.projectId,
@@ -59,7 +66,17 @@ export default function BuilderView({ agent, onDefinitionSaved }: BuilderViewPro
     emptyTitle: t(`builder.emptyTitle.${agent.kind}`),
     emptyDescription: t(`builder.emptyHint.${agent.kind}`),
     inputRequest,
-  }), [agent.kind, agent.definition, models, t, inputRequest]);
+    resendPrompt,
+    onPromptDelivered: () => {
+      deliveredVersionRef.current = BUILDER_PROMPT_VERSION;
+      setResendPrompt(false);
+      if (builderSession) {
+        const next = { ...builderSession, promptVersion: BUILDER_PROMPT_VERSION };
+        setBuilderSession(next);
+        void api.multiAgent.update(agent.id, { builderSession: next });
+      }
+    },
+  }), [agent.kind, agent.definition, agent.id, models, t, inputRequest, resendPrompt, builderSession]);
 
   const saveDefinition = useCallback(async (definition: MultiAgentDefinition) => {
     const saved = await readData<MultiAgent>(api.multiAgent.saveDefinition(agent.id, definition));
@@ -88,7 +105,8 @@ export default function BuilderView({ agent, onDefinitionSaved }: BuilderViewPro
     if (builderSession?.sessionId === sessionId) return;
     const selected = localStorage.getItem('selected-provider');
     const provider: LLMProvider = builderSession?.provider ?? (isLLMProvider(selected) ? selected : 'claude');
-    const next = { provider, sessionId };
+    // 新會話的第一則訊息一定附了說明
+    const next = { provider, sessionId, promptVersion: deliveredVersionRef.current ?? BUILDER_PROMPT_VERSION };
     setBuilderSession(next);
     void api.multiAgent.update(agent.id, { builderSession: next });
   }, [agent.id, builderSession]);

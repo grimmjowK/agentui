@@ -24,7 +24,7 @@ export type WorkflowRunnerDeps = {
 /** 階段式／漸近式進度：啟動 10%，每個事件往 90% 逼近 */
 const nextProgress = (current: number) => Math.min(90, current + (90 - current) * 0.08);
 
-export function buildNodePrompt(node: WorkflowNode, def: WorkflowDef, states: Record<string, NodeRunStatus>): string {
+export function buildNodePrompt(node: WorkflowNode, def: WorkflowDef, states: Record<string, NodeRunStatus>, startInput: string | null = null): string {
   const upstream = node.dependsOn.map((id) => {
     const dep = def.nodes.find((n) => n.id === id);
     const output = states[id]?.output ?? '';
@@ -33,6 +33,8 @@ export function buildNodePrompt(node: WorkflowNode, def: WorkflowDef, states: Re
   });
   return [
     `你正在執行工作流中的一個步驟：「${node.title}」。`,
+    // 啟動時輸入只給沒有依賴的入口節點，下游經由上游輸出取得
+    !node.dependsOn.length && startInput ? `## 本次執行的輸入\n${startInput}` : '',
     upstream.length ? `${upstream.join('\n\n')}\n` : '',
     `## 你的任務\n${node.instruction}`,
     '完成後直接給出這一步的結果，供後續步驟使用。',
@@ -58,12 +60,12 @@ export class WorkflowRunner {
   }
 
   /** 開始執行。已有執行中 run 時回傳 null。回傳的 promise 只代表已建立，執行在背景進行。 */
-  start(agent: MultiAgent & { userId: number }): { run: WorkflowRun; done: Promise<void> } | null {
+  start(agent: MultiAgent & { userId: number }, startInput: string | null = null): { run: WorkflowRun; done: Promise<void> } | null {
     const def = agent.definition as WorkflowDef;
     const initial: Record<string, NodeRunStatus> = Object.fromEntries(
       def.nodes.map((n) => [n.id, { state: 'pending', progress: 0 }]),
     );
-    const run = multiAgentsDb.createRun(agent, initial);
+    const run = multiAgentsDb.createRun(agent, initial, startInput?.trim() || null);
     if (!run) return null;
     const active = new ActiveRun(run, agent);
     this.active.set(run.id, active);
@@ -148,7 +150,7 @@ export class WorkflowRunner {
       permissionMode: node.permissionMode ?? getDefaultPermissionMode(node.provider!),
       cwd: agent.workspacePath,
       sessionId: null,
-      prompt: buildNodePrompt(node, run.definition, run.nodeStates),
+      prompt: buildNodePrompt(node, run.definition, run.nodeStates, run.startInput),
       onEvent: () => {
         if (state.state !== 'running') return;
         state.progress = nextProgress(state.progress);

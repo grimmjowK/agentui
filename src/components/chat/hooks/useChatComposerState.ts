@@ -671,9 +671,11 @@ export function useChatComposerState({
       const effectiveSessionIdForBuilder =
         currentSessionId || selectedSession?.id || null;
       // 建立器：新會話的第一則訊息附上建立器說明（之後在同一會話內 AI 已知道格式）
-      const messageContent = builder && !effectiveSessionIdForBuilder
-        ? wrapCommandContext('multi-agent-builder', builder.promptPrefix, mentionResolution.resolvedText)
+      const attachBuilderPrompt = Boolean(builder && (!effectiveSessionIdForBuilder || builder.resendPrompt));
+      const messageContent = attachBuilderPrompt
+        ? wrapCommandContext('multi-agent-builder', builder!.promptPrefix, mentionResolution.resolvedText)
         : mentionResolution.resolvedText;
+      if (attachBuilderPrompt) builder!.onPromptDelivered?.();
       const effort = resolveEffort(provider, thinkingMode);
       const effortOption = effort === 'default' ? {} : { effort };
 

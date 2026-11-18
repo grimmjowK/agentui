@@ -8,6 +8,12 @@ import type { MultiAgentKind } from '../types/types';
 
 export const DEFINITION_LANGUAGE = 'multi-agent-json';
 
+/**
+ * 建立器說明的版本。格式有變（例如新增節點類型）時遞增，
+ * 既有建立器會話的下一則訊息會重新附上最新說明。
+ */
+export const BUILDER_PROMPT_VERSION = 2;
+
 type ModelHint = { provider: LLMProvider; models: string[] };
 
 function modelSection(hints: ModelHint[]): string {

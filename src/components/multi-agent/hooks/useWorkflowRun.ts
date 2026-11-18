@@ -52,10 +52,10 @@ export function useWorkflowRun(multiAgentId: string) {
     });
   }, [latestMessage, multiAgentId, reload]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (input = '') => {
     setError(null);
     try {
-      setRun(await readData<WorkflowRun>(api.multiAgent.startRun(multiAgentId)));
+      setRun(await readData<WorkflowRun>(api.multiAgent.startRun(multiAgentId, input)));
     } catch (err) {
       setError((err as Error).message);
     }

@@ -53,6 +53,7 @@ type RunRow = {
   definition_version: number;
   definition_snapshot_json: string;
   node_states_json: string;
+  start_input: string | null;
   started_at: string;
   finished_at: string | null;
 };
@@ -106,6 +107,7 @@ const toRun = (row: RunRow): WorkflowRun => ({
   definitionVersion: row.definition_version,
   definition: parse<WorkflowDef>(row.definition_snapshot_json, { nodes: [] }),
   nodeStates: parse<Record<string, NodeRunStatus>>(row.node_states_json, {}),
+  startInput: row.start_input ?? null,
   startedAt: row.started_at,
   finishedAt: row.finished_at,
 });
@@ -155,6 +157,12 @@ export const multiAgentsDb = {
     return this.get(userId, id)!;
   },
 
+  setWorkspacePath(userId: UserId, id: string, workspacePath: string): boolean {
+    return getConnection()
+      .prepare('UPDATE multi_agents SET workspace_path = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+      .run(workspacePath, now(), id, userId).changes > 0;
+  },
+
   rename(userId: UserId, id: string, name: string): boolean {
     return getConnection()
       .prepare('UPDATE multi_agents SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?')
@@ -170,7 +178,7 @@ export const multiAgentsDb = {
     return changed ? this.get(userId, id) : null;
   },
 
-  setBuilderSession(userId: UserId, id: string, session: { provider: LLMProvider; sessionId: string }): boolean {
+  setBuilderSession(userId: UserId, id: string, session: { provider: LLMProvider; sessionId: string; promptVersion?: number }): boolean {
     return getConnection()
       .prepare('UPDATE multi_agents SET builder_session_json = ? WHERE id = ? AND user_id = ?')
       .run(JSON.stringify(session), id, userId).changes > 0;
@@ -207,7 +215,7 @@ export const multiAgentsDb = {
   // ----------------- 工作流執行 -----------------
 
   /** 建立 run 並保存定義快照；已有 running/stopping run 時回傳 null */
-  createRun(agent: MultiAgent, nodeStates: Record<string, NodeRunStatus>): WorkflowRun | null {
+  createRun(agent: MultiAgent, nodeStates: Record<string, NodeRunStatus>, startInput: string | null = null): WorkflowRun | null {
     const db = getConnection();
     return db.transaction(() => {
       const active = db.prepare(
@@ -216,9 +224,9 @@ export const multiAgentsDb = {
       if (active) return null;
       const id = crypto.randomUUID();
       db.prepare(`INSERT INTO multi_agent_runs
-                  (id, multi_agent_id, status, definition_version, definition_snapshot_json, node_states_json, started_at)
-                  VALUES (?, ?, 'running', ?, ?, ?, ?)`)
-        .run(id, agent.id, agent.definitionVersion, JSON.stringify(agent.definition), JSON.stringify(nodeStates), now());
+                  (id, multi_agent_id, status, definition_version, definition_snapshot_json, node_states_json, start_input, started_at)
+                  VALUES (?, ?, 'running', ?, ?, ?, ?, ?)`)
+        .run(id, agent.id, agent.definitionVersion, JSON.stringify(agent.definition), JSON.stringify(nodeStates), startInput, now());
       return toRun(db.prepare('SELECT * FROM multi_agent_runs WHERE id = ?').get(id) as RunRow);
     })();
   },

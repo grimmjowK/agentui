@@ -13,6 +13,7 @@ import { readData } from '../utils/fetchJson';
 import BuilderView from './subcomponents/BuilderView';
 import ChatroomView from './subcomponents/ChatroomView';
 import WorkflowView from './subcomponents/WorkflowView';
+import WorkspaceButton from './subcomponents/WorkspaceButton';
 
 type MultiAgentPageProps = {
   multiAgentId: string;
@@ -67,6 +68,7 @@ export default function MultiAgentPage({ multiAgentId, isMobile, onMenuClick }: 
                 {!agent.definition && ` · ${t('page.draft')}`}
               </p>
             </div>
+            <WorkspaceButton agent={agent} onChange={handleAgentChange} />
             {agent.definition && (editing ? (
               <button
                 type="button"
@@ -97,7 +99,7 @@ export default function MultiAgentPage({ multiAgentId, isMobile, onMenuClick }: 
         )}
         {status === 'ready' && agent && (
           showBuilder ? (
-            <BuilderView key={`${agent.id}:builder`} agent={agent} onDefinitionSaved={handleDefinitionSaved} />
+            <BuilderView key={`${agent.id}:builder`} agent={agent} editing={editing} onDefinitionSaved={handleDefinitionSaved} />
           ) : agent.kind === 'workflow' ? (
             <WorkflowView key={agent.id} agent={agent} onAgentChange={handleAgentChange} />
           ) : (

@@ -84,6 +84,9 @@ export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps
               : run?.status === 'succeeded' ? 'bg-emerald-500'
                 : run && run.status !== 'running' ? 'bg-destructive' : 'bg-muted-foreground/40')} />
             {statusLabel}
+            {run?.startInput && (
+              <span className="max-w-xs truncate rounded-md bg-muted px-2 py-0.5" title={run.startInput}>{run.startInput}</span>
+            )}
           </div>
           <div className="flex items-center gap-2">
           <RunHistory
@@ -161,7 +164,8 @@ export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps
           hasParallel={hasParallel}
           modelText={nodeModelText}
           onCancel={() => setConfirming(false)}
-          onConfirm={() => { setConfirming(false); void start(); }}
+          workspacePath={agent.workspacePath}
+          onConfirm={(input) => { setConfirming(false); void start(input); }}
         />
       )}
     </div>
@@ -417,14 +421,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function StartConfirm({ def, hasParallel, modelText, onCancel, onConfirm }: {
+function StartConfirm({ def, hasParallel, workspacePath, modelText, onCancel, onConfirm }: {
   def: WorkflowDef;
   hasParallel: boolean;
+  workspacePath: string;
   modelText: (node: WorkflowNode) => string;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: (input: string) => void;
 }) {
   const { t } = useTranslation('multiAgent');
+  const [input, setInput] = useState('');
   useEffect(() => {
     const esc = (event: KeyboardEvent) => { if (event.key === 'Escape') onCancel(); };
     document.addEventListener('keydown', esc);
@@ -446,6 +452,19 @@ function StartConfirm({ def, hasParallel, modelText, onCancel, onConfirm }: {
             </li>
           ))}
         </ul>
+        <label className="mt-4 block">
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">{t('workflow.startInput')}</span>
+          <textarea
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            rows={3}
+            placeholder={t('workflow.startInputPlaceholder')}
+            className="w-full resize-y rounded-lg border border-border/70 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
+          />
+        </label>
+        <p className="mt-2 truncate text-[11px] text-muted-foreground" title={workspacePath}>
+          {t('workspace.title')}: {workspacePath}
+        </p>
         {hasParallel && (
           <p className="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-2 text-xs text-amber-700 dark:text-amber-300">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
@@ -454,7 +473,7 @@ function StartConfirm({ def, hasParallel, modelText, onCancel, onConfirm }: {
         )}
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent">{t('list.cancel')}</button>
-          <button type="button" autoFocus onClick={onConfirm} className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+          <button type="button" onClick={() => onConfirm(input)} className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
             {t('workflow.confirm')}
           </button>
         </div>

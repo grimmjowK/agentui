@@ -94,7 +94,9 @@
       "planTitle": "模型完成规划，请求继续执行",
       "allow": "允许",
       "deny": "拒绝"
-    }
+    },
+    "startInput": "本次执行的输入（可选）",
+    "startInputPlaceholder": "会附给没有依赖的起始步骤，例如：只处理工单 18350"
   },
   "chatroom": {
     "placeholder": "发消息，可 @ 角色或 @所有人",
@@ -137,5 +139,9 @@
     "loadFailed": "加载失败",
     "saveFailed": "保存失败",
     "busy": "正在执行，请结束后再试。"
+  },
+  "workspace": {
+    "title": "工作目录",
+    "default": "默认目录（未绑定项目）"
   }
 }

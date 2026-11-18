@@ -146,3 +146,15 @@ test('停止時等待中的人工確認節點被駁回', async () => {
     assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.status, 'stopped');
   });
 });
+
+test('啟動時輸入只附給入口節點，並保存在 run', async () => {
+  await withDb(async () => {
+    const { mock, runner, agent } = setup({ nodes: [node('a'), node('b', ['a'])] }, say('ok'));
+    const started = runner.start(agent, '只處理工單 18350')!;
+    await started.done;
+    assert.match(mock.calls[0].prompt, /本次執行的輸入\n只處理工單 18350/);
+    assert.doesNotMatch(mock.calls[1].prompt, /本次執行的輸入/);
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.startInput, '只處理工單 18350');
+    assert.equal(mock.calls[0].options.cwd, '/tmp');
+  });
+});
