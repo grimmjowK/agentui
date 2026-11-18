@@ -120,6 +120,11 @@ export const api = {
       authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs`, { method: 'POST', body: JSON.stringify({ input }) }),
     listRuns: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs`),
     latestRun: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs/latest`),
+    finishNode: (id, runId, nodeId, outcome) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/finish`,
+        { method: 'POST', body: JSON.stringify({ outcome }) },
+      ),
     confirmNode: (id, runId, nodeId, approved, note) =>
       authenticatedFetch(
         `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/confirm`,
@@ -153,6 +158,8 @@ export const api = {
     authenticatedFetch(`/api/providers/sessions/${sessionId}/restore`, {
       method: 'POST',
     }),
+  getSessionInfo: (sessionId) =>
+    authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}`),
   // session 最後使用的模型（存在後端資料庫）
   getSessionModel: (sessionId) =>
     authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/model`),

@@ -62,8 +62,9 @@ export type MultiAgent = {
 /**
  * waiting_approval：tool 審批（模型要調用工具，等全域審批收件匣處理）
  * waiting_confirmation：人工確認節點，等使用者在畫布上核准／駁回
+ * waiting_input：使用者在聊天頁中斷節點，等待新指示、以目前輸出完成或標記失敗
  */
-export type NodeRunState = 'pending' | 'running' | 'waiting_approval' | 'waiting_confirmation' | 'succeeded' | 'failed' | 'skipped';
+export type NodeRunState = 'pending' | 'running' | 'waiting_approval' | 'waiting_confirmation' | 'waiting_input' | 'succeeded' | 'failed' | 'skipped';
 export type NodeRunStatus = {
   state: NodeRunState;
   progress: number;

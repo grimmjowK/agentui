@@ -79,6 +79,16 @@ export function useWorkflowRun(multiAgentId: string) {
     }
   }, [multiAgentId, run]);
 
+  /** waiting_input 節點：以目前輸出完成或標記失敗 */
+  const finishNode = useCallback(async (nodeId: string, outcome: 'complete' | 'fail') => {
+    if (!run) return;
+    try {
+      await readData(api.multiAgent.finishNode(multiAgentId, run.id, nodeId, outcome));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [multiAgentId, run]);
+
   const isRunning = run?.status === 'running' || run?.status === 'stopping';
-  return { run, isRunning, start, stop, confirm, error, clearError: () => setError(null), setRun };
+  return { run, isRunning, start, stop, confirm, finishNode, error, clearError: () => setError(null), setRun };
 }

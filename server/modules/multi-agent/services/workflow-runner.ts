@@ -7,6 +7,7 @@ import { sendToUser } from '@/modules/websocket/index.js';
 
 import { isApprovalNode, type MultiAgent, type NodeRunStatus, type WorkflowDef, type WorkflowNode, type WorkflowRun } from '../../../../shared/multiAgent.js';
 import { getDefaultPermissionMode } from '../../../../shared/providers.js';
+import { workflowSessions, type LiveWorkflowSession } from '@/shared/workflow-session-registry.js';
 
 import { AgentCall, truncateCodePoints, type RuntimeResolver } from './agent-call.js';
 
@@ -41,10 +42,15 @@ export function buildNodePrompt(node: WorkflowNode, def: WorkflowDef, states: Re
   ].filter(Boolean).join('\n\n');
 }
 
+/** waiting_input 的出口：送出新指示續接、以目前輸出完成、標記失敗 */
+type InputDecision = { kind: 'resume'; text: string; clientId: string } | { kind: 'complete' } | { kind: 'fail' };
+
 class ActiveRun {
   readonly calls = new Map<string, AgentCall>();
   /** 等待人工確認的節點：resolve 後 runner 繼續（true=核准） */
   readonly confirmations = new Map<string, (approved: boolean, note: string) => void>();
+  /** 使用者中斷後等待指示的節點（waiting_input） */
+  readonly inputs = new Map<string, (decision: InputDecision) => void>();
   stopping = false;
   constructor(readonly run: WorkflowRun, readonly agent: MultiAgent & { userId: number }) {}
 }
@@ -87,6 +93,7 @@ export class WorkflowRunner {
     this.persist(active);
     this.emitRun(active);
     for (const resolve of [...active.confirmations.values()]) resolve(false, '');
+    for (const resolve of [...active.inputs.values()]) resolve({ kind: 'fail' });
     await Promise.all([...active.calls.values()].map((call) => call.abort()));
     return true;
   }
@@ -143,6 +150,8 @@ export class WorkflowRunner {
     this.persist(active);
 
     let lastEmit = 0;
+    let userInterrupted = false;
+    let waiting: ((decision: InputDecision) => void) | null = null;
     const call = new AgentCall({
       userId: agent.userId,
       provider: node.provider!,
@@ -151,6 +160,7 @@ export class WorkflowRunner {
       cwd: agent.workspacePath,
       sessionId: null,
       prompt: buildNodePrompt(node, run.definition, run.nodeStates, run.startInput),
+      persist: true,
       onEvent: () => {
         if (state.state !== 'running') return;
         state.progress = nextProgress(state.progress);
@@ -158,31 +168,87 @@ export class WorkflowRunner {
         if (t - lastEmit > 300) { lastEmit = t; this.emitNode(active, node.id); }
       },
       onOutput: (text) => { state.output = text; },
-      onSessionId: (sessionId) => { state.sessionId = sessionId; this.emitNode(active, node.id); },
-      onApprovalChange: (waiting) => {
+      onSessionId: (sessionId) => {
+        // 先登記再讓事件繼續：同步器第一次索引這個會話時它已在側邊欄排除名單
+        multiAgentsDb.addWorkflowSession({ sessionId, multiAgentId: agent.id, runId: run.id, nodeId: node.id, userId: agent.userId });
+        if (state.sessionId && state.sessionId !== sessionId) workflowSessions.unregister(state.sessionId, live);
+        state.sessionId = sessionId;
+        workflowSessions.register(sessionId, live);
+        this.emitNode(active, node.id);
+      },
+      onApprovalChange: (waitingApproval) => {
         if (state.state === 'running' || state.state === 'waiting_approval') {
-          state.state = waiting ? 'waiting_approval' : 'running';
+          state.state = waitingApproval ? 'waiting_approval' : 'running';
           this.emitNode(active, node.id);
         }
       },
     }, this.resolveRuntime);
+    const live: LiveWorkflowSession = {
+      multiAgentId: agent.id,
+      runId: run.id,
+      nodeId: node.id,
+      nodeTitle: node.title,
+      userId: agent.userId,
+      state: () => (waiting ? 'waiting_input' : 'running'),
+      markUserInterrupted: () => { userInterrupted = true; },
+      resume: (text, clientId) => {
+        if (!waiting) return false;
+        waiting({ kind: 'resume', text, clientId });
+        return true;
+      },
+    };
     active.calls.set(node.id, call);
 
-    const result = await call.run();
-    active.calls.delete(node.id);
-    state.output = result.text;
-    if (active.stopping || result.status === 'aborted') {
-      state.state = 'failed';
-      state.error = 'stopped';
-    } else if (result.status === 'succeeded') {
-      state.state = 'succeeded';
-      state.progress = 100;
-    } else {
-      state.state = 'failed';
-      state.error = result.error ?? result.status;
+    try {
+      let result = await call.run();
+      // 聊天頁中斷：不判定失敗，等使用者的下一步（design D4）
+      while (!active.stopping && result.status === 'aborted' && userInterrupted) {
+        userInterrupted = false;
+        state.state = 'waiting_input';
+        state.output = result.text;
+        this.persist(active);
+        this.emitNode(active, node.id);
+        const decision = await new Promise<InputDecision>((resolve) => {
+          waiting = resolve;
+          active.inputs.set(node.id, resolve);
+        });
+        waiting = null;
+        active.inputs.delete(node.id);
+        if (decision.kind !== 'resume' || active.stopping) {
+          result = decision.kind === 'complete' && !active.stopping
+            ? { ...result, status: 'succeeded', error: null }
+            : { ...result, status: 'failed', error: active.stopping ? 'stopped' : 'rejected' };
+          break;
+        }
+        state.state = 'running';
+        this.emitNode(active, node.id);
+        result = await call.run(decision.text, decision.clientId);
+      }
+      state.output = result.text;
+      if (active.stopping || result.status === 'aborted') {
+        state.state = 'failed';
+        state.error = 'stopped';
+      } else if (result.status === 'succeeded') {
+        state.state = 'succeeded';
+        state.progress = 100;
+      } else {
+        state.state = 'failed';
+        state.error = result.error ?? result.status;
+      }
+    } finally {
+      active.calls.delete(node.id);
+      if (state.sessionId) workflowSessions.unregister(state.sessionId, live);
     }
     this.persist(active);
     this.emitNode(active, node.id);
+  }
+
+  /** waiting_input 的畫布操作：以目前輸出完成或標記失敗。節點不在等待時回傳 false。 */
+  finishWaitingInput(runId: string, nodeId: string, outcome: 'complete' | 'fail'): boolean {
+    const resolve = this.active.get(runId)?.inputs.get(nodeId);
+    if (!resolve) return false;
+    resolve({ kind: outcome });
+    return true;
   }
 
   /** 人工確認節點：暫停執行，等使用者核准／駁回；停止時直接略過。 */

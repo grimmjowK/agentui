@@ -67,7 +67,8 @@
       "succeeded": "完成",
       "failed": "失败",
       "skipped": "已跳过",
-      "waiting_confirmation": "等待确认"
+      "waiting_confirmation": "等待确认",
+      "waiting_input": "等待指示"
     },
     "node": {
       "instruction": "执行内容",
@@ -79,7 +80,8 @@
       "save": "保存",
       "saved": "已保存",
       "error": "错误",
-      "dependsOn": "依赖"
+      "dependsOn": "依赖",
+      "openChat": "打开对话"
     },
     "approvalNode": "人工确认",
     "approval": {
@@ -96,7 +98,13 @@
       "deny": "拒绝"
     },
     "startInput": "本次执行的输入（可选）",
-    "startInputPlaceholder": "会附给没有依赖的起始步骤，例如：只处理工单 18350"
+    "startInputPlaceholder": "会附给没有依赖的起始步骤，例如：只处理工单 18350",
+    "input": {
+      "waiting": "已在对话中中断，等待你的指示",
+      "hint": "在对话页送出新指示会以同一会话继续这个节点。",
+      "complete": "以目前输出完成",
+      "fail": "标记失败"
+    }
   },
   "chatroom": {
     "placeholder": "发消息，可 @ 角色或 @所有人",
@@ -143,5 +151,9 @@
   "workspace": {
     "title": "工作目录",
     "default": "默认目录（未绑定项目）"
+  },
+  "session": {
+    "badge": "工作流节点",
+    "back": "返回流程图"
   }
 }

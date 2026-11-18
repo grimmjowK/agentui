@@ -204,6 +204,18 @@ router.post('/:id/runs/:runId/nodes/:nodeId/confirm', asyncHandler(async (req: R
   res.json(createApiSuccessResponse({ ok }));
 }));
 
+/** 使用者中斷後等待指示的節點：{ outcome: 'complete' | 'fail' } */
+router.post('/:id/runs/:runId/nodes/:nodeId/finish', asyncHandler(async (req: Request, res: Response) => {
+  const agent = requireAgent(req);
+  const run = multiAgentsDb.getRun(agent.id, String(req.params.runId));
+  if (!run) throw new AppError('Run not found', { statusCode: 404, code: 'NOT_FOUND' });
+  const outcome = req.body?.outcome;
+  if (outcome !== 'complete' && outcome !== 'fail') throw badRequest("outcome must be 'complete' or 'fail'");
+  const ok = workflowRunner.finishWaitingInput(run.id, String(req.params.nodeId), outcome);
+  if (!ok) throw new AppError('Node is not waiting for input', { statusCode: 409, code: 'NOT_WAITING' });
+  res.json(createApiSuccessResponse({ ok }));
+}));
+
 router.post('/:id/runs/:runId/stop', asyncHandler(async (req: Request, res: Response) => {
   const agent = requireAgent(req);
   const run = multiAgentsDb.getRun(agent.id, String(req.params.runId));

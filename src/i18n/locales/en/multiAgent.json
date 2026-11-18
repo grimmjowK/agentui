@@ -67,7 +67,8 @@
       "succeeded": "Done",
       "failed": "Failed",
       "skipped": "Skipped",
-      "waiting_confirmation": "Waiting for confirmation"
+      "waiting_confirmation": "Waiting for confirmation",
+      "waiting_input": "Waiting for input"
     },
     "node": {
       "instruction": "Instruction",
@@ -79,7 +80,8 @@
       "save": "Save",
       "saved": "Saved",
       "error": "Error",
-      "dependsOn": "Depends on"
+      "dependsOn": "Depends on",
+      "openChat": "Open chat"
     },
     "approvalNode": "Manual confirmation",
     "approval": {
@@ -96,7 +98,13 @@
       "deny": "Deny"
     },
     "startInput": "Input for this run (optional)",
-    "startInputPlaceholder": "Passed to the entry steps, e.g. only process ticket 18350"
+    "startInputPlaceholder": "Passed to the entry steps, e.g. only process ticket 18350",
+    "input": {
+      "waiting": "Interrupted in chat — waiting for your instruction",
+      "hint": "Sending a new message in the chat continues this node in the same session.",
+      "complete": "Complete with current output",
+      "fail": "Mark as failed"
+    }
   },
   "chatroom": {
     "placeholder": "Message the group, @ a role or @everyone",
@@ -143,5 +151,9 @@
   "workspace": {
     "title": "Working directory",
     "default": "Default directory (no project)"
+  },
+  "session": {
+    "badge": "Workflow node",
+    "back": "Back to workflow"
   }
 }

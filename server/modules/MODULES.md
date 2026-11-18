@@ -40,6 +40,9 @@
 定義型別與校驗在 `shared/multiAgent.ts`，持久化在 `database/repositories/multi-agents.db.ts`。
 - `services/agent-call.ts`：一次 provider runtime 呼叫的封裝（收集輸出、sessionId、中止、超時、轉推審批事件）。
 - `services/workflow-runner.ts`：按 DAG 執行，就緒節點並行上限 3，失敗下游略過；狀態以 `multi-agent-run` 推送。
+  節點會話寫入 `session_messages` 並推給使用者所有連線（`AgentCall` persist），sessionId 登記在 `workflow_sessions`（側邊欄／檢索排除）
+  與執行中登記 `server/shared/workflow-session-registry.ts`：聊天頁只旁觀不搶占；聊天頁中斷後節點進入 `waiting_input`，
+  新訊息以同一 sessionId 續接，或在畫布「以目前輸出完成」／「標記失敗」（`POST .../nodes/:nodeId/finish`）。
 - `services/chatroom-dispatcher.ts`：每聊天室一個回合，忙碌時訊息排隊；@ 調度、字數截斷、每輪上限、120 秒超時；
   成員 session 依變更類型續接或重建（`PROVIDER_INFO.capabilities.resumeAcrossModels`）。事件 `multi-agent-message` / `multi-agent-turn`。
 - 事件只推給擁有者：`websocket` 的 `sendToUser(userId, event)`。

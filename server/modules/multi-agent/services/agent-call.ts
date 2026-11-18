@@ -2,8 +2,10 @@
  * 一次 provider runtime 呼叫的封裝：收集輸出、追蹤 sessionId、支援中止與超時。
  * 工作流節點與聊天室成員共用（multi-agent-workspace design D5/D6）。
  */
+import { randomUUID } from 'node:crypto';
+
 import { providerRegistry } from '@/modules/providers/index.js';
-import { sendToUser } from '@/modules/websocket/index.js';
+import { LoggingWriter, sendToUser } from '@/modules/websocket/index.js';
 import type { IProviderRuntime, ProviderRuntimeWriter } from '@/shared/interfaces.js';
 
 import { PROVIDER_INFO, type LLMProvider, type PermissionMode } from '../../../../shared/providers.js';
@@ -25,6 +27,11 @@ export type AgentCallOptions = {
   /** 審批狀態變化 */
   onApprovalChange?: (waiting: boolean) => void;
   onSessionId?: (sessionId: string) => void;
+  /**
+   * 寫進會話訊息紀錄並推給使用者所有連線（工作流節點，node-live-session D1）。
+   * 聊天頁打開該會話時看得到工具調用、串流與審批。
+   */
+  persist?: boolean;
 };
 
 export type AgentCallResult = {
@@ -55,6 +62,9 @@ export class AgentCall {
   private readonly waiting = new Set<string>();
   private readonly runtime: IProviderRuntime;
   private readonly writer: ProviderRuntimeWriter;
+  private rounds = 0;
+  /** 目前這一輪實際交給 runtime 的 writer（persist 時是 LoggingWriter） */
+  private activeWriter: ProviderRuntimeWriter | null = null;
 
   constructor(private readonly options: AgentCallOptions, resolveRuntime: RuntimeResolver = defaultResolver) {
     this.sessionId = options.sessionId;
@@ -70,8 +80,22 @@ export class AgentCall {
     return [...this.completed, this.segment].filter(Boolean).join('\n\n');
   }
 
-  async run(): Promise<AgentCallResult> {
+  /**
+   * 執行一輪。prompt 省略時用建構時的提示；之後的輪次（中斷後續接）以同一 sessionId 續接，
+   * 輸出累加在前面已有的文字之後。clientId 用於前端對應樂觀顯示的使用者訊息。
+   */
+  async run(prompt = this.options.prompt, clientId: string = randomUUID()): Promise<AgentCallResult> {
     const { provider, permissionMode } = this.options;
+    // 前一輪被中斷時殘留的串流段落，併入已完成的輸出
+    if (this.segment) { this.completed.push(this.segment); this.segment = ''; }
+    this.aborted = false;
+    this.timedOut = false;
+    this.error = null;
+    this.exitFailed = false;
+    const resume = this.rounds > 0 ? true : Boolean(this.options.sessionId);
+    this.rounds += 1;
+    const writer = this.options.persist ? this.createLoggingWriter(prompt, clientId) : this.writer;
+    this.activeWriter = writer;
     const info = PROVIDER_INFO[provider];
     const mode = info.mapPermissionMode ? info.mapPermissionMode(permissionMode) : permissionMode;
     let elapsed = 0;
@@ -86,26 +110,45 @@ export class AgentCall {
       }, agentCallTiming.tickMs)
       : null;
     try {
-      await this.runtime.start(this.options.prompt, {
+      await this.runtime.start(prompt, {
         cwd: this.options.cwd,
         projectPath: this.options.cwd,
-        sessionId: this.options.sessionId,
-        resume: Boolean(this.options.sessionId),
+        sessionId: this.sessionId,
+        resume,
         model: this.options.model,
         permissionMode: mode,
         // Cursor 只認 skipPermissions
         skipPermissions: mode === 'bypassPermissions',
-      }, this.writer);
+      }, writer);
     } catch (error) {
       this.error ??= error instanceof Error ? error.message : String(error);
     } finally {
       if (timer) clearInterval(timer);
+      if (writer instanceof LoggingWriter) writer.finish();
+      this.activeWriter = null;
     }
     const status = this.timedOut ? 'timeout'
       : this.aborted ? 'aborted'
         : this.error || this.exitFailed ? 'failed'
           : 'succeeded';
     return { status, sessionId: this.sessionId, text: this.text, error: this.error };
+  }
+
+  /** LoggingWriter(inner = 扇出)：執行器自己處理事件，同時推給使用者所有連線 */
+  private createLoggingWriter(prompt: string, clientId: string): LoggingWriter {
+    const { userId, provider } = this.options;
+    const fanout: ProviderRuntimeWriter = {
+      userId,
+      send: (data) => {
+        this.handle(data);
+        // session_created 不推：停在「新會話」頁的聊天頁會把它當成自己的新會話而跳轉
+        if ((data as Event | null)?.kind !== 'session_created') sendToUser(userId, data);
+      },
+      setSessionId: (id) => this.captureSessionId(id),
+    };
+    const writer = new LoggingWriter(fanout, { initialSessionId: this.sessionId, userId, provider });
+    writer.recordUserMessage({ clientId, content: prompt, provider, sessionId: this.sessionId });
+    return writer;
   }
 
   /** 中止。尚未取得 sessionId 時延後到取得後再中止。 */
@@ -116,7 +159,7 @@ export class AgentCall {
       return;
     }
     try {
-      await this.runtime.abort(this.sessionId, this.writer);
+      await this.runtime.abort(this.sessionId, this.activeWriter ?? this.writer);
     } catch (error) {
       console.warn('[multi-agent] abort failed', error);
     }
@@ -147,12 +190,12 @@ export class AgentCall {
     switch (event.kind) {
       case 'permission_request':
         if (typeof event.requestId === 'string') this.setWaiting(event.requestId, true);
-        // 轉推給使用者，全域審批池才看得到
-        sendToUser(this.options.userId, { ...event, provider: event.provider ?? this.options.provider });
+        // 轉推給使用者，全域審批池才看得到（persist 時扇出已經推送）
+        if (!this.options.persist) sendToUser(this.options.userId, { ...event, provider: event.provider ?? this.options.provider });
         break;
       case 'permission_cancelled':
         if (typeof event.requestId === 'string') this.setWaiting(event.requestId, false);
-        sendToUser(this.options.userId, event);
+        if (!this.options.persist) sendToUser(this.options.userId, event);
         break;
       case 'stream_delta':
         if (typeof event.content === 'string' && !this.aborted) {
@@ -177,6 +220,8 @@ export class AgentCall {
         this.error = typeof event.content === 'string' && event.content ? event.content : 'Unknown error';
         break;
       case 'complete':
+        // 由外部（聊天頁停止）中斷時，執行器也要知道這一輪是被中斷的
+        if (event.aborted === true) this.aborted = true;
         if (typeof event.exitCode === 'number' && event.exitCode !== 0 && !event.aborted) this.exitFailed = true;
         if (typeof event.actualSessionId === 'string') this.captureSessionId(event.actualSessionId);
         break;

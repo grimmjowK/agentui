@@ -14,7 +14,8 @@ import {
   sendToClient,
 } from '@/modules/websocket/services/logging-writer.service.js';
 import { isSessionMessageLogEnabled } from '@/shared/session-message-log-flags.js';
-import { sessionsDb } from '@/modules/database/index.js';
+import { multiAgentsDb, sessionsDb } from '@/modules/database/index.js';
+import { workflowSessions } from '@/shared/workflow-session-registry.js';
 import { expandSessionMentions } from '@/modules/providers/index.js';
 import type { IProviderRuntime } from '@/shared/interfaces.js';
 import type {
@@ -133,6 +134,21 @@ function readRequestUserId(
   return null;
 }
 
+/** 會話屬於使用者的哪個工作流節點（聊天頁顯示節點標記與返回連結） */
+function workflowInfo(sessionId: string, userId: string | number | null) {
+  const entry = sessionId ? multiAgentsDb.getWorkflowSession(sessionId) : null;
+  if (!entry || String(entry.userId) !== String(userId)) return null;
+  const def = multiAgentsDb.getById(entry.multiAgentId)?.definition as { nodes?: Array<{ id: string; title: string }> } | null | undefined;
+  const nodeTitle = def?.nodes?.find((n) => n.id === entry.nodeId)?.title ?? null;
+  return { multiAgentId: entry.multiAgentId, runId: entry.runId, nodeId: entry.nodeId, nodeTitle };
+}
+
+/** 執行中的工作流節點會話，且屬於這位使用者 */
+function liveWorkflowSession(sessionId: unknown, userId: string | number | null) {
+  const live = workflowSessions.get(typeof sessionId === 'string' ? sessionId : null);
+  return live && String(live.userId) === String(userId) ? live : null;
+}
+
 /**
  * Handles authenticated chat websocket messages used by the main chat panel.
  */
@@ -168,6 +184,15 @@ export function handleChatConnection(
         const requestedSessionId = typeof data.options?.sessionId === 'string'
           ? data.options.sessionId
           : null;
+        // 工作流節點會話不走一般啟動：等待指示時交給執行器續接，執行中則請改用插話（design D4/D5）
+        const live = liveWorkflowSession(requestedSessionId, writer.userId);
+        if (live) {
+          if (!live.resume(data.command ?? '', clientId)) {
+            sendToClient(writer, createNormalizedMessage({ kind: 'task_notification', provider: id,
+              sessionId: requestedSessionId, status: 'warning', summary: 'Workflow node is running; send as a steer message instead.' }));
+          }
+          return;
+        }
         const loggingWriter = new LoggingWriter(writer, {
           initialSessionId: requestedSessionId,
           userId: writer.userId,
@@ -198,6 +223,8 @@ export function handleChatConnection(
       if (messageType === 'abort-session') {
         const { id, runtime } = resolveRuntime(registry, data.provider);
         const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
+        // 聊天頁停止工作流節點：節點等待新指示，而不是失敗
+        liveWorkflowSession(sessionId, writer.userId)?.markUserInterrupted();
         const registered = getLoggingWriterForSession(sessionId);
         const loggingWriter = registered
           ?? new LoggingWriter(writer, {
@@ -313,6 +340,20 @@ export function handleChatConnection(
           : null;
         // 關閉日誌讀路徑時前端走舊合併邏輯，重播的日誌行（user:<uuid> 等 id）會與 provider 歷史重複
         const replayEnabled = isSessionMessageLogEnabled();
+        const workflow = workflowInfo(sessionId, writer.userId);
+        const live = liveWorkflowSession(sessionId, writer.userId);
+        if (live) {
+          // 旁觀不搶占：輸出由執行器推給使用者所有連線，這裡只補齊漏掉的部分（design D2）
+          if (replayEnabled) {
+            if (registered) registered.replayAfterSeq(afterSeq, writer);
+            else {
+              const tempWriter = new LoggingWriter(writer, { initialSessionId: sessionId, userId: writer.userId, provider: id });
+              try { tempWriter.replayAfterSeq(afterSeq); } finally { tempWriter.finish(); }
+            }
+          }
+          writer.send({ type: 'session-status', sessionId, provider: id, isProcessing: live.state() === 'running', workflow });
+          return;
+        }
         if (registered) {
           registered.updateWebSocket(writer.ws);
           if (replayEnabled) registered.replayAfterSeq(afterSeq);
@@ -334,6 +375,7 @@ export function handleChatConnection(
           sessionId,
           provider: id,
           isProcessing,
+          ...(workflow ? { workflow } : {}),
         });
         return;
       }

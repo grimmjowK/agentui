@@ -331,7 +331,8 @@ export class LoggingWriter {
     return result.message;
   }
 
-  replayAfterSeq(afterSeq: number | null): void {
+  /** target 省略時重播給自己的 inner；旁觀的連線傳入自己的 writer，不改變 inner（node-live-session D2） */
+  replayAfterSeq(afterSeq: number | null, target: Pick<LoggingWriterInner, 'send'> = this.inner): void {
     if (!this.currentSessionId) return;
     // afterSeq 為 null 表示前端還沒有任何持久化訊息，首屏由 HTTP 分頁載入；
     // 這裡若全量重播，長會話會被整段推過 WS，分頁失效。
@@ -341,11 +342,11 @@ export class LoggingWriter {
         limit: null,
       });
       for (const message of page.messages) {
-        this.inner.send(message);
+        target.send(message);
       }
     }
     if (this.streamingText) {
-      this.inner.send({
+      target.send({
         kind: 'stream_delta',
         sessionId: this.currentSessionId,
         provider: this.provider,

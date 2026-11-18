@@ -202,6 +202,17 @@ CREATE TABLE IF NOT EXISTS multi_agent_messages (
     created_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_multi_agent_messages_seq ON multi_agent_messages(multi_agent_id, seq);
+
+-- 工作流節點產生的 provider 會話：側邊欄與檢索排除、聊天頁顯示節點標記（node-live-session D2）
+CREATE TABLE IF NOT EXISTS workflow_sessions (
+    session_id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_sessions_agent ON workflow_sessions(multi_agent_id);
 `;
 
 export const INIT_SCHEMA_SQL = `

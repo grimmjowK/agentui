@@ -3,6 +3,7 @@ import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo'
 import type { AppTab, Project, ProjectSession } from '../../../../types/app';
 import { usePlugins } from '../../../../contexts/PluginsContext';
 import SessionIdBadge from './SessionIdBadge';
+import WorkflowNodeBadge from './WorkflowNodeBadge';
 
 type MainContentTitleProps = {
   activeTab: AppTab;
@@ -72,6 +73,7 @@ export default function MainContentTitle({
             <div className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
               <span className="truncate">{selectedProject.displayName}</span>
               <SessionIdBadge sessionId={selectedSession.id} provider={selectedSession.__provider} />
+              <WorkflowNodeBadge sessionId={selectedSession.id} />
             </div>
           </div>
         ) : showChatNewSession ? (

@@ -21,6 +21,7 @@ export function createMockRuntime(script: Script) {
       concurrent += 1;
       maxConcurrent = Math.max(maxConcurrent, concurrent);
       const sessionId = typeof options.sessionId === 'string' && options.sessionId ? options.sessionId : `s${++counter}`;
+      abortedSessions.delete(sessionId); // 續接的新一輪不沿用上一輪的中止
       if (!options.sessionId) writer.send({ kind: 'session_created', newSessionId: sessionId, sessionId });
       try {
         await script({ prompt: command, options, writer, aborted: () => abortedSessions.has(sessionId), sessionId });

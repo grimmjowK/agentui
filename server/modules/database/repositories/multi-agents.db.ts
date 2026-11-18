@@ -208,8 +208,21 @@ export const multiAgentsDb = {
       db.prepare('DELETE FROM multi_agent_runs WHERE multi_agent_id = ?').run(id);
       db.prepare('DELETE FROM multi_agent_turns WHERE multi_agent_id = ?').run(id);
       db.prepare('DELETE FROM multi_agent_messages WHERE multi_agent_id = ?').run(id);
+      db.prepare('DELETE FROM workflow_sessions WHERE multi_agent_id = ?').run(id);
       return true;
     })();
+  },
+
+  /** 節點取得 sessionId 時登記；同一會話續接時保留第一次的登記 */
+  addWorkflowSession(entry: { sessionId: string; multiAgentId: string; runId: string; nodeId: string; userId: UserId }): void {
+    getConnection().prepare(`INSERT OR IGNORE INTO workflow_sessions (session_id, multi_agent_id, run_id, node_id, user_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(entry.sessionId, entry.multiAgentId, entry.runId, entry.nodeId, entry.userId, now());
+  },
+
+  getWorkflowSession(sessionId: string): { multiAgentId: string; runId: string; nodeId: string; userId: number } | null {
+    const row = getConnection().prepare('SELECT multi_agent_id, run_id, node_id, user_id FROM workflow_sessions WHERE session_id = ?')
+      .get(sessionId) as { multi_agent_id: string; run_id: string; node_id: string; user_id: number } | undefined;
+    return row ? { multiAgentId: row.multi_agent_id, runId: row.run_id, nodeId: row.node_id, userId: row.user_id } : null;
   },
 
   // ----------------- 工作流執行 -----------------
@@ -375,7 +388,7 @@ export const multiAgentsDb = {
       for (const run of runs) {
         const states = parse<Record<string, NodeRunStatus>>(run.node_states_json, {});
         for (const state of Object.values(states)) {
-          if (state.state === 'running' || state.state === 'waiting_approval' || state.state === 'waiting_confirmation') {
+          if (state.state === 'running' || state.state === 'waiting_approval' || state.state === 'waiting_confirmation' || state.state === 'waiting_input') {
             state.state = 'failed';
             state.error = 'interrupted';
           } else if (state.state === 'pending') {

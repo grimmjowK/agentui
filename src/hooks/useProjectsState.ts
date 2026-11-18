@@ -238,6 +238,11 @@ export function useProjectsState({
   isSessionActive,
 }: UseProjectsStateArgs) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const projectsRef = useRef<Project[]>([]);
+  projectsRef.current = projects;
+  const sessionInfoRequestedRef = useRef<string | null>(null);
+  /** 最近一次按 id 查到的會話上下文；URL effect 重跑時直接沿用，不退回 localStorage 猜測 */
+  const sessionInfoRef = useRef<{ sessionId: string; project: Project; session: ProjectSession } | null>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedSession, setSelectedSession] = useState<ProjectSession | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>(readPersistedTab);
@@ -477,7 +482,9 @@ export function useProjectsState({
       (session) => session.id === selectedSession.id,
     );
 
-    if (!updatedSelectedSession) {
+    // 只在會話原本列在專案下、這次消失（被刪除）時清掉；工作流節點會話本來就不在列表裡
+    const wasListed = getProjectSessions(selectedProject).some((session) => session.id === selectedSession.id);
+    if (!updatedSelectedSession && wasListed) {
       setSelectedSession(null);
     }
   }, [latestProjectEvent, selectedProject, selectedSession, isSessionActive, projects]);
@@ -518,6 +525,47 @@ export function useProjectsState({
     // right after `session_created` + navigate, before the next projects refresh).
     // Without a `selectedSession`, chat state clears `currentSessionId` and the
     // UI stops reading the session store even though messages stream under this id.
+    // 不在任何專案的會話（工作流節點會話被側邊欄排除）：按 id 查 provider 與專案組出上下文。
+    // 查到後快取；查不到（Claude 會話要等同步器索引 transcript）就在下一次專案更新時重查。
+    // 結果回來時 URL 已換成別的會話就丟棄。
+    const cached = sessionInfoRef.current;
+    if (cached?.sessionId === sessionId) {
+      if (selectedProject?.projectId !== cached.project.projectId) setSelectedProject(cached.project);
+      if (selectedSession?.id !== sessionId || selectedSession.__provider !== cached.session.__provider) setSelectedSession(cached.session);
+      return;
+    }
+    if (sessionInfoRequestedRef.current !== sessionId) {
+      sessionInfoRequestedRef.current = sessionId;
+      void api.getSessionInfo(sessionId)
+        .then((response: Response) => (response.ok ? response.json() : null))
+        .then((body: { data?: { provider: LLMProvider; projectId: string | null; projectPath: string | null; summary: string } } | null) => {
+          const info = body?.data;
+          if (sessionInfoRequestedRef.current !== sessionId) return;
+          if (!info?.projectId || !info.projectPath) {
+            sessionInfoRequestedRef.current = null;
+            return;
+          }
+          const project = projectsRef.current.find((p) => p.projectId === info.projectId) ?? {
+            projectId: info.projectId,
+            displayName: info.projectPath.split('/').filter(Boolean).pop() ?? info.projectPath,
+            fullPath: info.projectPath,
+            path: info.projectPath,
+          };
+          sessionInfoRef.current = {
+            sessionId,
+            project,
+            session: { id: sessionId, __provider: info.provider, __projectId: project.projectId, summary: info.summary },
+          };
+          setSelectedProject((current) => (current?.projectId === project.projectId ? current : project));
+          // 只在猜錯 provider 或專案時更正，避免剛建立的一般會話被換掉物件
+          setSelectedSession((current) => (current?.id === sessionId && current.__provider === info.provider
+            && current.__projectId === project.projectId
+            ? current
+            : { id: sessionId, __provider: info.provider, __projectId: project.projectId, summary: info.summary }));
+        })
+        .catch(() => { sessionInfoRequestedRef.current = null; });
+    }
+
     if (selectedSession?.id === sessionId) {
       return;
     }

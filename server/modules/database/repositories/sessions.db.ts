@@ -142,7 +142,8 @@ export const sessionsDb = {
       .prepare(
         `SELECT session_id, provider, project_path, jsonl_path, custom_name, isArchived, isStarred, created_at, updated_at
          FROM sessions
-         WHERE isArchived = 0`
+         WHERE isArchived = 0
+           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)`
       )
       .all() as SessionRow[];
   },
@@ -158,6 +159,7 @@ export const sessionsDb = {
         `SELECT session_id, provider, project_path, jsonl_path, custom_name, isArchived, isStarred, created_at, updated_at
          FROM sessions
          WHERE isArchived = 1
+           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)
          ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC`
       )
       .all() as SessionRow[];
@@ -171,7 +173,8 @@ export const sessionsDb = {
         `SELECT session_id, provider, project_path, jsonl_path, custom_name, isArchived, isStarred, created_at, updated_at
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0`
+           AND isArchived = 0
+           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)`
       )
       .all(normalizedProjectPath) as SessionRow[];
   },
@@ -201,6 +204,7 @@ export const sessionsDb = {
          FROM sessions
          WHERE project_path = ?
            AND isArchived = 0
+           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)
          ORDER BY isStarred DESC, datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ? OFFSET ?`
       )
@@ -215,7 +219,8 @@ export const sessionsDb = {
         `SELECT COUNT(*) AS count
          FROM sessions
          WHERE project_path = ?
-           AND isArchived = 0`
+           AND isArchived = 0
+           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)`
       )
       .get(normalizedProjectPath) as { count: number } | undefined;
 

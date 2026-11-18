@@ -1,0 +1,31 @@
+/**
+ * 執行中的工作流節點會話登記（node-live-session-and-agy-acp design D2）。
+ * 放在 shared，讓 WebSocket 層與工作流執行器都能引用而不互相依賴。
+ */
+export type LiveWorkflowSession = {
+  multiAgentId: string;
+  runId: string;
+  nodeId: string;
+  nodeTitle: string;
+  userId: string | number;
+  /** running：輸出中（含等待審批）；waiting_input：使用者中斷後等待新指示 */
+  state(): 'running' | 'waiting_input';
+  /** 使用者在聊天頁中斷：這一輪結束後節點進入 waiting_input 而不是失敗 */
+  markUserInterrupted(): void;
+  /** waiting_input 時送出新指示，以同一 sessionId 續接；非等待狀態回傳 false */
+  resume(text: string, clientId: string): boolean;
+};
+
+const live = new Map<string, LiveWorkflowSession>();
+
+export const workflowSessions = {
+  register(sessionId: string, entry: LiveWorkflowSession): void {
+    live.set(sessionId, entry);
+  },
+  unregister(sessionId: string, entry: LiveWorkflowSession): void {
+    if (live.get(sessionId) === entry) live.delete(sessionId);
+  },
+  get(sessionId: string | null | undefined): LiveWorkflowSession | null {
+    return (sessionId && live.get(sessionId)) || null;
+  },
+};

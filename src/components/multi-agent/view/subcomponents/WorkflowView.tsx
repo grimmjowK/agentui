@@ -2,7 +2,8 @@
  * 工作流頁面：流程圖 + 節點詳情抽屜 + 開始／停止（multi-agent-workflow spec）。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, CircleDashed, History, Loader2, UserCheck, Play, ShieldQuestion, SkipForward, Square, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, CircleDashed, History, Loader2, MessageSquare, PauseCircle, UserCheck, Play, ShieldQuestion, SkipForward, Square, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { isApprovalNode, layerWorkflow } from '../../../../../shared/multiAgent';
@@ -29,6 +30,7 @@ const STATE_STYLE: Record<NodeRunState, { icon: typeof Check; className: string;
   running: { icon: Loader2, className: 'text-primary animate-spin', bar: 'bg-primary' },
   waiting_approval: { icon: ShieldQuestion, className: 'text-amber-500', bar: 'bg-amber-500' },
   waiting_confirmation: { icon: UserCheck, className: 'text-amber-500 animate-pulse', bar: 'bg-amber-500' },
+  waiting_input: { icon: PauseCircle, className: 'text-amber-500 animate-pulse', bar: 'bg-amber-500' },
   succeeded: { icon: Check, className: 'text-emerald-500', bar: 'bg-emerald-500' },
   failed: { icon: X, className: 'text-destructive', bar: 'bg-destructive' },
   skipped: { icon: SkipForward, className: 'text-muted-foreground', bar: 'bg-muted-foreground/30' },
@@ -42,7 +44,7 @@ type WorkflowViewProps = {
 export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps) {
   const { t } = useTranslation('multiAgent');
   const models = useProviderModels();
-  const { run: latestRun, isRunning, start, stop, confirm, error, clearError } = useWorkflowRun(agent.id);
+  const { run: latestRun, isRunning, start, stop, confirm, finishNode, error, clearError } = useWorkflowRun(agent.id);
   /** 查看歷史執行時的快照；null 表示看最近一次 */
   const [historyRun, setHistoryRun] = useState<WorkflowRun | null>(null);
   const run = historyRun ?? latestRun;
@@ -60,7 +62,7 @@ export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps
 
   // 執行到人工確認節點時自動打開它的詳情，方便直接核准
   const waitingId = viewingHistory ? null
-    : Object.entries(states).find(([, s]) => s.state === 'waiting_confirmation' || s.state === 'waiting_approval')?.[0] ?? null;
+    : Object.entries(states).find(([, s]) => s.state === 'waiting_confirmation' || s.state === 'waiting_approval' || s.state === 'waiting_input')?.[0] ?? null;
   useEffect(() => { if (waitingId) setSelectedId(waitingId); }, [waitingId]);
 
   const saveNode = useCallback(async (next: WorkflowNode) => {
@@ -129,7 +131,7 @@ export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps
           nodeHeight={NODE_H}
           pannable
           className="min-h-0 flex-1 bg-[radial-gradient(circle,hsl(var(--border))_1px,transparent_1px)] [background-size:20px_20px]"
-          activeEdge={(from, to) => states[from]?.state === 'succeeded' && ['running', 'waiting_approval', 'waiting_confirmation'].includes(states[to]?.state ?? '')}
+          activeEdge={(from, to) => states[from]?.state === 'succeeded' && ['running', 'waiting_approval', 'waiting_confirmation', 'waiting_input'].includes(states[to]?.state ?? '')}
           renderNode={(node) => (
             <NodeCard
               node={node}
@@ -152,6 +154,7 @@ export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps
           readonly={isRunning || viewingHistory}
           canConfirm={!viewingHistory}
           onConfirm={(approved, note) => confirm(selected.id, approved, note)}
+          onFinish={(outcome) => finishNode(selected.id, outcome)}
           models={models}
           onSave={saveNode}
           onClose={() => setSelectedId(null)}
@@ -192,7 +195,7 @@ function NodeCard({ node, status, modelText, selected, onClick }: {
         selected ? 'border-primary ring-2 ring-primary/20' : 'border-border/70 hover:border-border',
         state === 'failed' && !selected && 'border-destructive/40',
         state === 'succeeded' && !selected && 'border-emerald-500/40',
-        state === 'waiting_confirmation' && !selected && 'border-amber-500/60',
+        (state === 'waiting_confirmation' || state === 'waiting_input') && !selected && 'border-amber-500/60',
         isApprovalNode(node) && 'border-dashed',
       )}
     >
@@ -222,7 +225,7 @@ function NodeCard({ node, status, modelText, selected, onClick }: {
   );
 }
 
-function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, onConfirm, models, onSave, onClose }: {
+function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, onConfirm, onFinish, models, onSave, onClose }: {
   node: WorkflowNode;
   status?: NodeRunStatus;
   /** 人工確認時要審閱的上游輸出 */
@@ -231,6 +234,7 @@ function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, on
   readonly: boolean;
   canConfirm: boolean;
   onConfirm: (approved: boolean, note: string) => Promise<void>;
+  onFinish: (outcome: 'complete' | 'fail') => Promise<void>;
   models: ReturnType<typeof useProviderModels>;
   onSave: (node: WorkflowNode) => Promise<void>;
   onClose: () => void;
@@ -244,7 +248,9 @@ function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, on
     || draft.provider !== node.provider || draft.permissionMode !== node.permissionMode;
   const approval = isApprovalNode(node);
   const permissionMode = draft.permissionMode ?? (draft.provider ? getDefaultPermissionMode(draft.provider) : 'default');
+  const navigate = useNavigate();
   const waitingConfirmation = canConfirm && status?.state === 'waiting_confirmation';
+  const waitingInput = canConfirm && status?.state === 'waiting_input';
   const viewingHistoryPanel = !canConfirm;
   const upstreamOutputs = node.dependsOn.map((id) => ({
     id,
@@ -256,6 +262,10 @@ function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, on
   const decide = async (approved: boolean) => {
     setConfirmingAction(true);
     try { await onConfirm(approved, note); } finally { setConfirmingAction(false); }
+  };
+  const finish = async (outcome: 'complete' | 'fail') => {
+    setConfirmingAction(true);
+    try { await onFinish(outcome); } finally { setConfirmingAction(false); }
   };
   const depTitles = node.dependsOn.map((id) => def.nodes.find((n) => n.id === id)?.title ?? id);
 
@@ -282,7 +292,42 @@ function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, on
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {readonly && !waitingConfirmation && <p className="rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">{t('workflow.node.readonly')}</p>}
+        {status?.sessionId && !approval && (
+          <button
+            type="button"
+            onClick={() => navigate(`/session/${encodeURIComponent(status.sessionId!)}`)}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />{t('workflow.node.openChat')}
+          </button>
+        )}
         {status?.sessionId && !viewingHistoryPanel && <NodeToolApprovals sessionId={status.sessionId} />}
+        {waitingInput && (
+          <div className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
+            <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+              <PauseCircle className="h-4 w-4 text-amber-500" />{t('workflow.input.waiting')}
+            </p>
+            <p className="text-xs text-muted-foreground">{t('workflow.input.hint')}</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={confirmingAction}
+                onClick={() => void finish('fail')}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50"
+              >
+                {t('workflow.input.fail')}
+              </button>
+              <button
+                type="button"
+                disabled={confirmingAction}
+                onClick={() => void finish('complete')}
+                className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                <Check className="h-3.5 w-3.5" />{t('workflow.input.complete')}
+              </button>
+            </div>
+          </div>
+        )}
         {waitingConfirmation && (
           <div className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
             <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">

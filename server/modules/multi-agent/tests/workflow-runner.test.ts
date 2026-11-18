@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection, initializeDatabase, multiAgentsDb } from '@/modules/database/index.js';
+import { closeConnection, initializeDatabase, multiAgentsDb, sessionMessagesDb, sessionsDb } from '@/modules/database/index.js';
+import { workflowSessions } from '@/shared/workflow-session-registry.js';
 import { WorkflowRunner } from '@/modules/multi-agent/services/workflow-runner.js';
 
 import type { WorkflowDef } from '../../../../shared/multiAgent.js';
@@ -157,4 +158,92 @@ test('啟動時輸入只附給入口節點，並保存在 run', async () => {
     assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.startInput, '只處理工單 18350');
     assert.equal(mock.calls[0].options.cwd, '/tmp');
   });
+});
+
+// ---------------- 節點會話（node-live-session-and-agy-acp） ----------------
+
+const waitFor = async (check: () => boolean, ms = 2000) => {
+  const until = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > until) throw new Error('timeout');
+    await tick(2);
+  }
+};
+
+/** 模擬聊天頁按停止：標記使用者中斷並呼叫 runtime.abort */
+async function interruptFromChat(mock: ReturnType<typeof createMockRuntime>, sessionId: string) {
+  workflowSessions.get(sessionId)!.markUserInterrupted();
+  await mock.runtime.abort(sessionId, { send() {} } as never);
+}
+
+test('節點事件寫入會話紀錄、登記 workflow_sessions，且不出現在專案會話列表', async () => {
+  await withDb(async () => {
+    const { runner, agent } = setup({ nodes: [node('a')] }, say('A-OUT'));
+    sessionsDb.createSession('s1', 'claude', '/tmp', 'node');
+    sessionsDb.createSession('plain', 'claude', '/tmp', 'plain');
+    const started = runner.start(agent)!;
+    await started.done;
+    const rows = sessionMessagesDb.list('s1', { afterSeq: null, limit: null }).messages;
+    assert.deepEqual(rows.map((m) => [m.role, m.content]), [['user', rows[0].content], ['assistant', 'A-OUT']]);
+    assert.match(String(rows[0].content), /do a/);
+    assert.deepEqual(multiAgentsDb.getWorkflowSession('s1'), { multiAgentId: agent.id, runId: started.run.id, nodeId: 'a', userId: 1 });
+    assert.equal(workflowSessions.get('s1'), null, '結束後移出執行中登記');
+    const listed = sessionsDb.getSessionsByProjectPath('/tmp').map((r) => r.session_id);
+    assert.deepEqual(listed, ['plain']);
+    assert.equal(sessionsDb.countSessionsByProjectPath('/tmp'), 1);
+    assert.deepEqual(sessionsDb.getAllSessions().map((r) => r.session_id), ['plain']);
+    assert.ok(sessionsDb.getSessionById('s1'), '按 id 仍可載入');
+    multiAgentsDb.delete(1, agent.id);
+    assert.equal(multiAgentsDb.getWorkflowSession('s1'), null, '刪除多 Agent 時級聯刪除');
+  });
+});
+
+test('聊天頁中斷 → waiting_input → 新指示續接 → 成功，輸出累加且下游收到', async () => {
+  await withDb(async () => {
+    const { mock, runner, agent } = setup({ nodes: [node('a'), node('b', ['a'])] }, async (ctx) => {
+      if (ctx.prompt.includes('do a')) await say('PART1', 5000)(ctx);
+      else if (ctx.prompt === 'fix it') await say('PART2')(ctx);
+      else await say('B-OUT')(ctx);
+    });
+    const started = runner.start(agent)!;
+    await waitFor(() => Boolean(workflowSessions.get('s1')));
+    assert.equal(workflowSessions.get('s1')!.resume('too early', 'c0'), false, '執行中不能續接');
+    await interruptFromChat(mock, 's1');
+    await waitFor(() => workflowSessions.get('s1')?.state() === 'waiting_input');
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.a.state, 'waiting_input');
+    assert.equal(workflowSessions.get('s1')!.resume('fix it', 'c1'), true);
+    await started.done;
+    const run = multiAgentsDb.getRun(agent.id, started.run.id)!;
+    assert.equal(run.status, 'succeeded');
+    assert.equal(run.nodeStates.a.output, 'PART1\n\nPART2');
+    assert.equal(mock.calls[1].options.sessionId, 's1');
+    assert.equal(mock.calls[1].options.resume, true);
+    assert.match(mock.calls[2].prompt, /PART1\n\nPART2/);
+    const users = sessionMessagesDb.list('s1', { afterSeq: null, limit: null }).messages.filter((m) => m.role === 'user');
+    assert.ok(users.some((m) => m.content === 'fix it'), '新指示記入節點會話');
+  });
+});
+
+test('waiting_input：以目前輸出完成、標記失敗、工作流停止', async () => {
+  for (const action of ['complete', 'fail', 'stop'] as const) {
+    await withDb(async () => {
+      const { mock, runner, agent } = setup({ nodes: [node('a')] }, say('PART1', 5000));
+      const started = runner.start(agent)!;
+      await waitFor(() => Boolean(workflowSessions.get('s1')));
+      await interruptFromChat(mock, 's1');
+      await waitFor(() => workflowSessions.get('s1')?.state() === 'waiting_input');
+      if (action === 'stop') await runner.stop(started.run.id);
+      else assert.equal(runner.finishWaitingInput(started.run.id, 'a', action), true);
+      await started.done;
+      const a = multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.a;
+      if (action === 'complete') {
+        assert.equal(a.state, 'succeeded');
+        assert.equal(a.output, 'PART1');
+      } else {
+        assert.equal(a.state, 'failed');
+        assert.equal(a.error, action === 'stop' ? 'stopped' : 'rejected');
+      }
+      assert.equal(runner.finishWaitingInput(started.run.id, 'a', 'complete'), false);
+    });
+  }
 });

@@ -9,6 +9,7 @@ import { closeConnection, initializeDatabase, sessionMessagesDb } from '@/module
 import { handleChatConnection } from '@/modules/websocket/services/chat-websocket.service.js';
 import { isSessionLogActive } from '@/modules/websocket/services/logging-writer.service.js';
 import type { IProviderRuntime } from '@/shared/interfaces.js';
+import { workflowSessions, type LiveWorkflowSession } from '@/shared/workflow-session-registry.js';
 import type { LLMProvider } from '@/shared/types.js';
 
 type Sent = Record<string, any>;
@@ -232,3 +233,60 @@ test('abort-session、check-session-status 與 recordUserMessage 衝突不會洩
   assert.equal(isSessionLogActive('leak-conflict-1'), false);
 });
 
+
+// ---------------- 工作流節點會話：旁觀不搶占（node-live-session D2/D4/D5） ----------------
+
+function liveNode(sessionId: string, overrides: Partial<LiveWorkflowSession> = {}) {
+  const calls = { interrupted: 0, resumed: [] as string[] };
+  const entry: LiveWorkflowSession = {
+    multiAgentId: 'ma', runId: 'r', nodeId: 'n', nodeTitle: 'N', userId: 7,
+    state: () => 'running',
+    markUserInterrupted: () => { calls.interrupted += 1; },
+    resume: (text) => { calls.resumed.push(text); return false; },
+    ...overrides,
+  };
+  workflowSessions.register(sessionId, entry);
+  return { entry, calls, done: () => workflowSessions.unregister(sessionId, entry) };
+}
+
+test('check-session-status：執行中的節點會話只重播，不改送也不 reconnect', async () => {
+  const node = liveNode('wf-live');
+  let reconnects = 0;
+  const { ws, send } = connect({ claude: fakeRuntime({ reconnect: () => { reconnects += 1; return true; } }) });
+  try {
+    await send({ type: 'check-session-status', provider: 'claude', sessionId: 'wf-live', afterSeq: 0 });
+    assert.equal(reconnects, 0);
+    const status = ws.sent.find((m) => m.type === 'session-status');
+    assert.equal(status?.isProcessing, true);
+  } finally {
+    node.done();
+  }
+});
+
+test('chat-command 對執行中節點會話被拒；等待指示時交給執行器續接', async () => {
+  let starts = 0;
+  let resumable = false;
+  const node = liveNode('wf-cmd', { resume: (text) => { if (resumable) node.calls.resumed.push(text); return resumable; } });
+  const { ws, send } = connect({ claude: fakeRuntime({ start: async () => { starts += 1; } }) });
+  try {
+    await send({ type: 'chat-command', provider: 'claude', command: 'x', clientId: CLIENT_ID_1, options: { sessionId: 'wf-cmd' } });
+    assert.equal(ws.sent.at(-1)?.status, 'warning');
+    resumable = true;
+    await send({ type: 'chat-command', provider: 'claude', command: 'fix', clientId: CLIENT_ID_2, options: { sessionId: 'wf-cmd' } });
+    assert.deepEqual(node.calls.resumed, ['fix']);
+    assert.equal(starts, 0, '節點會話不走一般啟動');
+  } finally {
+    node.done();
+  }
+});
+
+test('abort-session 對節點會話標記使用者中斷', async () => {
+  const node = liveNode('wf-abort');
+  const { send } = connect({ claude: fakeRuntime() });
+  try {
+    await send({ type: 'abort-session', provider: 'claude', sessionId: 'wf-abort' });
+    assert.equal(node.calls.interrupted, 1);
+  } finally {
+    node.done();
+  }
+});

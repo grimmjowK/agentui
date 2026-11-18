@@ -3,6 +3,7 @@ import express, { type Request, type Response } from 'express';
 import multer from 'multer';
 
 import { codexOwnership } from '@/modules/codex-runtime/index.js';
+import { multiAgentsDb, projectsDb } from '@/modules/database/index.js';
 import { sessionMessagesDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { getCodexRuntimeInfo } from '@/shared/codex-cli-path.js';
@@ -423,6 +424,40 @@ router.put(
     const summary = parseSessionRenameSummary(req.body);
     const result = sessionsService.renameSessionById(sessionId, summary);
     res.json(createApiSuccessResponse(result));
+  }),
+);
+
+/** 工作流節點會話：回傳所屬工作流與節點標題（只給擁有者） */
+function workflowOf(req: Request, sessionId: string) {
+  const entry = multiAgentsDb.getWorkflowSession(sessionId);
+  const user = (req as Request & { user?: { id?: number | string; userId?: number | string } }).user;
+  if (!entry || String(user?.id ?? user?.userId) !== String(entry.userId)) return null;
+  const nodes = (multiAgentsDb.getById(entry.multiAgentId)?.definition as { nodes?: Array<{ id: string; title: string }> } | null)?.nodes;
+  return { multiAgentId: entry.multiAgentId, runId: entry.runId, nodeId: entry.nodeId, nodeTitle: nodes?.find((n) => n.id === entry.nodeId)?.title ?? null };
+}
+
+/**
+ * 按 id 取得會話的 provider 與專案（node-live-session D6）：工作流節點會話不在側邊欄，
+ * 聊天頁從 URL 打開時要靠它組出專案上下文。
+ */
+router.get(
+  '/sessions/:sessionId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const row = sessionsDb.getSessionById(sessionId);
+    if (!row) throw new AppError('Session not found.', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+    const projectPath = row.project_path ?? null;
+    const project = projectPath
+      ? projectsDb.getProjectPath(projectPath) ?? projectsDb.createProjectPath(projectPath).project
+      : null;
+    res.json(createApiSuccessResponse({
+      sessionId: row.session_id,
+      provider: row.provider,
+      projectPath,
+      projectId: project?.project_id ?? null,
+      summary: row.custom_name ?? '',
+      workflow: workflowOf(req, sessionId),
+    }));
   }),
 );
 
