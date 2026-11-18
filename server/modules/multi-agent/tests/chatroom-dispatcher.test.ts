@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { closeConnection, initializeDatabase, multiAgentsDb } from '@/modules/database/index.js';
 import { agentCallTiming } from '@/modules/multi-agent/services/agent-call.js';
-import { ChatroomDispatcher, needsNewSession } from '@/modules/multi-agent/services/chatroom-dispatcher.js';
+import { ChatroomDispatcher, needsNewSession, settingNotes } from '@/modules/multi-agent/services/chatroom-dispatcher.js';
 
 import { defaultChatRules, type ChatMember, type ChatroomDef } from '../../../../shared/multiAgent.js';
 
@@ -150,7 +150,6 @@ test('session 規則：改人設沿用 session 並附說明；換 provider 重�
 
     const before = agent().definition as ChatroomDef;
     const after: ChatroomDef = { ...before, members: [{ ...before.members[0], persona: '新人設' }] };
-    dispatcher.recordMemberChanges(id, before, after);
     multiAgentsDb.setDefinition(1, id, after);
     dispatcher.send(agent(), '第二句');
     await dispatcher.idle(id);
@@ -175,4 +174,14 @@ test('needsNewSession 依 provider 與 resumeAcrossModels', () => {
   assert.equal(needsNewSession(s, member('a', 'a', { model: 'opus' })), false, 'Claude 可跨模型續接');
   assert.equal(needsNewSession(s, member('a', 'a', { provider: 'codex', model: 'gpt' })), true);
   assert.equal(needsNewSession({ ...s, provider: 'codex', model: 'a' }, member('a', 'a', { provider: 'codex', model: 'b' })), true);
+});
+
+test('settingNotes：依目前定義比對，改回原值不提示，截斷提示一次', () => {
+  const def: ChatroomDef = { members: [member('pm', '產品經理')], rules: defaultChatRules(1) };
+  const seen = { name: '產品經理', persona: '產品經理 persona', rulesText: '', maxReplyChars: 800, allowAiMentions: false };
+  const session = { provider: 'claude' as const, model: 'sonnet', sessionId: 'x', lastDeliveredSeq: 0, seen };
+  assert.deepEqual(settingNotes(session, def.members[0], def), []);
+  const changed: ChatroomDef = { ...def, rules: { ...def.rules, maxReplyChars: 40 } };
+  assert.deepEqual(settingNotes(session, def.members[0], changed), ['每則回覆上限改為 40 字']);
+  assert.match(settingNotes({ ...session, truncatedAt: 40 }, def.members[0], def).join(), /第 40 字被截斷/);
 });

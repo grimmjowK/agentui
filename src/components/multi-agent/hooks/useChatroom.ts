@@ -17,6 +17,9 @@ type MessageEvent =
   | { type: 'multi-agent-turn'; multiAgentId: string; turnId: string; status: string };
 
 function upsert(list: ChatMessage[], message: ChatMessage): ChatMessage[] {
+  const existing = list.find((m) => m.id === message.id);
+  // 送出的 HTTP 回應（queued）可能晚於 WS 推送的「已開始處理」，不能把狀態倒回去
+  if (existing && message.status === 'queued' && existing.status !== 'queued') return list;
   const without = list.filter((m) => m.id !== message.id);
   // 排隊訊息開始處理時 seq 會重新取號，依 seq 重排
   return [...without, message].sort((a, b) => a.seq - b.seq);

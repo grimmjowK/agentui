@@ -129,7 +129,7 @@ router.put('/:id/definition', asyncHandler(async (req: Request, res: Response) =
   if (isBusy(agent)) throw new AppError('Workflow is running', { statusCode: 409, code: 'BUSY' });
   const definition = await assertValid(agent.kind, req.body?.definition);
   if (agent.kind === 'chatroom') {
-    chatroomDispatcher.recordMemberChanges(agent.id, agent.definition as ChatroomDef | null, definition as ChatroomDef);
+    chatroomDispatcher.pruneMemberSessions(agent.id, definition as ChatroomDef);
   }
   res.json(createApiSuccessResponse(multiAgentsDb.setDefinition(agent.userId, agent.id, definition)));
 }));

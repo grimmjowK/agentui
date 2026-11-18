@@ -40,11 +40,33 @@ type ActiveTurn = {
 
 const codePoints = (text: string) => [...text].length;
 
-/** 成員設定變化需要在下一輪提示中說明的部分（不重建 session） */
-function describeSettingChanges(before: ChatMember, after: ChatMember): string[] {
+type SeenSettings = NonNullable<MemberSession['seen']>;
+
+function seenOf(member: ChatMember, def: ChatroomDef): SeenSettings {
+  return {
+    name: member.name,
+    persona: member.persona,
+    rulesText: def.rules.text,
+    maxReplyChars: def.rules.maxReplyChars,
+    allowAiMentions: def.rules.allowAiMentions,
+  };
+}
+
+/** 與 session 上次看到的設定比對，產生「設定已更新」提示（不重建 session）。改回原值則沒有提示。 */
+export function settingNotes(session: MemberSession, member: ChatMember, def: ChatroomDef): string[] {
   const notes: string[] = [];
-  if (before.name !== after.name) notes.push(`你的名稱已改為「${after.name}」`);
-  if (before.persona !== after.persona) notes.push(`你的人設已更新為：${after.persona}`);
+  const seen = session.seen;
+  const now = seenOf(member, def);
+  if (seen) {
+    if (seen.name !== now.name) notes.push(`你的名稱已改為「${now.name}」`);
+    if (seen.persona !== now.persona) notes.push(`你的人設已更新為：${now.persona}`);
+    if (seen.rulesText !== now.rulesText && now.rulesText) notes.push(`群規已更新：${now.rulesText}`);
+    if (seen.maxReplyChars !== now.maxReplyChars) notes.push(`每則回覆上限改為 ${now.maxReplyChars} 字`);
+    if (seen.allowAiMentions !== now.allowAiMentions) {
+      notes.push(now.allowAiMentions ? '現在可以 @ 其他成員請其接話' : '現在不可以 @ 其他成員');
+    }
+  }
+  if (session.truncatedAt) notes.push(`你上次的回覆在第 ${session.truncatedAt} 字被截斷`);
   return notes;
 }
 
@@ -213,7 +235,7 @@ export class ChatroomDispatcher {
     const rebuild = needsNewSession(saved, member);
     const session = rebuild ? undefined : saved;
 
-    const notes = [...(session?.pendingNotes ?? [])];
+    const notes = session ? settingNotes(session, member, def) : [];
     const historyAll = session
       ? multiAgentsDb.listMessagesAfter(agent.id, session.lastDeliveredSeq)
       : multiAgentsDb.listMessagesAfter(agent.id, 0);
@@ -285,16 +307,15 @@ export class ChatroomDispatcher {
     if (result.sessionId) {
       const succeeded = result.status === 'succeeded' || finishReason === 'length';
       const latest = multiAgentsDb.getMemberSessions(agent.id);
-      const pendingNotes = finishReason === 'length'
-        ? [`你上次的回覆在第 ${def.rules.maxReplyChars} 字被截斷`]
-        : succeeded ? [] : notes;
       latest[member.id] = {
         provider: member.provider,
         model: member.model,
         sessionId: result.sessionId,
         // 成功時歷史已送達且自己的回覆在 session 內，游標推進到這則；失敗則保留舊游標下次重送
         lastDeliveredSeq: succeeded ? message.seq : (session?.lastDeliveredSeq ?? 0),
-        pendingNotes,
+        // 成功送達本輪提示後才記為已看過；失敗時保留舊的，下次仍會提示
+        seen: succeeded ? seenOf(member, def) : (session?.seen ?? seenOf(member, def)),
+        truncatedAt: finishReason === 'length' ? def.rules.maxReplyChars : succeeded ? undefined : session?.truncatedAt,
       };
       multiAgentsDb.setMemberSessions(agent.id, latest);
     }
@@ -304,30 +325,13 @@ export class ChatroomDispatcher {
     return final;
   }
 
-  /** 成員設定變更：記錄需要在下一輪提示的說明；換 provider / 不可續接的換模型由 needsNewSession 處理 */
-  recordMemberChanges(multiAgentId: string, before: ChatroomDef | null, after: ChatroomDef): void {
-    if (!before) return;
+  /** 成員被移除時清掉其 session */
+  pruneMemberSessions(multiAgentId: string, def: ChatroomDef): void {
     const sessions = multiAgentsDb.getMemberSessions(multiAgentId);
-    let changed = false;
-    for (const member of after.members) {
-      const prev = before.members.find((m) => m.id === member.id);
-      const session = sessions[member.id];
-      if (!prev || !session) continue;
-      const notes = describeSettingChanges(prev, member);
-      if (before.rules.text !== after.rules.text && after.rules.text) notes.push(`群規已更新：${after.rules.text}`);
-      if (before.rules.maxReplyChars !== after.rules.maxReplyChars) notes.push(`每則回覆上限改為 ${after.rules.maxReplyChars} 字`);
-      if (before.rules.allowAiMentions !== after.rules.allowAiMentions) {
-        notes.push(after.rules.allowAiMentions ? '現在可以 @ 其他成員請其接話' : '現在不可以 @ 其他成員');
-      }
-      if (notes.length) {
-        session.pendingNotes = [...(session.pendingNotes ?? []), ...notes];
-        changed = true;
-      }
-    }
-    for (const id of Object.keys(sessions)) {
-      if (!after.members.some((m) => m.id === id)) { delete sessions[id]; changed = true; }
-    }
-    if (changed) multiAgentsDb.setMemberSessions(multiAgentId, sessions);
+    const stale = Object.keys(sessions).filter((id) => !def.members.some((m) => m.id === id));
+    if (!stale.length) return;
+    for (const id of stale) delete sessions[id];
+    multiAgentsDb.setMemberSessions(multiAgentId, sessions);
   }
 
   private emitMessage(agent: Agent, message: ChatMessage): void {

@@ -73,12 +73,12 @@
 - [x] 11.1 `src/i18n/locales/*` 新增 `multiAgent` 文案（zh-CN、en；專案未提供 zh-TW 語系，其他語系回退 en），移除不再使用的 `search.modeConversations` 相關鍵
 - [x] 11.2 更新 `src/components/COMPONENTS.md`、`server/modules/MODULES.md`
 - [x] 11.3 `npm run typecheck`、`npm run lint`、`npm run build`、相關測試全部通過
-- [ ] 11.4 瀏覽器實測深淺色主題與行動版：建立工作流 → 編輯節點 → 執行看到進度與 ✓/✗；建立聊天室 → @角色 / @所有人 → 群規限制生效
+- [x] 11.4 瀏覽器實測深淺色主題與行動版：建立工作流 → 編輯節點 → 執行看到進度與 ✓/✗；建立聊天室 → @角色 / @所有人 → 群規限制生效
 
 ## 12. 執行隔離、歷史一致性與 Provider 契約測試
 
-- [ ] 12.1 `PROVIDER_INFO.capabilities` 新增 `resumeAcrossModels`（Claude=true、Codex/Antigravity=false、Cursor 實測後填入）；節點與成員的 `permissionMode` 欄位、預設值（成員：Claude/Cursor=plan，Codex/Antigravity=default）與 UI 選擇器
-- [ ] 12.2 Provider 契約測試：四家在工作流節點與聊天室成員中都能啟動、串流、abort（emitsTerminal 只產生一次終止事件）、審批請求進入全域收件匣；節點卡片顯示等待審批
+- [x] 12.1 `PROVIDER_INFO.capabilities` 新增 `resumeAcrossModels`（Claude=true、Codex/Antigravity=false、Cursor 未安裝無法實測，暫填 false＝保守重建）；節點與成員的 `permissionMode` 欄位、預設值（成員：Claude/Cursor=plan，Codex/Antigravity=default）與 UI 選擇器
+- [x] 12.2 Provider 契約測試：四家在工作流節點與聊天室成員中都能啟動、串流、abort（emitsTerminal 只產生一次終止事件）、審批請求進入全域收件匣；節點卡片顯示等待審批（mock 測試覆蓋審批與 abort；真實模型實測 Claude/Codex/Antigravity，Cursor 本機未安裝）
 - [x] 12.3 串接現有 providerModelsService/API；測試動態新增模型可保存、查詢失敗不清除輸入、不在 fallback 時可重試、啟動前再驗證
 - [x] 12.4 保存 definition_version、builder_session_json、member_sessions_json、run 完整定義快照及訊息作者快照；測試刪除／重用節點 id、修改模型後舊 run 仍正確；提供歷史 run 列表／詳情 UI
 - [x] 12.5 dispatcher per-chatroom 互斥與排隊：忙碌時訊息標記 queued、本輪結束依序開新回合、`DELETE /messages/:msgId` 取消排隊訊息；測試兩分頁並行送出、忙碌時編輯於下一回合生效、同工作流重複開始回 409

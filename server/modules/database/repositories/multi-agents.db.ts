@@ -26,8 +26,10 @@ export type MemberSession = {
   model: string;
   sessionId: string;
   lastDeliveredSeq: number;
-  /** 上次發言後設定已變更，下一輪提示需附說明 */
-  pendingNotes?: string[];
+  /** session 最後一次看到的設定；下一輪與目前定義比對，差異以「設定已更新」提示 */
+  seen?: { name: string; persona: string; rulesText: string; maxReplyChars: number; allowAiMentions: boolean };
+  /** 上次回覆被截斷時的字數上限，下一輪提示一次 */
+  truncatedAt?: number;
 };
 
 type AgentRow = {
