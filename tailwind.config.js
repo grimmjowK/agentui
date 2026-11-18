@@ -71,11 +71,16 @@ export default {
           from: { opacity: '0', transform: 'translate(-50%, -48%) scale(0.96)' },
           to: { opacity: '1', transform: 'translate(-50%, -50%) scale(1)' },
         },
+        // 多 Agent 流程圖：執行中的連線虛線流動
+        'edge-flow': {
+          to: { strokeDashoffset: '-18' },
+        },
       },
       animation: {
         shimmer: 'shimmer 2s linear infinite',
         'dialog-overlay-show': 'dialog-overlay-show 150ms ease-out',
         'dialog-content-show': 'dialog-content-show 150ms ease-out',
+        'edge-flow': 'edge-flow 1s linear infinite',
       },
     },
   },

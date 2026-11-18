@@ -30,6 +30,7 @@ import type {
   PermissionMode,
 } from '../types/types';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
+import type { ChatBuilderConfig } from '../utils/builderContext';
 import { getCommandUserText, splitCommandContext, wrapCommandContext } from '../utils/commandContext';
 import {
   resolveSessionMentionLabels,
@@ -77,6 +78,7 @@ interface UseChatComposerStateArgs {
   pendingPermissionRequests: PendingPermissionRequest[];
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
   onRunInShell?: (command: string) => void;
+  builder?: ChatBuilderConfig | null;
 }
 
 interface MentionableFile {
@@ -150,6 +152,7 @@ export function useChatComposerState({
   setPendingPermissionRequests,
   pendingPermissionRequests,
   onRunInShell,
+  builder = null,
 }: UseChatComposerStateArgs) {
   const [input, setInput] = useState(() => {
     if (typeof window !== 'undefined' && selectedProject) {
@@ -665,7 +668,12 @@ export function useChatComposerState({
         }
       }
 
-      const messageContent = mentionResolution.resolvedText;
+      const effectiveSessionIdForBuilder =
+        currentSessionId || selectedSession?.id || null;
+      // 建立器：新會話的第一則訊息附上建立器說明（之後在同一會話內 AI 已知道格式）
+      const messageContent = builder && !effectiveSessionIdForBuilder
+        ? wrapCommandContext('multi-agent-builder', builder.promptPrefix, mentionResolution.resolvedText)
+        : mentionResolution.resolvedText;
       const effort = resolveEffort(provider, thinkingMode);
       const effortOption = effort === 'default' ? {} : { effort };
 
@@ -859,6 +867,7 @@ export function useChatComposerState({
       queueKey,
       setStartingTurn,
       t,
+      builder,
     ],
   );
 

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import Sidebar from '../sidebar/view/Sidebar';
 import MainContent from '../main-content/view/MainContent';
 import CommandPalette from '../command-palette/CommandPalette';
+import { MultiAgentPage } from '../multi-agent';
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { PaletteOpsProvider, usePaletteOpsRegister } from '../../contexts/PaletteOpsContext';
 import { useDeviceSettings } from '../../hooks/useDeviceSettings';
@@ -21,7 +22,7 @@ export default function AppContent() {
 
 function AppContentInner() {
   const navigate = useNavigate();
-  const { sessionId } = useParams<{ sessionId?: string }>();
+  const { sessionId, multiAgentId } = useParams<{ sessionId?: string; multiAgentId?: string }>();
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
   const { ws, sendMessage, latestMessage, latestProjectEvent, isConnected } = useWebSocket();
@@ -202,6 +203,13 @@ function AppContentInner() {
       )}
 
       <div className="app-main flex min-w-0 flex-1 flex-col">
+        {multiAgentId ? (
+          <MultiAgentPage
+            multiAgentId={multiAgentId}
+            isMobile={isMobile}
+            onMenuClick={() => setSidebarOpen(true)}
+          />
+        ) : (
         <MainContent
           selectedProject={selectedProject}
           selectedSession={selectedSession}
@@ -228,6 +236,7 @@ function AppContentInner() {
           pendingShellCommand={pendingShellCommand}
           onRunInShell={runInShell}
         />
+        )}
       </div>
 
       <CommandPalette

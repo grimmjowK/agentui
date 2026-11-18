@@ -3,13 +3,13 @@
  */
 import crypto from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import express, { type Request, type Response } from 'express';
 
 import { multiAgentsDb, projectsDb } from '@/modules/database/index.js';
 import { providerModelsService } from '@/modules/providers/index.js';
+import { MULTI_AGENT_WORKSPACE_ROOT } from '@/shared/multi-agent-workspace.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
 import {
@@ -81,7 +81,7 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   // 綁定目前選中的專案路徑，否則用專屬目錄
   const projectPath = projectId ? projectsDb.getProjectPathById(projectId) : null;
   const id = crypto.randomUUID();
-  const workspacePath = projectPath ?? path.join(os.homedir(), '.cloudcli', 'multi-agent', id);
+  const workspacePath = projectPath ?? path.join(MULTI_AGENT_WORKSPACE_ROOT, id);
   if (!projectPath) await mkdir(workspacePath, { recursive: true });
 
   const agent = multiAgentsDb.create(userId, {
@@ -93,8 +93,16 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   res.status(201).json(createApiSuccessResponse(agent));
 }));
 
+/** 建立器沿用聊天頁，需要工作目錄對應的專案列（專屬目錄不會出現在側邊欄） */
+const projectIdFor = (workspacePath: string): string | null => {
+  const existing = projectsDb.getProjectPath(workspacePath);
+  if (existing) return existing.project_id;
+  return projectsDb.createProjectPath(workspacePath).project?.project_id ?? null;
+};
+
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
-  res.json(createApiSuccessResponse(requireAgent(req)));
+  const agent = requireAgent(req);
+  res.json(createApiSuccessResponse({ ...agent, projectId: projectIdFor(agent.workspacePath) }));
 }));
 
 router.patch('/:id', asyncHandler(async (req: Request, res: Response) => {

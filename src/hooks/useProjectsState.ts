@@ -610,6 +610,15 @@ export function useProjectsState({
     [isMobile, navigate],
   );
 
+  const handleMultiAgentSelect = useCallback(
+    (multiAgentId: string) => {
+      setSelectedSession(null);
+      navigate(`/multi-agent/${multiAgentId}`);
+      if (isMobile) setSidebarOpen(false);
+    },
+    [isMobile, navigate],
+  );
+
   const handleSessionDelete = useCallback(
     (sessionIdToDelete: string) => {
       if (selectedSession?.id === sessionIdToDelete) {
@@ -763,6 +772,7 @@ export function useProjectsState({
       onProjectSelect: handleProjectSelect,
       onSessionSelect: handleSessionSelect,
       onNewSession: handleNewSession,
+      onMultiAgentSelect: handleMultiAgentSelect,
       onSessionDelete: handleSessionDelete,
       onLoadMoreSessions: loadMoreProjectSessions,
       onProjectDelete: handleProjectDelete,
@@ -777,6 +787,7 @@ export function useProjectsState({
     }),
     [
       handleNewSession,
+      handleMultiAgentSelect,
       handleProjectDelete,
       handleProjectSelect,
       handleSessionDelete,

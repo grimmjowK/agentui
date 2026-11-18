@@ -124,5 +124,9 @@
     "badge": "승인 대기",
     "inbox_one": "승인 대기 {{count}}건",
     "inbox_other": "승인 대기 {{count}}건"
+  },
+  "search": {
+    "modeMultiAgent": "멀티 에이전트",
+    "multiAgentPlaceholder": "멀티 에이전트 검색..."
   }
 }

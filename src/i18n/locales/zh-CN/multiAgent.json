@@ -1,0 +1,126 @@
+{
+  "list": {
+    "empty": "还没有多 Agent",
+    "emptyHint": "创建聊天室或工作流，让多个 Agent 协作。",
+    "create": "创建",
+    "noMatch": "没有匹配的多 Agent",
+    "rename": "重命名",
+    "delete": "删除",
+    "deleteConfirm": "删除「{{name}}」？执行记录和群聊记录会一并删除。",
+    "cancel": "取消",
+    "more": "更多"
+  },
+  "kind": {
+    "chatroom": "聊天室",
+    "workflow": "工作流",
+    "chatroomDesc": "多个角色一起讨论，可 @ 角色或所有人",
+    "workflowDesc": "按流程图依次执行各步骤"
+  },
+  "page": {
+    "loading": "加载中...",
+    "notFound": "这个多 Agent 已不存在。",
+    "editWithAi": "用 AI 修改",
+    "backToCanvas": "返回",
+    "draft": "草稿"
+  },
+  "builder": {
+    "emptyTitle": {
+      "workflow": "描述你想要的工作流",
+      "chatroom": "描述你想要的聊天室"
+    },
+    "emptyHint": {
+      "workflow": "例如：「整理本周的 issue，分类后写一份摘要」。在下方选择模型后开始输入。",
+      "chatroom": "例如：「一个产品经理、一个工程师和一个审稿人讨论需求」。在下方选择模型后开始输入。"
+    },
+    "preview": "预览",
+    "create": "创建",
+    "apply": "应用修改",
+    "fixWithAi": "让 AI 修正",
+    "invalid": "这个定义有问题",
+    "nodes_one": "{{count}} 个步骤",
+    "nodes_other": "{{count}} 个步骤",
+    "members_one": "{{count}} 位成员",
+    "members_other": "{{count}} 位成员",
+    "saving": "保存中...",
+    "fixPrompt": "你给出的定义没有通过校验：\n{{errors}}\n请修正后重新输出完整的 multi-agent-json 区块。"
+  },
+  "workflow": {
+    "start": "开始",
+    "stop": "停止",
+    "running": "执行中",
+    "succeeded": "已完成",
+    "failed": "失败",
+    "stopped": "已停止",
+    "interrupted": "已中断",
+    "idle": "尚未执行",
+    "confirmTitle": "开始执行这个工作流？",
+    "confirmBody_one": "将有 {{count}} 个步骤调用模型：",
+    "confirmBody_other": "将有 {{count}} 个步骤调用模型：",
+    "parallelWarning": "同一列的步骤会并行执行，并共用工作目录。",
+    "confirm": "开始",
+    "history": "执行记录",
+    "latest": "最近一次",
+    "nodeState": {
+      "pending": "等待中",
+      "running": "执行中",
+      "waiting_approval": "等待审批",
+      "succeeded": "完成",
+      "failed": "失败",
+      "skipped": "已跳过"
+    },
+    "node": {
+      "instruction": "执行内容",
+      "model": "模型",
+      "permission": "权限模式",
+      "output": "输出",
+      "noOutput": "暂无输出",
+      "readonly": "执行中不可编辑。",
+      "save": "保存",
+      "saved": "已保存",
+      "error": "错误",
+      "dependsOn": "依赖"
+    }
+  },
+  "chatroom": {
+    "placeholder": "发消息，可 @ 角色或 @所有人",
+    "everyone": "所有人",
+    "send": "发送",
+    "stop": "停止",
+    "queued": "排队中",
+    "cancelQueued": "取消",
+    "members": "成员",
+    "settings": "群聊设置",
+    "rules": "群规",
+    "rulesPlaceholder": "例如：围绕主题发言，不要重复别人说过的内容。",
+    "maxReplyChars": "每条回复最大字数",
+    "allowAiMentions": "允许 AI 互相 @",
+    "maxAiRepliesPerTurn": "每条消息最多触发的 AI 回复数",
+    "unmentioned": "没有 @ 任何人时",
+    "unmentionedAll": "所有人回复",
+    "unmentionedNone": "不回复",
+    "limitsNote": "限制由服务端强制执行，但不是精确的费用上限。",
+    "persona": "人设",
+    "save": "保存",
+    "saved": "已保存",
+    "truncated": "已截断",
+    "timeout": "已超时",
+    "stoppedReply": "已停止",
+    "error": "失败",
+    "empty": "打个招呼，开始群聊吧。",
+    "collapse": "隐藏侧栏",
+    "expand": "显示成员",
+    "loadEarlier": "加载更早的消息"
+  },
+  "permission": {
+    "default": "需审批",
+    "plan": "规划（只读）",
+    "acceptEdits": "自动接受编辑",
+    "bypassPermissions": "跳过权限",
+    "auto": "自动"
+  },
+  "errors": {
+    "loadFailed": "加载失败",
+    "saveFailed": "保存失败",
+    "busy": "正在执行，请结束后再试。"
+  }
+}
