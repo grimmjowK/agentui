@@ -30,11 +30,13 @@
 - [ ] 5.3 `shared/providers.ts`：Antigravity `midTurnSteer: true`、`permissionModes` 改為 `default`、`acceptEdits`、`plan`、`bypassPermissions`；多 Agent 成員預設權限表同步檢查
 - [ ] 5.4 `antigravity-acp-interactive-approvals/proposal.md` 頂部標註「已被 node-live-session-and-agy-acp 取代」
 
-## 6. 節點會話：持久化與推送
+## 6. 節點會話：持久化、推送與側邊欄排除
 
 - [ ] 6.1 `AgentCall` 的 writer 改為 `LoggingWriter(inner = FanoutWriter)`：FanoutWriter 同時交給 `AgentCall.handle` 與 `sendToUser`；以 `recordUserMessage` 記錄節點實際提示
 - [ ] 6.2 工作流持有會話登記表（sessionId → runId／nodeId／userId），節點取得 sessionId 時登記、結束時移除；`isWorkflowSession(sessionId)` 供 WebSocket 使用
-- [ ] 6.3 runner 測試：節點事件寫入 `session_messages`、推送給使用者、登記與移除
+- [ ] 6.3 新增 `workflow_sessions` 表（`session_id` PK、multi_agent_id、run_id、node_id、user_id、created_at）與 repository；節點取得 sessionId 時先寫入；刪除多 Agent 時級聯刪除
+- [ ] 6.4 `sessions.db.ts` 的 `getSessionsByProjectPath`、`getSessionsByProjectPathPage`、`countSessionsByProjectPath`、`getArchivedSessions`、`getAllSessions` 排除 `workflow_sessions`；`getSessionById` 與 `getSessionsByProjectPathIncludingArchived` 不排除
+- [ ] 6.5 測試：節點事件寫入 `session_messages`、推送給使用者、執行中登記與移除；工作流會話不出現在專案會話列表／計數／封存／全文檢索來源，同專案一般會話不受影響
 
 ## 7. 節點會話：旁觀不搶占
 
@@ -63,4 +65,5 @@
 - [ ] 10.3 節點執行中在聊天頁插話（三家各一次），模型採納，節點輸出包含插話後回覆，下游收到
 - [ ] 10.4 節點聊天頁中斷 → 畫布顯示等待指示 → 聊天頁送出新指示 → 節點成功、下游執行；另測「以目前輸出完成」與工作流停止
 - [ ] 10.5 專屬目錄的工作流，節點對話以正確 provider 與工作目錄載入
+- [ ] 10.5a 工作目錄設為一般專案（如 `dm_pm`）執行後：側邊欄該專案的會話列表、計數、⌘K 搜尋都看不到節點會話；重啟服務後仍看不到；從節點「打開對話」可進入
 - [ ] 10.6 `npm run typecheck`、`npm run lint`（0 錯誤）、`npm test`、`npm run build` 全部通過；更新 `server/SERVER.md`、`server/modules/MODULES.md`、`server/modules/providers/README.md`

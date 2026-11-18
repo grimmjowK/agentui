@@ -46,16 +46,34 @@ runtime.start(prompt, opts, loggingWriter)
 
 替代方案：聊天頁輪詢節點輸出 → 看不到工具調用與審批，且延遲高，否決。
 
-### D2. 工作流持有的會話：登記表 + `check-session-status` 不改送
+### D2. 工作流會話：持久化登記 + `check-session-status` 不改送
 
-- `workflowSessions: Map<sessionId, { runId, nodeId, userId }>`，節點取得 sessionId 時登記，節點結束時移除。
-- `check-session-status` 遇到登記中的 sessionId：
+**兩層登記，用途不同：**
+
+| | 存放 | 生命週期 | 用途 |
+| --- | --- | --- | --- |
+| `workflow_sessions` 表 | SQLite：`session_id PK, multi_agent_id, run_id, node_id, user_id, created_at` | 節點取得 sessionId 時寫入，永久保留；刪除多 Agent 時級聯刪除 | 側邊欄排除、聊天頁顯示節點標記與返回連結 |
+| 執行中登記（記憶體） | `Map<sessionId, { runId, nodeId, userId }>` | 節點執行中（含 `waiting_input`）；結束即移除 | 旁觀不改送（下方）、D4／D5 的送出判斷 |
+
+- 寫入時機：`AgentCall` 收到 sessionId（`session_created` 或首個帶 sessionId 的事件）時，**先**寫 `workflow_sessions`，再讓事件繼續流動；同步器在之後才會看到 transcript，所以會話第一次被索引時已在排除名單。
+- `check-session-status` 遇到**執行中登記**的 sessionId：
   - **不** `registered.updateWebSocket(...)`、**不** `runtime.reconnect(...)`。
   - 以一個暫時的 `LoggingWriter(inner = 這個連線)` 執行 `replayAfterSeq(afterSeq)`，補齊漏掉的訊息與目前的串流段落（現有暫時 writer 路徑已有，只是條件改為「登記中也走這條」）。
   - 回覆 `session-status { isProcessing: true, workflow: { multiAgentId, runId, nodeId } }`，前端據此顯示節點標記與「返回流程圖」。
 - `runtime.reconnect` 本身不改：一般聊天斷線重連仍需要它。
 
 這就是「進入正在執行的 session，而不是搶占」：輸出一直由執行器的 FanoutWriter 送出，聊天頁只是多一個接收者。
+
+### D2.1 側邊欄與檢索排除工作流會話
+
+- `sessions.db.ts` 的 `getSessionsByProjectPath`、`getSessionsByProjectPathPage`、`countSessionsByProjectPath`、`getArchivedSessions`、`getAllSessions` 一律加上 `AND session_id NOT IN (SELECT session_id FROM workflow_sessions)`。
+  - 涵蓋側邊欄專案下的會話列表與計數、封存視圖、全文檢索（⌘K，來源是 `getAllSessions`）、`@session` 引用的候選。
+  - `getSessionById`、`getSessionsByProjectPathIncludingArchived`（刪除專案時清理檔案）**不**排除：前者是聊天頁按 id 載入所需，後者需要看到全部檔案。
+- 專案列表本身不受影響：工作流會話所在的專案（例如 `dm_pm`）如果還有一般會話，照常顯示；只是工作流產生的會話不在其下。工作流使用專屬目錄時，該目錄原本就已被排除。
+- 會話被同步器重新掃描、改名或封存，都不影響排除：判斷依據是 `workflow_sessions` 有沒有這個 id，與 sessions 表的欄位無關。
+- 聊天頁進入：只從節點詳情的「打開對話」；直接輸入 `/session/<id>` 也能打開（由 `getSessionById` 載入），但側邊欄不會高亮任何項目。
+
+替代方案：在 `sessions` 表加 `origin` 欄位 → 同步器以 upsert 寫入 sessions，可能早於或覆蓋節點寫入的標記，產生競態；獨立表只由節點寫入，無此問題，否決。
 
 ### D3. 插話：沿用 `chat-steer`，回覆計入節點輸出
 
@@ -85,7 +103,7 @@ runtime.start(prompt, opts, loggingWriter)
 ### D6. 前端入口與標記
 
 - 節點詳情：節點有 `sessionId` 時顯示「打開對話」，導向 `/session/<sessionId>`；聊天頁需要專案上下文：以工作流的 `workspacePath` 對應的 projectId（`GET /api/multi-agent/:id` 已回傳，沿用 BuilderView 的組法）。
-- `useProjectsState` 遇到 URL 的 sessionId 不在任何專案（專屬目錄被過濾）：以 `GET /api/providers/sessions/:id` 取得 provider 與 project_path 組出臨時專案（目前只靠 localStorage 猜 provider，節點會話需要準確的 provider）。
+- `useProjectsState` 遇到 URL 的 sessionId 不在任何專案（工作流會話一律被排除，見 D2.1）：以 `GET /api/providers/sessions/:id` 取得 provider 與 project_path 組出臨時專案（目前只靠 localStorage 猜 provider，節點會話需要準確的 provider）。
 - 聊天頁頭部：收到 `session-status.workflow` 時顯示「工作流節點：<節點標題>」與返回流程圖的連結。
 
 ### D7. Antigravity：承接 ACP D1–D8，差異如下
@@ -102,7 +120,9 @@ runtime.start(prompt, opts, loggingWriter)
 - [推送給使用者所有連線，多分頁時每頁都收到節點事件] → 與一般聊天相同，前端依 sessionId 過濾；量級是單一使用者的節點數，可接受。
 - [`waiting_input` 讓節點無限期掛起] → 畫布明確顯示並提供「以目前輸出完成／標記失敗」；工作流停止會結束它；服務重啟時視為中斷（沿用 `markInterrupted`）。
 - [ACP 是較新的協議，agy 升級可能改欄位] → 沿用 ACP 提案的 fixture 測試策略；`initialize` 版本不符時明確報錯。
-- [前端同時存在「一般會話」與「工作流持有會話」兩種語意] → 差異集中在後端 D2/D4/D5 三處判斷；前端只多一個標記與一個入口。
+- [`NOT IN (SELECT …)` 增加列表查詢成本] → `workflow_sessions.session_id` 為主鍵，量級是節點執行次數，對側邊欄分頁查詢影響可忽略。
+- [使用者想在側邊欄找工作流會話卻找不到] → 刻意設計：入口在流程圖的節點詳情；執行記錄下拉可找回歷史 run 的節點。
+- [前端同時存在「一般會話」與「工作流持有會話」兩種語意] → 差異集中在後端 D2/D2.1/D4/D5 幾處判斷；前端只多一個標記與一個入口。
 - [Antigravity 替換執行層影響一般聊天] → ACP 提案的驗收清單（6.1–6.10）全部保留為本 change 的驗收項。
 
 ## Migration Plan
