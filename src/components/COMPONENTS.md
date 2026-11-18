@@ -18,6 +18,7 @@ AI 调整某模块时，可只加载对应模块目录，无需通读全部。
 | `llm-logo-provider/` | LLM 提供商（Claude、Codex、Cursor、Antigravity）的 logo 组件库 |
 | `main-content/` | 主内容区域，聚合聊天、编辑器、终端等子模块 |
 | `mcp/` | 管理和配置 MCP 服务器 |
+| `multi-agent/` | 多 Agent：側邊欄列表與建立選單、複用聊天頁的建立器、工作流流程圖（節點詳情、執行進度）、聊天室（@ 調度、成員與群規側欄） |
 | `onboarding/` | 新用户引导流程，含 Git 与代理连接配置 |
 | `plugins/` | 第三方插件管理和渲染的插件系统 |
 | `prd-editor/` | PRD 文档编辑器，支持创建和编辑项目需求文档 |

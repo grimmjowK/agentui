@@ -47,8 +47,9 @@ import projectModuleRoutes from './modules/projects/projects.routes.js';
 import userRoutes from './routes/user.js';
 import pluginsRoutes from './routes/plugins.js';
 import providerRoutes from './modules/providers/provider.routes.js';
+import { multiAgentRoutes } from './modules/multi-agent/index.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
-import { initializeDatabase, projectsDb, sessionsDb } from './modules/database/index.js';
+import { initializeDatabase, multiAgentsDb, projectsDb, sessionsDb } from './modules/database/index.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { isSessionMessageLogEnabled } from './shared/session-message-log-flags.js';
@@ -167,6 +168,9 @@ app.use('/api/plugins', authenticateToken, pluginsRoutes);
 
 // Unified provider MCP routes (protected)
 app.use('/api/providers', authenticateToken, providerRoutes);
+
+// 多 Agent（聊天室 / 工作流）
+app.use('/api/multi-agent', authenticateToken, multiAgentRoutes);
 
 // Agent API Routes (uses API key authentication)
 app.use('/api/agent', agentRoutes);
@@ -1357,6 +1361,8 @@ async function startServer() {
     try {
         // Initialize authentication database
         await initializeDatabase();
+        // 上次執行中斷的多 Agent 執行／回合標記為 interrupted，不續跑
+        multiAgentsDb.markInterrupted();
         startSessionMessageLogCleanup();
 
         // Configure Web Push (VAPID keys)

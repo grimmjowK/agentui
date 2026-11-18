@@ -1,7 +1,7 @@
 import type { LoadingProgress, Project, ProjectSession, LLMProvider } from '../../../types/app';
 
 export type ProjectSortOrder = 'name' | 'date';
-export type SidebarSearchMode = 'projects' | 'conversations' | 'archived';
+export type SidebarSearchMode = 'projects' | 'multiAgent' | 'archived';
 export type ArchivedProjectListItem = Project & { isArchived: true };
 
 export type SessionWithProvider = ProjectSession & {
@@ -43,6 +43,7 @@ export type SidebarProps = {
   onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: ProjectSession) => void;
   onNewSession: (project: Project) => void;
+  onMultiAgentSelect: (multiAgentId: string) => void;
   onSessionDelete?: (sessionId: string) => void;
   onLoadMoreSessions?: (projectId: string) => Promise<void> | void;
   // `projectId` is the DB identifier; the sidebar hands it back to the parent

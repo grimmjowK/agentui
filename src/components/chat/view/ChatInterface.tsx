@@ -12,7 +12,10 @@ import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useSessionStore } from '../../../stores/useSessionStore';
 
+import { ChatBuilderContext } from '../utils/builderContext';
+
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
+import { CodeBlockRenderersContext } from './subcomponents/Markdown';
 import ChatComposer from './subcomponents/ChatComposer';
 
 
@@ -45,6 +48,8 @@ function ChatInterface({
   newSessionTrigger,
   onShowAllTasks,
   onRunInShell,
+  builder = null,
+  codeBlockRenderers = null,
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
   const { t } = useTranslation('chat');
@@ -203,7 +208,18 @@ function ChatInterface({
     pendingPermissionRequests,
     setPendingPermissionRequests,
     onRunInShell,
+    builder,
   });
+
+  // 建立器要求填入輸入框（例如把校驗錯誤送回給 AI）
+  const builderInputNonce = builder?.inputRequest?.nonce;
+  useEffect(() => {
+    const request = builder?.inputRequest;
+    if (!request) return;
+    setInput(request.text);
+    textareaRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [builderInputNonce]);
 
   // On WebSocket reconnect, re-fetch the current session's messages from the server
   // so missed streaming events are shown. Also re-check session status to fix stuck loading.
@@ -333,6 +349,8 @@ function ChatInterface({
   }
 
   return (
+    <ChatBuilderContext.Provider value={builder}>
+    <CodeBlockRenderersContext.Provider value={codeBlockRenderers}>
     <PermissionContext.Provider value={permissionContextValue}>
       <div className="flex h-full flex-col">
         <ChatMessagesPane
@@ -450,6 +468,8 @@ function ChatInterface({
 
       <QuickSettingsPanel />
     </PermissionContext.Provider>
+    </CodeBlockRenderersContext.Provider>
+    </ChatBuilderContext.Provider>
   );
 }
 

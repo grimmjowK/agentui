@@ -1,0 +1,147 @@
+{
+  "list": {
+    "empty": "No multi-agents yet",
+    "emptyHint": "Create a chat room or workflow to let several agents work together.",
+    "create": "Create",
+    "noMatch": "No matching multi-agents",
+    "rename": "Rename",
+    "delete": "Delete",
+    "deleteConfirm": "Delete \"{{name}}\"? Its runs and chat history will be removed.",
+    "cancel": "Cancel",
+    "more": "More"
+  },
+  "kind": {
+    "chatroom": "Chat room",
+    "workflow": "Workflow",
+    "chatroomDesc": "Several roles discuss together; @ a role or everyone",
+    "workflowDesc": "Steps run in order as a flowchart"
+  },
+  "page": {
+    "loading": "Loading...",
+    "notFound": "This multi-agent no longer exists.",
+    "editWithAi": "Edit with AI",
+    "backToCanvas": "Back",
+    "draft": "Draft"
+  },
+  "builder": {
+    "emptyTitle": {
+      "workflow": "Describe the workflow you want",
+      "chatroom": "Describe the chat room you want"
+    },
+    "emptyHint": {
+      "workflow": "For example: \"Collect this week's issues, classify them, then write a summary.\" Pick a model below and start typing.",
+      "chatroom": "For example: \"A product manager, an engineer and a reviewer to discuss requirements.\" Pick a model below and start typing."
+    },
+    "preview": "Preview",
+    "create": "Create",
+    "apply": "Apply changes",
+    "fixWithAi": "Ask AI to fix",
+    "invalid": "This definition has problems",
+    "nodes_one": "{{count}} step",
+    "nodes_other": "{{count}} steps",
+    "members_one": "{{count}} member",
+    "members_other": "{{count}} members",
+    "saving": "Saving...",
+    "fixPrompt": "The definition you produced failed validation:\n{{errors}}\nPlease fix it and output the complete multi-agent-json block again."
+  },
+  "workflow": {
+    "start": "Start",
+    "stop": "Stop",
+    "running": "Running",
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "stopped": "Stopped",
+    "interrupted": "Interrupted",
+    "idle": "Not run yet",
+    "confirmTitle": "Start this workflow?",
+    "confirmBody_one": "{{count}} step will call a model:",
+    "confirmBody_other": "{{count}} steps will call models:",
+    "parallelWarning": "Steps in the same column run in parallel and share the working directory.",
+    "confirm": "Start",
+    "history": "Run history",
+    "latest": "Latest",
+    "nodeState": {
+      "pending": "Waiting",
+      "running": "Running",
+      "waiting_approval": "Waiting for approval",
+      "succeeded": "Done",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "waiting_confirmation": "Waiting for confirmation"
+    },
+    "node": {
+      "instruction": "Instruction",
+      "model": "Model",
+      "permission": "Permission mode",
+      "output": "Output",
+      "noOutput": "No output yet",
+      "readonly": "Editing is disabled while running.",
+      "save": "Save",
+      "saved": "Saved",
+      "error": "Error",
+      "dependsOn": "Depends on"
+    },
+    "approvalNode": "Manual confirmation",
+    "approval": {
+      "waiting": "Waiting for your confirmation",
+      "notePlaceholder": "Optional note for the next steps, e.g. which tickets to apply or what to change",
+      "approve": "Approve & continue",
+      "reject": "Reject",
+      "instruction": "What to confirm"
+    },
+    "tool": {
+      "title": "Tool approval: {{tool}}",
+      "planTitle": "The model finished planning and wants to proceed",
+      "allow": "Allow",
+      "deny": "Deny"
+    },
+    "startInput": "Input for this run (optional)",
+    "startInputPlaceholder": "Passed to the entry steps, e.g. only process ticket 18350"
+  },
+  "chatroom": {
+    "placeholder": "Message the group, @ a role or @everyone",
+    "everyone": "Everyone",
+    "send": "Send",
+    "stop": "Stop",
+    "queued": "Queued",
+    "cancelQueued": "Cancel",
+    "members": "Members",
+    "settings": "Group settings",
+    "rules": "Group rules",
+    "rulesPlaceholder": "e.g. Stay on topic. Do not repeat what others have said.",
+    "maxReplyChars": "Max characters per reply",
+    "allowAiMentions": "Allow agents to @ each other",
+    "maxAiRepliesPerTurn": "Max agent replies per message",
+    "unmentioned": "When nobody is @-mentioned",
+    "unmentionedAll": "Everyone replies",
+    "unmentionedNone": "Nobody replies",
+    "limitsNote": "Limits are enforced by the server but are not exact cost caps.",
+    "persona": "Persona",
+    "save": "Save",
+    "saved": "Saved",
+    "truncated": "Truncated",
+    "timeout": "Timed out",
+    "stoppedReply": "Stopped",
+    "error": "Failed",
+    "empty": "Say hello to start the conversation.",
+    "collapse": "Hide sidebar",
+    "expand": "Show members",
+    "loadEarlier": "Load earlier messages"
+  },
+  "permission": {
+    "default": "Ask",
+    "plan": "Plan (read-only)",
+    "acceptEdits": "Accept edits",
+    "bypassPermissions": "Bypass permissions",
+    "auto": "Auto"
+  },
+  "errors": {
+    "loadFailed": "Failed to load",
+    "saveFailed": "Failed to save",
+    "busy": "It is running; try again when it finishes."
+  },
+  "workspace": {
+    "title": "Working directory",
+    "default": "Default directory (no project)"
+  }
+}

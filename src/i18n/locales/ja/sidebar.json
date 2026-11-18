@@ -123,5 +123,9 @@
     "badge": "承認待ち",
     "inbox_one": "承認待ち {{count}} 件",
     "inbox_other": "承認待ち {{count}} 件"
+  },
+  "search": {
+    "modeMultiAgent": "マルチエージェント",
+    "multiAgentPlaceholder": "マルチエージェントを検索..."
   }
 }

@@ -458,6 +458,12 @@ export const runMigrations = (db: Database) => {
     db.exec(PROJECTS_TABLE_SCHEMA_SQL);
     rebuildProjectsTableWithPrimaryKeySchema(db);
 
+    // 多 Agent：工作流執行保存啟動時輸入
+    if (tableExists(db, 'multi_agent_runs')) {
+      const runColumns = (db.prepare('PRAGMA table_info(multi_agent_runs)').all() as { name: string }[]).map((c) => c.name);
+      addColumnToTableIfNotExists(db, 'multi_agent_runs', runColumns, 'start_input', 'TEXT');
+    }
+
     migrateLegacyWorkspaceTableIntoProjects(db);
     rebuildSessionsTableWithProjectSchema(db);
     // 重建分支建表时不带 isStarred，两条路径都补一次

@@ -35,6 +35,15 @@
 `CodexAppServer`（JSON-RPC over stdio）、审批池 `codexApprovals`、线程占用锁 `codexOwnership`。
 `protocol/` 是 `npm run codex:gen-types` 生成的协议型别（只保留用到的方法），勿手改。
 
+### `multi-agent/` — 多 Agent 聊天室與工作流（含 `services/`、`tests/`）
+`multi-agent.routes.ts` 掛在 `/api/multi-agent`（CRUD、定義保存、工作流執行／停止、群聊訊息／停止）。
+定義型別與校驗在 `shared/multiAgent.ts`，持久化在 `database/repositories/multi-agents.db.ts`。
+- `services/agent-call.ts`：一次 provider runtime 呼叫的封裝（收集輸出、sessionId、中止、超時、轉推審批事件）。
+- `services/workflow-runner.ts`：按 DAG 執行，就緒節點並行上限 3，失敗下游略過；狀態以 `multi-agent-run` 推送。
+- `services/chatroom-dispatcher.ts`：每聊天室一個回合，忙碌時訊息排隊；@ 調度、字數截斷、每輪上限、120 秒超時；
+  成員 session 依變更類型續接或重建（`PROVIDER_INFO.capabilities.resumeAcrossModels`）。事件 `multi-agent-message` / `multi-agent-turn`。
+- 事件只推給擁有者：`websocket` 的 `sendToUser(userId, event)`。
+
 ### `websocket/` — 实时通信网关（含 `services/`）
 创建单一 WebSocketServer，管理三条路由：`/ws`（聊天）、`/shell`（命令行）、
 `/plugin-ws`（插件代理）。`services/` 分别处理各路由及认证状态管理。

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 
 import type { WebSocket } from 'ws';
 
-import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
+import { connectedClients, setClientUser } from '@/modules/websocket/services/websocket-state.service.js';
 import {
   hasLiveShellSession,
   markShellSessionStale,
@@ -145,6 +145,7 @@ export function handleChatConnection(
   connectedClients.add(ws);
 
   const writer = new WebSocketWriter(ws, readRequestUserId(request));
+  setClientUser(ws, writer.userId);
 
   ws.on('message', async (rawMessage) => {
     try {

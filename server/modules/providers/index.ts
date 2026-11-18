@@ -10,3 +10,4 @@ export { providerAuthService } from './services/provider-auth.service.js';
 
 export { initializeSessionsWatcher } from './services/sessions-watcher.service.js';
 export { closeSessionsWatcher, notifySessionsChanged } from './services/sessions-watcher.service.js';
+export { providerModelsService } from './services/models.service.js';

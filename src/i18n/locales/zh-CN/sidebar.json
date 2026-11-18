@@ -113,18 +113,10 @@
   },
   "search": {
     "modeProjects": "项目",
-    "modeConversations": "对话",
-    "conversationsPlaceholder": "搜索对话内容...",
-    "searching": "搜索中...",
+    "modeMultiAgent": "多 Agent",
+    "multiAgentPlaceholder": "搜索多 Agent...",
     "archivedPlaceholder": "搜索已归档会话...",
-    "archiveOnlyTooltip": "仅归档",
-    "noResults": "未找到结果",
-    "tryDifferentQuery": "尝试不同的搜索词",
-    "matches_one": "{{count}} 个匹配",
-    "matches_other": "{{count}} 个匹配",
-    "projectsScanned_one": "{{count}} 个项目已扫描",
-    "projectsScanned_other": "{{count}} 个项目已扫描",
-    "unsearchableProviders": "未搜索：{{providers}} 的会话"
+    "archiveOnlyTooltip": "仅归档"
   },
   "deleteConfirmation": {
     "deleteProject": "移除项目",
