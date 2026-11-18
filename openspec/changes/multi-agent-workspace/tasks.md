@@ -1,37 +1,37 @@
 ## 1. 共用型別與校驗
 
-- [ ] 1.1 新增 `shared/multiAgent.ts`：`WorkflowNode`/`WorkflowDef`/`ChatMember`/`ChatRules`/`ChatroomDef`/`MultiAgent` 型別與預設群規常數
-- [ ] 1.2 實作 `validateDefinition(kind, def)`：節點 1–12、成員 1–8、id 唯一、依賴存在且無環、provider 合法、成員名稱唯一且非「所有人」、群規整數範圍與 unmentionedBehavior 合法；結構驗證與注入模型清單的驗證分開；回傳錯誤列表
-- [ ] 1.3 實作 `layerWorkflow(def)`（Kahn 分層），附單元測試覆蓋：線性、分叉、匯合、環、缺失依賴
+- [x] 1.1 新增 `shared/multiAgent.ts`：`WorkflowNode`/`WorkflowDef`/`ChatMember`/`ChatRules`/`ChatroomDef`/`MultiAgent` 型別與預設群規常數
+- [x] 1.2 實作 `validateDefinition(kind, def)`：節點 1–12、成員 1–8、id 唯一、依賴存在且無環、provider 合法、成員名稱唯一且非「所有人」、群規整數範圍與 unmentionedBehavior 合法；結構驗證與注入模型清單的驗證分開；回傳錯誤列表
+- [x] 1.3 實作 `layerWorkflow(def)`（Kahn 分層），附單元測試覆蓋：線性、分叉、匯合、環、缺失依賴
 
 ## 2. 後端持久化
 
-- [ ] 2.1 `server/modules/database/schema.ts` 新增 `multi_agents`、`multi_agent_runs`、`multi_agent_messages` 與 `multi_agent_turns` 四張表（`CREATE TABLE IF NOT EXISTS`）並在 init 中建立
-- [ ] 2.2 新增 `repositories/multi-agents.db.ts`：CRUD（依 user_id 隔離）、run 讀寫、訊息追加/分頁讀取、刪除時級聯清除
-- [ ] 2.3 repository 整合測試（建立、更新定義、列表排序、刪除級聯）
+- [x] 2.1 `server/modules/database/schema.ts` 新增 `multi_agents`、`multi_agent_runs`、`multi_agent_messages` 與 `multi_agent_turns` 四張表（`CREATE TABLE IF NOT EXISTS`）並在 init 中建立
+- [x] 2.2 新增 `repositories/multi-agents.db.ts`：CRUD（依 user_id 隔離）、run 讀寫、訊息追加/分頁讀取、刪除時級聯清除
+- [x] 2.3 repository 整合測試（建立、更新定義、列表排序、刪除級聯）
 
 ## 3. 後端 API 與工作目錄
 
-- [ ] 3.1 新增 `server/modules/multi-agent/` 模組與 `multi-agent.routes.ts`：`GET/POST /api/multi-agent`、`GET/PATCH/DELETE /:id`、`PUT /:id/definition`（後端再次校驗，執行中拒絕）
-- [ ] 3.2 建立時決定 `workspace_path`：帶入當前專案路徑，否則建立 `~/.cloudcli/multi-agent/<id>/`
-- [ ] 3.3 在 `server/index.js` 掛載路由（走既有 JWT 中介層），更新 `server/modules/MODULES.md`
+- [x] 3.1 新增 `server/modules/multi-agent/` 模組與 `multi-agent.routes.ts`：`GET/POST /api/multi-agent`、`GET/PATCH/DELETE /:id`、`PUT /:id/definition`（後端再次校驗，執行中拒絕）
+- [x] 3.2 建立時決定 `workspace_path`：帶入當前專案路徑，否則建立 `~/.cloudcli/multi-agent/<id>/`
+- [x] 3.3 在 `server/index.js` 掛載路由（走既有 JWT 中介層），更新 `server/modules/MODULES.md`
 
 ## 4. 工作流執行器
 
-- [ ] 4.1 實作 `WorkflowRunner`：建立 run、就緒節點並行（上限 3）、組裝節點提示（instruction + 上游輸出截斷）、經 `providerRegistry` runtime 執行
-- [ ] 4.2 自訂收集 writer：累積 assistant 文字、計算階段式/漸近式進度、`complete`/錯誤時判定成功或失敗；失敗節點下游標記 skipped
-- [ ] 4.3 狀態變化寫入 `node_states_json`，並經聊天 WS 推送 `multi-agent-run` 事件給該使用者所有連線
-- [ ] 4.4 `POST /:id/runs`、`POST /:id/runs/:runId/stop`、`GET /:id/runs/latest`、`GET /:id/runs`、`GET /:id/runs/:runId`；停止時對執行中節點呼叫 `runtime.abort`
-- [ ] 4.5 服務啟動時把 `running` 的 run/節點標記為失敗（已中斷）
-- [ ] 4.6 runner 單元測試（mock runtime）：依序執行、並行上限、失敗傳播、停止
+- [x] 4.1 實作 `WorkflowRunner`：建立 run、就緒節點並行（上限 3）、組裝節點提示（instruction + 上游輸出截斷）、經 `providerRegistry` runtime 執行
+- [x] 4.2 自訂收集 writer：累積 assistant 文字、計算階段式/漸近式進度、`complete`/錯誤時判定成功或失敗；失敗節點下游標記 skipped
+- [x] 4.3 狀態變化寫入 `node_states_json`，並經聊天 WS 推送 `multi-agent-run` 事件給該使用者所有連線
+- [x] 4.4 `POST /:id/runs`、`POST /:id/runs/:runId/stop`、`GET /:id/runs/latest`、`GET /:id/runs`、`GET /:id/runs/:runId`；停止時對執行中節點呼叫 `runtime.abort`
+- [x] 4.5 服務啟動時把 `running` 的 run/節點標記為失敗（已中斷）
+- [x] 4.6 runner 單元測試（mock runtime）：依序執行、並行上限、失敗傳播、停止
 
 ## 5. 聊天室調度器
 
-- [ ] 5.1 實作 `@` 解析（成員名稱、所有人、未 @ 預設行為），附單元測試
-- [ ] 5.2 實作 `ChatroomDispatcher`：依序讓目標成員發言，組裝 persona + 群規 + 硬限制說明 + 最近紀錄；每成員保存並 resume 自己的 provider sessionId
-- [ ] 5.3 後端強制限制：`maxReplyChars` 截斷、`allowAiMentions` 佇列擴展、`maxAiRepliesPerTurn` 達上限插入系統訊息；成員以各自設定的權限模式執行
-- [ ] 5.4 `POST /:id/messages`、`POST /:id/messages/stop { turnId }`、`GET /:id/messages`；串流經 WS 推送 `multi-agent-message`
-- [ ] 5.5 dispatcher 單元測試（mock runtime）：@ 單人、@所有人、截斷、AI 互 @ 上限、停止
+- [x] 5.1 實作 `@` 解析（成員名稱、所有人、未 @ 預設行為），附單元測試
+- [x] 5.2 實作 `ChatroomDispatcher`：依序讓目標成員發言，組裝 persona + 群規 + 硬限制說明 + 最近紀錄；每成員保存並 resume 自己的 provider sessionId
+- [x] 5.3 後端強制限制：`maxReplyChars` 截斷、`allowAiMentions` 佇列擴展、`maxAiRepliesPerTurn` 達上限插入系統訊息；成員以各自設定的權限模式執行
+- [x] 5.4 `POST /:id/messages`、`POST /:id/messages/stop { turnId }`、`GET /:id/messages`；串流經 WS 推送 `multi-agent-message`
+- [x] 5.5 dispatcher 單元測試（mock runtime）：@ 單人、@所有人、截斷、AI 互 @ 上限、停止
 
 ## 6. 側邊欄
 

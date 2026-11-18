@@ -20,6 +20,8 @@ export type ProviderCapabilities = {
   effort: boolean;
   /** 提供會話產物（Session Artifacts）側邊欄。 */
   artifacts: boolean;
+  /** 同一 session 換模型後可直接續接；否則多 Agent 成員換模型要重建 session。 */
+  resumeAcrossModels: boolean;
 };
 
 export type ProviderInfo = {
@@ -47,26 +49,26 @@ function antigravityDefaultPermissionMode(): PermissionMode {
 
 export const PROVIDER_INFO: Record<LLMProvider, ProviderInfo> = {
   claude: {
-    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false },
+    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false, resumeAcrossModels: true },
     permissionModes: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
     defaultPermissionMode: 'default',
     settingsStorageKey: 'claude-settings',
   },
   cursor: {
-    capabilities: { midTurnSteer: false, images: true, effort: false, artifacts: false },
+    capabilities: { midTurnSteer: false, images: true, effort: false, artifacts: false, resumeAcrossModels: false },
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
     defaultPermissionMode: 'default',
     settingsStorageKey: 'cursor-tools-settings',
   },
   codex: {
-    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false },
+    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false, resumeAcrossModels: false },
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions'],
     defaultPermissionMode: 'default',
     mapPermissionMode: (mode) => (mode === 'plan' ? 'default' : mode),
     settingsStorageKey: 'codex-settings',
   },
   antigravity: {
-    capabilities: { midTurnSteer: false, images: true, effort: false, artifacts: true },
+    capabilities: { midTurnSteer: false, images: true, effort: false, artifacts: true, resumeAcrossModels: false },
     permissionModes: ['default', 'bypassPermissions'],
     defaultPermissionMode: antigravityDefaultPermissionMode,
     settingsStorageKey: 'antigravity-settings',

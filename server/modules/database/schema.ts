@@ -146,6 +146,63 @@ CREATE INDEX IF NOT EXISTS idx_session_messages_tool_id
     ON session_messages(session_id, json_extract(payload, '$.toolId'));
 `;
 
+// 多 Agent（聊天室 / 工作流）。definition_json 由 shared/multiAgent.ts 型別約束；
+// runs / turns 保存當時的定義快照，修改定義不影響歷史。
+export const MULTI_AGENT_TABLES_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS multi_agents (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('chatroom', 'workflow')),
+    name TEXT NOT NULL,
+    definition_json TEXT,
+    definition_version INTEGER NOT NULL DEFAULT 0,
+    builder_session_json TEXT,
+    member_sessions_json TEXT NOT NULL DEFAULT '{}',
+    workspace_path TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agents_user ON multi_agents(user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS multi_agent_runs (
+    id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    definition_version INTEGER NOT NULL,
+    definition_snapshot_json TEXT NOT NULL,
+    node_states_json TEXT NOT NULL DEFAULT '{}',
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_runs_agent ON multi_agent_runs(multi_agent_id, started_at);
+
+CREATE TABLE IF NOT EXISTS multi_agent_turns (
+    id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    trigger_message_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    definition_snapshot_json TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_turns_agent ON multi_agent_turns(multi_agent_id, started_at);
+
+CREATE TABLE IF NOT EXISTS multi_agent_messages (
+    id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    turn_id TEXT,
+    seq INTEGER NOT NULL,
+    author_kind TEXT NOT NULL CHECK (author_kind IN ('user', 'member', 'system')),
+    member_id TEXT,
+    author_snapshot_json TEXT,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL,
+    finish_reason TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_multi_agent_messages_seq ON multi_agent_messages(multi_agent_id, seq);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -189,4 +246,6 @@ ${APP_CONFIG_TABLE_SCHEMA_SQL}
 ${SESSION_MODELS_TABLE_SCHEMA_SQL}
 
 ${SESSION_MESSAGES_TABLE_SCHEMA_SQL}
+
+${MULTI_AGENT_TABLES_SCHEMA_SQL}
 `;

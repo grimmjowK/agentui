@@ -13,3 +13,5 @@ export type { SessionMessageRow } from '@/modules/database/repositories/session-
 export { sessionsDb } from '@/modules/database/repositories/sessions.db.js';
 export { userDb } from '@/modules/database/repositories/users.js';
 export { vapidKeysDb } from '@/modules/database/repositories/vapid-keys.js';
+export { multiAgentsDb } from '@/modules/database/repositories/multi-agents.db.js';
+export type { MemberSession } from '@/modules/database/repositories/multi-agents.db.js';
