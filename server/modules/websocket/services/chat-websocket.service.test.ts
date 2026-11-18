@@ -157,6 +157,21 @@ test('claude-permission-response 帶上呼叫者 userId；被拒時回覆警告'
   assert.equal(ws.sent[0].status, 'warning');
 });
 
+test('permission-decision 分派到 runtime.resolveApproval；未實作或被拒時回覆警告', async () => {
+  const calls: unknown[] = [];
+  const { ws, send } = connect({
+    antigravity: fakeRuntime({ resolveApproval: (...args) => { calls.push(args); return args[2] === 'allow'; } }),
+    claude: fakeRuntime(),
+  });
+  await send({ type: 'permission-decision', provider: 'antigravity', requestId: 'r1', sessionId: 's1', decision: 'allow' });
+  assert.deepEqual(calls, [['r1', 7, 'allow']]);
+  assert.equal(ws.sent.length, 0);
+  await send({ type: 'permission-decision', provider: 'antigravity', requestId: 'r1', sessionId: 's1', decision: 'bogus' });
+  assert.equal(ws.sent.at(-1)?.status, 'warning');
+  await send({ type: 'permission-decision', provider: 'claude', requestId: 'r2', sessionId: 's1', decision: 'allow' });
+  assert.equal(ws.sent.at(-1)?.status, 'warning');
+});
+
 test('get-pending-permissions 不帶 sessionId 時跨 provider 匯總，帶 sessionId 時只查該會話', async () => {
   const calls: unknown[] = [];
   const pending = (provider: string) => (userId: unknown, sessionId?: string) => {

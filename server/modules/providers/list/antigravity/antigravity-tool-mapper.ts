@@ -99,3 +99,53 @@ export function mapAgyStepUpdate(step: AnyRecord): AnyRecord | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// ACP（agy acp）即時事件。實測形狀見 docs/fixtures/antigravity/acp-*.jsonl（agy 1.5.11）：
+// - tool_call / tool_call_update 帶 `name`、`args`（與 step_update 的工具名與參數相同）與 `toolCallId`；
+// - 完成時結果在 `content[].content.text`（同 `rawOutput.output`），失敗為 `status: 'failed'`；
+// - ACP 沒有 step_index，即時 id 以 toolCallId 組成，一輪結束後再以 transcript 對上歷史 id。
+// ---------------------------------------------------------------------------
+
+/** ACP 即時工具的 id。 */
+export function acpToolId(toolCallId: unknown): string {
+  return `agy_acp_${toolCallId}`;
+}
+
+function acpToolOutput(update: AnyRecord): string {
+  const parts = Array.isArray(update.content) ? update.content : [];
+  const texts = parts
+    .map((part: AnyRecord) => (part?.content?.type === 'text' ? str(part.content.text) : ''))
+    .filter(Boolean);
+  if (texts.length) return texts.join('\n');
+  const raw = update.rawOutput as AnyRecord | undefined;
+  return raw?.output == null ? '' : str(raw.output);
+}
+
+/**
+ * ACP 的 `session/update`（tool_call / tool_call_update）→ tool_use 或 tool_result；
+ * 文字、思考與其他更新由執行層處理（需要累積串流段落），這裡回傳 null。
+ */
+export function mapAcpUpdate(update: AnyRecord): AnyRecord | null {
+  const kind = update?.sessionUpdate;
+  if (kind !== 'tool_call' && kind !== 'tool_call_update') return null;
+  const toolId = acpToolId(update.toolCallId);
+  const status = update.status;
+  if (kind === 'tool_call') {
+    const args = (update.args ?? update.rawInput ?? {}) as AnyRecord;
+    return { kind: 'tool_use', id: toolId, toolId, ...mapAgyTool(str(update.name), args) };
+  }
+  if (status === 'completed' || status === 'failed') {
+    const output = stripStepHeader(acpToolOutput(update));
+    const isError = status === 'failed' || isAgyToolError(undefined, output);
+    return {
+      kind: 'tool_result',
+      id: `${toolId}:result`,
+      toolId,
+      // 被拒絕或取消時 CLI 只給空輸出，補上說明讓卡片看得出原因
+      content: output || (status === 'failed' ? 'Tool call was denied or cancelled.' : ''),
+      isError,
+    };
+  }
+  return null;
+}

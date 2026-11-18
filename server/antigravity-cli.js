@@ -1,6 +1,17 @@
+/**
+ * Antigravity 執行層：每一輪啟動一個 `agy acp` 行程（node-live-session-and-agy-acp design D7 / ACP D1–D8）。
+ *
+ * 流程：spawn `agy acp` → initialize → session/new 或 session/resume → session/set_mode → session/set_model
+ *       → session/prompt；所有 session/prompt 都返回後送一次 complete，關閉行程。
+ * - 審批：session/request_permission 進 antigravityApprovals，頁面決定後回覆；bypassPermissions 以
+ *   `--dangerously-skip-permissions` 啟動（agy 1.5.11 實測可用），不由客戶端代答。
+ * - 插話：同一條連線再送 session/prompt，由 agy 併入目前這一輪；有未決審批時 agy 會拒絕，直接回 waiting_approval。
+ * - 中斷：session/cancel → 未決審批回覆已取消 → 等 prompt 以 cancelled 返回，7 秒內沒返回就結束行程。
+ * - 歷史：ACP 即時事件沒有 step_index；一輪結束後讀 transcript，把即時訊息的 id 對到歷史 id（providerIds），
+ *   讓歷史對帳能去重（見 linkLiveIdsToTranscript）。
+ */
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
-import { StringDecoder } from 'node:string_decoder';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,33 +25,28 @@ import { ensureAntigravitySessionInCliStore } from './shared/antigravity-session
 import { cleanupTempFiles, handleImages } from './shared/image-temp-files.js';
 import {
   agyTextId,
-  mapAgyStepUpdate,
+  agyToolId,
+  antigravityApprovals,
+  AcpConnection,
+  AcpRequestError,
+  mapAcpUpdate,
   notifySessionsChanged,
   providerRegistry,
 } from './modules/providers/index.js';
-import { sessionsDb } from './modules/database/index.js';
+import { sessionMessagesDb, sessionsDb } from './modules/database/index.js';
 
 const spawnFunction = process.platform === 'win32' ? crossSpawn : spawn;
 
-// Active processes mapped by session ID
-const activeAntigravityProcesses = new Map();
+/** UI 權限模式 → ACP 模式；bypassPermissions 走 CLI 旗標 */
+const ACP_MODES = { default: 'default', acceptEdits: 'accept-edits', auto: 'auto', plan: 'plan' };
+const CANCEL_GRACE_MS = 7000;
+
+/** @type {Map<string, AntigravityRun>} sessionId → 執行中的一輪 */
+const activeRuns = new Map();
 
 function send(writer, message) {
   if (!writer) return;
-  const normalized = createNormalizedMessage({ provider: 'antigravity', ...message });
-  if (writer.isWebSocketWriter || writer.isSSEStreamWriter) {
-    writer.send(normalized);
-  } else if (typeof writer.send === 'function') {
-    if (writer.readyState === undefined || writer.readyState === 1) {
-      try {
-        writer.send(normalized);
-      } catch {
-        writer.send(JSON.stringify(normalized));
-      }
-    }
-  } else if (typeof writer.write === 'function') {
-    writer.write(`data: ${JSON.stringify(normalized)}\n\n`);
-  }
+  writer.send(createNormalizedMessage({ provider: 'antigravity', ...message }));
 }
 
 export function createReconnectableWriter(writer) {
@@ -58,278 +64,6 @@ export function createReconnectableWriter(writer) {
       return true;
     },
   };
-}
-
-/**
- * Parses stdout lines from `agy` non-interactive execution.
- */
-export class AntigravityResponseHandler {
-  /** @param {(sessionId: string) => void} [onSessionId] */
-  constructor(sessionId, writer, onSessionId = () => {}) {
-    this.sessionId = sessionId;
-    this.writer = writer;
-    this.onSessionId = onSessionId;
-    this.error = null;
-    this.errorEmitted = false;
-    this.aborted = false;
-    this.decoder = new StringDecoder('utf8');
-    this.buffer = '';
-    this.hasStreamed = false;
-    // 目前串流段落：每個 agent_response 步驟各自一段，遇到換步驟、工具或結束就收尾
-    this.streamStep = null;
-    this.segmentText = '';
-    this.hasStreamedAny = false;
-    this.lastStepCompletedAgentResponse = false;
-    this.ignoredResultError = null;
-    this.sessionCreatedEmitted = false;
-  }
-
-  clearTransientError() {
-    this.error = null;
-  }
-
-  adoptSessionId(sessionId) {
-    if (typeof sessionId !== 'string' || !sessionId) return;
-    if (!this.sessionCreatedEmitted || this.sessionId !== sessionId) {
-      this.onSessionId(sessionId);
-      this.sessionId = sessionId;
-      this.writer?.setSessionId?.(sessionId);
-      this.sessionCreatedEmitted = true;
-      send(this.writer, { kind: 'session_created', newSessionId: sessionId, sessionId });
-    }
-  }
-
-  handleChunk(chunk) {
-    this.buffer += this.decoder.write(chunk);
-    const lines = this.buffer.split('\n');
-    this.buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      this.handleLine(trimmed);
-    }
-  }
-
-  appendStream(text, stepIndex = null) {
-    if (this.hasStreamed && stepIndex !== this.streamStep) this.endStream();
-    this.hasStreamed = true;
-    this.streamStep = stepIndex;
-    this.segmentText += text;
-    send(this.writer, { sessionId: this.sessionId, kind: 'stream_delta', content: text });
-  }
-
-  /**
-   * 收尾目前段落：stream_end 帶上與歷史相同的 id（transcript 的 step_index），再送完整文字。
-   * 前端把串流氣泡改成這個 id，隨後的 text 以同 id 覆蓋；歷史拉取時也能按 id 去重。
-   */
-  endStream() {
-    if (!this.hasStreamed) return;
-    const messageId = this.streamStep !== null && this.sessionId
-      ? agyTextId(this.sessionId, this.streamStep)
-      : generateMessageId('agy_msg');
-    send(this.writer, { sessionId: this.sessionId, kind: 'stream_end', messageId });
-    send(this.writer, { sessionId: this.sessionId, id: messageId, kind: 'text', role: 'assistant', content: this.segmentText });
-    this.hasStreamedAny = true;
-    this.hasStreamed = false;
-    this.streamStep = null;
-    this.segmentText = '';
-  }
-
-  handleLine(line) {
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      if (/^API error \(attempt \d+\):/i.test(line)) {
-        if (!this.aborted) {
-          this.error = line;
-          this.lastStepCompletedAgentResponse = false;
-        }
-        return;
-      }
-      // Plain text streaming fallback
-      this.clearTransientError();
-      this.appendStream(line + '\n');
-      return;
-    }
-    this.handleJsonEvent(event);
-  }
-
-  handleJsonEvent(event) {
-    if (!event || typeof event !== 'object') return;
-
-    // A. Native agy stream-json format: init event
-    if (event.event === 'init') {
-      this.adoptSessionId(event.conversation_id);
-      return;
-    }
-
-    // B. Native agy stream-json format: step_update event
-    if (event.event === 'step_update' && event.step_update) {
-      this.ignoredResultError = null;
-      const step = event.step_update;
-      this.adoptSessionId(step.conversation_id);
-
-      const stepIndex = typeof step.step_index === 'number' ? step.step_index : null;
-      // 換到別的步驟（含 system_message 這類不帶文字也不是工具的步驟）就收尾上一段，
-      // 否則上一段會停在串流佔位裡，期間拉到的歷史無法按 id 認領它
-      if (this.hasStreamed && stepIndex !== this.streamStep) this.endStream();
-
-      // Text delta
-      if (typeof step.text_delta === 'string' && step.text_delta) {
-        this.clearTransientError();
-        this.appendStream(step.text_delta, stepIndex);
-      }
-      if (step.step_type === 'agent_response') {
-        const isDone = step.state === 'DONE';
-        if (isDone) this.endStream();
-        this.lastStepCompletedAgentResponse = isDone && this.hasStreamedAny;
-        return;
-      }
-
-      this.lastStepCompletedAgentResponse = false;
-
-      // Tool use / result：與歷史解析共用 antigravity-tool-mapper
-      const mapped = mapAgyStepUpdate(step);
-      if (mapped) {
-        this.clearTransientError();
-        this.endStream();
-        send(this.writer, { sessionId: this.sessionId, ...mapped });
-        return;
-      }
-
-      return;
-    }
-
-    // C. Native agy stream-json format: result event
-    if (event.event === 'result' && event.result) {
-      const res = event.result;
-      this.adoptSessionId(res.conversation_id);
-
-      if (res.status === 'ERROR') {
-        if (this.aborted) return;
-        // agy --conversation 續接含有歷史錯誤步驟的會話時，printmode 在 stream-json 下因
-        // initialStepIndex=0 與 streamJSONEmitter.HasResponse()=false 的競態，會把舊輪次的
-        // 錯誤塞進本輪結尾的 result.error。若本輪最後一步已是正常 DONE 的 agent_response，忽略該陳舊錯誤。
-        if (this.lastStepCompletedAgentResponse) {
-          this.ignoredResultError = typeof res.error === 'string' ? res.error : null;
-          this.clearTransientError();
-          this.endStream();
-          return;
-        }
-        this.error = res.error || 'Antigravity execution failed';
-        this.errorEmitted = true;
-        send(this.writer, {
-          sessionId: this.sessionId,
-          kind: 'error',
-          content: this.error,
-        });
-        return;
-      }
-
-      this.clearTransientError();
-      this.endStream();
-      // response 是最後一段回覆，串流時已逐字送出過；只有完全沒有串流（result-only）才用它補上
-      // ponytail: 假設最後一段回覆一定有 text_delta（agy 1.5.0 實測如此），否則該段會缺
-      const responseText = res.response || '';
-      if (responseText.trim() && !this.hasStreamedAny) {
-        send(this.writer, { sessionId: this.sessionId, kind: 'text', role: 'assistant', content: responseText });
-      }
-      return;
-    }
-
-    // D. Generic/Mock event fallbacks for backward-compat and unit tests
-    // 1. Text delta
-    if (event.delta || event.type === 'delta') {
-      const delta = typeof event.delta === 'string' ? event.delta : (event.text || '');
-      if (delta) {
-        this.clearTransientError();
-        this.appendStream(delta);
-      }
-      return;
-    }
-
-    // 2. Tool use
-    if (event.type === 'tool_use' || event.tool_use) {
-      this.clearTransientError();
-      this.endStream();
-      const tool = event.tool_use || event;
-      const toolId = tool.id || generateMessageId('agy_tool');
-      send(this.writer, {
-        sessionId: this.sessionId,
-        kind: 'tool_use',
-        toolName: tool.name || tool.toolName || 'tool',
-        toolInput: tool.input || tool.args || {},
-        toolId,
-      });
-      return;
-    }
-
-    // 3. Tool result
-    if (event.type === 'tool_result' || event.tool_result) {
-      this.clearTransientError();
-      const result = event.tool_result || event;
-      send(this.writer, {
-        sessionId: this.sessionId,
-        kind: 'tool_result',
-        toolId: result.tool_use_id || result.toolId || '',
-        content: typeof result.content === 'string' ? result.content : JSON.stringify(result.content ?? ''),
-        isError: Boolean(result.is_error || result.isError),
-      });
-      return;
-    }
-
-    // 4. Completed message
-    if (event.type === 'message' || event.type === 'text') {
-      const content = event.content || event.text || '';
-      if (content && typeof content === 'string') {
-        this.clearTransientError();
-        if (this.hasStreamed) {
-          // 完整訊息以它為準，取代串流累積的內容
-          this.segmentText = content;
-          this.endStream();
-        } else {
-          send(this.writer, { sessionId: this.sessionId, kind: 'text', role: 'assistant', content });
-        }
-      }
-      return;
-    }
-
-    // 5. Error event (may be a transient mid-stream retry such as "API error (attempt 2): ...";
-    // hold until flush/result unless unrecovered when the stream finishes)
-    if (event.type === 'error' || event.error) {
-      if (this.aborted) return;
-      const errMsg = typeof event.error === 'string' ? event.error : (event.error?.message || event.message || 'Unknown error');
-      this.error = errMsg;
-      this.lastStepCompletedAgentResponse = false;
-    }
-  }
-
-  flush() {
-    this.buffer += this.decoder.end();
-    if (this.buffer.trim()) {
-      this.handleLine(this.buffer.trim());
-      this.buffer = '';
-    }
-
-    this.endStream();
-
-    if (this.error && !this.errorEmitted && !this.aborted) {
-      this.errorEmitted = true;
-      send(this.writer, {
-        sessionId: this.sessionId,
-        kind: 'error',
-        content: this.error,
-      });
-    }
-  }
-}
-
-/** 從 stderr 找出 headless 模式自動拒絕審批的說明（agy 1.5.0 實測文字）。 */
-export function findPermissionDeniedNotice(stderr) {
-  const line = String(stderr || '').split('\n').find((text) => /auto-denied|cannot prompt for/i.test(text));
-  return line ? line.trim() : null;
 }
 
 function antigravityBrainRoots() {
@@ -385,19 +119,191 @@ function scheduleAntigravityMetadataResync(sessionId, transcriptPath) {
 }
 
 /**
- * Launches an Antigravity CLI process and pipes events to the provided writer.
+ * 把這一輪的即時訊息 id 對到 transcript 的歷史 id。
+ * ACP 沒有 step_index，即時 tool_use 的 id 是 toolCallId、文字是隨機 id；transcript 以 step_index 編號。
+ * 依「這一輪新增的步驟」順序配對：工具呼叫依序對 tool_calls，助理文字依序對有內容的 PLANNER_RESPONSE。
+ * 配對不上就跳過，歷史對帳會在會話閒置時以 transcript 重建，不影響正確性。
+ */
+export function linkLiveIdsToTranscript(sessionId, transcriptPath, fromStepExclusive, liveTools, liveTexts) {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return;
+  const toolIds = [];
+  const textIds = [];
+  for (const line of fs.readFileSync(transcriptPath, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    if (typeof entry.step_index !== 'number' || entry.step_index <= fromStepExclusive) continue;
+    if (entry.type !== 'PLANNER_RESPONSE') continue;
+    if (typeof entry.content === 'string' && entry.content.trim()) textIds.push(agyTextId(sessionId, entry.step_index));
+    if (Array.isArray(entry.tool_calls)) {
+      entry.tool_calls.forEach((_, k) => toolIds.push(agyToolId(entry.step_index + 1 + k)));
+    }
+  }
+  const link = (liveIds, historyIds) => {
+    liveIds.forEach((liveId, i) => {
+      if (historyIds[i]) sessionMessagesDb.updateProviderIds(sessionId, liveId, [historyIds[i]]);
+    });
+  };
+  try {
+    link(liveTools, toolIds);
+    link(liveTexts, textIds);
+  } catch (error) {
+    console.warn('Antigravity transcript id linking warning:', error.message);
+  }
+}
+
+function lastTranscriptStep(transcriptPath) {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return -1;
+  let last = -1;
+  for (const line of fs.readFileSync(transcriptPath, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const index = JSON.parse(line).step_index;
+      if (typeof index === 'number' && index > last) last = index;
+    } catch { /* ignore */ }
+  }
+  return last;
+}
+
+function friendlyError(error) {
+  if (error instanceof AcpRequestError && /authentication required/i.test(error.message)) {
+    return 'Antigravity CLI 尚未登入，請先在終端執行 `agy` 完成登入後再試。';
+  }
+  return error?.message || String(error);
+}
+
+/** 一輪 ACP 執行：負責串流段落、待返回的 prompt 計數、審批與中斷。 */
+class AntigravityRun {
+  constructor({ writer, sessionId, cwd, userId, notifyContext }) {
+    this.writer = writer;
+    this.sessionId = sessionId;
+    this.cwd = cwd;
+    this.userId = userId;
+    this.notifyContext = notifyContext;
+    this.instanceId = crypto.randomUUID();
+    this.connection = null;
+    this.outstanding = 0;
+    this.finishing = false;
+    this.aborted = false;
+    this.error = null;
+    this.segment = '';
+    this.segmentId = null;
+    this.liveTools = [];
+    this.liveTexts = [];
+    this.done = null;
+    this.resolveDone = null;
+  }
+
+  // ---- 串流段落：文字一段一段收尾，工具或結束時送出完整 text ----
+  appendText(text) {
+    if (!text) return;
+    if (!this.segmentId) this.segmentId = generateMessageId('agy_acp_msg');
+    this.segment += text;
+    send(this.writer, { sessionId: this.sessionId, kind: 'stream_delta', content: text });
+  }
+
+  endSegment() {
+    if (!this.segmentId) return;
+    const id = this.segmentId;
+    send(this.writer, { sessionId: this.sessionId, kind: 'stream_end', messageId: id });
+    send(this.writer, { sessionId: this.sessionId, id, kind: 'text', role: 'assistant', content: this.segment });
+    this.liveTexts.push(id);
+    this.segment = '';
+    this.segmentId = null;
+  }
+
+  onUpdate(update) {
+    if (!update) return;
+    switch (update.sessionUpdate) {
+      case 'agent_message_chunk':
+        if (update.content?.type === 'text') this.appendText(update.content.text);
+        return;
+      case 'agent_thought_chunk':
+        if (update.content?.type === 'text' && update.content.text) {
+          send(this.writer, { sessionId: this.sessionId, kind: 'thinking', content: update.content.text });
+        }
+        return;
+      case 'tool_call':
+      case 'tool_call_update': {
+        const mapped = mapAcpUpdate(update);
+        if (!mapped) return;
+        this.endSegment();
+        if (mapped.kind === 'tool_use') {
+          if (this.liveTools.includes(mapped.id)) return;
+          this.liveTools.push(mapped.id);
+        }
+        send(this.writer, { sessionId: this.sessionId, ...mapped });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /** 送出一個 prompt；所有 prompt 都返回後收尾。 */
+  sendPrompt(text) {
+    this.outstanding += 1;
+    this.connection.request('session/prompt', { sessionId: this.sessionId, prompt: [{ type: 'text', text }] }, 0)
+      .then((result) => {
+        if (result?.stopReason === 'cancelled') this.aborted = true;
+      })
+      .catch((error) => {
+        if (!this.aborted) this.error ??= friendlyError(error);
+      })
+      .finally(() => {
+        this.outstanding -= 1;
+        if (this.outstanding === 0) this.finish();
+      });
+  }
+
+  steer(text) {
+    if (this.finishing || this.aborted || !this.connection || this.connection.isClosed) return { ok: false, reason: 'not_running' };
+    if (!text.trim()) return { ok: false, reason: 'empty' };
+    // agy 在等待審批時會拒絕新的 prompt（-32603）；直接回覆，讓前端保留在佇列
+    if (antigravityApprovals.hasPending(this.instanceId)) return { ok: false, reason: 'waiting_approval' };
+    this.sendPrompt(text);
+    return { ok: true };
+  }
+
+  async abort() {
+    if (this.finishing || this.aborted) return false;
+    this.aborted = true;
+    antigravityApprovals.clearInstance(this.instanceId, 'aborted');
+    this.connection?.notify('session/cancel', { sessionId: this.sessionId });
+    const timer = setTimeout(() => {
+      if (!this.finishing) this.connection?.kill();
+    }, CANCEL_GRACE_MS);
+    timer.unref?.();
+    notifyRunStopped({ ...this.notifyContext, sessionId: this.sessionId, stopReason: 'aborted' });
+    return true;
+  }
+
+  finish() {
+    if (this.finishing) return;
+    this.finishing = true;
+    this.endSegment();
+    antigravityApprovals.clearInstance(this.instanceId);
+    this.connection?.close();
+    this.resolveDone?.();
+  }
+}
+
+/**
+ * Launches one Antigravity ACP turn and pipes events to the provided writer.
  */
 export async function spawnAntigravity(message, options = {}, ws) {
-  let sessionId = options.sessionId || crypto.randomUUID();
+  const resumeId = options.sessionId || null;
   const cwd = options.cwd || options.projectPath || process.cwd();
-  const model = options.model;
+  const liveWriter = createReconnectableWriter(ws);
+  const userId = ws?.userId ?? null;
+  const notifyContext = { userId: userId || null, provider: 'antigravity', sessionName: options.sessionSummary };
 
-  if (options.sessionId) {
+  if (resumeId) {
     try {
-      await ensureAntigravitySessionInCliStore(options.sessionId);
+      await ensureAntigravitySessionInCliStore(resumeId);
     } catch (error) {
-      const errorMsg = `Failed to prepare Antigravity conversation ${options.sessionId}: ${error.message}`;
-      send(ws, { sessionId, kind: 'error', content: errorMsg });
+      const errorMsg = `Failed to prepare Antigravity conversation ${resumeId}: ${error.message}`;
+      send(liveWriter, { sessionId: resumeId, kind: 'error', content: errorMsg });
       throw new Error(errorMsg);
     }
   }
@@ -405,216 +311,160 @@ export async function spawnAntigravity(message, options = {}, ws) {
   let executablePath;
   try {
     executablePath = resolveAntigravityExecutablePath();
-  } catch (err) {
+  } catch {
     const errorMsg = 'Antigravity CLI (agy) is not installed or not found on PATH. '
       + 'Please install it first: https://www.antigravity.google/docs/cli/';
-    send(ws, { sessionId, kind: 'error', content: errorMsg });
+    send(liveWriter, { sessionId: resumeId, kind: 'error', content: errorMsg });
     throw new Error(errorMsg);
   }
 
   const { modifiedCommand, tempImagePaths, tempDir } = await handleImages(message, options.images, cwd);
+  const args = ['acp'];
+  if (options.permissionMode === 'bypassPermissions') args.push('--dangerously-skip-permissions');
 
-  // Construct CLI arguments array
-  const args = [];
-
-  // Prompt / Non-interactive argument
-  args.push('--prompt', modifiedCommand);
-
-  // Model selection
-  if (model) {
-    args.push('--model', model);
+  let child;
+  try {
+    child = spawnFunction(executablePath, args, { cwd, env: { ...process.env, PAGER: 'cat' }, stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (error) {
+    await cleanupTempFiles(tempImagePaths, tempDir);
+    send(liveWriter, { sessionId: resumeId, kind: 'error', content: error.message });
+    throw error;
   }
 
-  // Multi-turn session resume: agy uses --conversation <id>
-  if (options.sessionId) {
-    args.push('--conversation', options.sessionId);
-  }
+  const run = new AntigravityRun({ writer: liveWriter, sessionId: resumeId, cwd, userId, notifyContext });
+  run.done = new Promise((resolve) => { run.resolveDone = resolve; });
+  const register = (id) => {
+    if (run.sessionId && run.sessionId !== id) activeRuns.delete(run.sessionId);
+    run.sessionId = id;
+    activeRuns.set(id, run);
+  };
+  if (resumeId) register(resumeId);
 
-  // Stream format
-  args.push('--output-format', 'stream-json');
-
-  // Permission mode: agy uses --dangerously-skip-permissions
-  if (options.permissionMode === 'bypassPermissions') {
-    args.push('--dangerously-skip-permissions');
-  }
-
-  const liveWriter = createReconnectableWriter(ws);
-
-  return new Promise((resolve, reject) => {
-    let childProcess;
-    try {
-      childProcess = spawnFunction(executablePath, args, {
-        cwd,
-        env: {
-          ...process.env,
-          PAGER: 'cat',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
+  run.connection = new AcpConnection(child, {
+    onNotification: (method, params) => {
+      if (method === 'session/update' && params?.sessionId === run.sessionId) run.onUpdate(params.update);
+    },
+    onRequest: async (method, params) => {
+      if (method !== 'session/request_permission') throw Object.assign(new Error(`Method not supported: ${method}`), { code: -32601 });
+      run.endSegment();
+      return antigravityApprovals.add({
+        userId,
+        sessionId: run.sessionId,
+        instanceId: run.instanceId,
+        toolCall: params?.toolCall ?? {},
+        options: Array.isArray(params?.options) ? params.options : [],
+        notify: (msg) => send(liveWriter, msg),
       });
-    } catch (err) {
-      void cleanupTempFiles(tempImagePaths, tempDir);
-      send(liveWriter, { sessionId, kind: 'error', content: err.message });
-      return reject(err);
+    },
+    onExit: () => {
+      if (!run.finishing) {
+        if (!run.aborted) run.error ??= `agy acp exited unexpectedly${run.connection.stderr ? `: ${run.connection.stderr.trim().slice(-300)}` : ''}`;
+        run.finish();
+      }
+    },
+  });
+
+  let transcriptPath = null;
+  let stepBefore = -1;
+  try {
+    const init = await run.connection.request('initialize', {
+      protocolVersion: 1,
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+    });
+    if (init?.protocolVersion !== 1) {
+      throw new Error(`Unsupported ACP protocol version ${init?.protocolVersion} (agy ${init?.agentInfo?.version ?? 'unknown'})`);
     }
 
-    activeAntigravityProcesses.set(sessionId, childProcess);
-    // 推送通知按 userId 查订阅，缺了它 notifyUserIfEnabled 会直接跳过
-    childProcess.notifyContext = { userId: ws?.userId || null, provider: 'antigravity', sessionName: options.sessionSummary };
-    const handler = new AntigravityResponseHandler(options.sessionId || null, liveWriter, (nativeId) => {
-      activeAntigravityProcesses.delete(sessionId);
-      sessionId = nativeId;
-      activeAntigravityProcesses.set(sessionId, childProcess);
-      // Index before session_created triggers navigation/history loading. The
-      // transcript can arrive later; preserve the request's actual workspace.
-      const existing = sessionsDb.getSessionById(nativeId);
-      sessionsDb.createSession(nativeId, 'antigravity', cwd,
+    if (resumeId) {
+      transcriptPath = findAntigravityTranscriptPath(resumeId);
+      stepBefore = lastTranscriptStep(transcriptPath);
+      await run.connection.request('session/resume', { sessionId: resumeId, cwd, mcpServers: [] });
+    } else {
+      const created = await run.connection.request('session/new', { cwd, mcpServers: [] });
+      register(created.sessionId);
+      // 先登記會話再送 session_created，前端導向與歷史載入才找得到它
+      const existing = sessionsDb.getSessionById(created.sessionId);
+      sessionsDb.createSession(created.sessionId, 'antigravity', cwd,
         existing?.custom_name || options.sessionSummary || String(message || '').slice(0, 50),
         existing?.created_at, undefined, existing?.jsonl_path);
-    });
+      liveWriter.setSessionId?.(created.sessionId);
+      send(liveWriter, { kind: 'session_created', newSessionId: created.sessionId, sessionId: created.sessionId });
+    }
 
-    childProcess.responseHandler = handler;
+    const mode = ACP_MODES[options.permissionMode];
+    if (mode && mode !== 'default') {
+      await run.connection.request('session/set_mode', { sessionId: run.sessionId, modeId: mode });
+    }
+    if (options.model) {
+      await run.connection.request('session/set_model', { sessionId: run.sessionId, modelId: options.model });
+    }
 
-    childProcess.stdout.on('data', (chunk) => {
-      try {
-        handler.handleChunk(chunk);
-      } catch (error) {
-        handler.error = error.message;
-        handler.errorEmitted = true;
-        send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: error.message });
-        childProcess.kill('SIGTERM');
-      }
-    });
+    if (run.aborted) run.finish();
+    else run.sendPrompt(modifiedCommand);
+  } catch (error) {
+    run.error = friendlyError(error);
+    run.finish();
+  }
 
-    let stderrOutput = '';
-    childProcess.stderr.on('data', (chunk) => {
-      stderrOutput += chunk.toString();
-    });
+  await run.done;
+  await cleanupTempFiles(tempImagePaths, tempDir);
+  if (run.sessionId) activeRuns.delete(run.sessionId);
 
-    let spawnFailed = false;
-    childProcess.on('close', async (code) => {
-      await cleanupTempFiles(tempImagePaths, tempDir);
-      if (spawnFailed) return;
-      try {
-        handler.flush();
-      } catch (error) {
-        handler.error = error.message;
-        handler.errorEmitted = true;
-        send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: error.message });
-      }
-      activeAntigravityProcesses.delete(sessionId);
-      if (handler.sessionId && handler.sessionId !== sessionId) {
-        activeAntigravityProcesses.delete(handler.sessionId);
-      }
+  // 結束後立即同步 transcript，並把即時 id 對到歷史 id
+  try {
+    transcriptPath = findAntigravityTranscriptPath(run.sessionId);
+    if (transcriptPath) {
+      const synchronizer = providerRegistry.resolveProvider('antigravity')?.sessionSynchronizer;
+      if (synchronizer) await synchronizer.synchronizeFile(transcriptPath);
+      linkLiveIdsToTranscript(run.sessionId, transcriptPath, stepBefore, run.liveTools, run.liveTexts);
+    }
+  } catch (error) {
+    console.warn('Antigravity session post-run sync warning:', error);
+  }
+  if (!run.aborted && transcriptPath) scheduleAntigravityMetadataResync(run.sessionId, transcriptPath);
 
-      // Trigger immediate sync for this session into sessionsDb
-      let transcriptPath = null;
-      try {
-        transcriptPath = findAntigravityTranscriptPath(handler.sessionId);
-        if (transcriptPath) {
-          const synchronizer = providerRegistry.resolveProvider('antigravity')?.sessionSynchronizer;
-          if (synchronizer) {
-            await synchronizer.synchronizeFile(transcriptPath);
-          }
-        }
-      } catch (err) {
-        console.warn('Antigravity session post-run sync warning:', err);
-      }
-      if (!childProcess.aborted && transcriptPath) {
-        scheduleAntigravityMetadataResync(handler.sessionId, transcriptPath);
-      }
-
-      if (childProcess.aborted) {
-        send(liveWriter, { sessionId: handler.sessionId, kind: 'complete', aborted: true, success: true, exitCode: 0 });
-        resolve();
-      } else if (!handler.error && (code === 0 || (
-        code === 1 && handler.lastStepCompletedAgentResponse && handler.ignoredResultError
-        // CLI 的同一個歷史 result.error 也可能寫入 stderr 並導致 exit 1。
-        // 只消除已辨識的同一個錯誤；其他退出碼、signal 或不同 stderr 仍視為失敗。
-        && (!stderrOutput.trim() || stderrOutput.trim() === handler.ignoredResultError.trim())
-      ))) {
-        // headless 模式無法詢問審批，CLI 會自動拒絕需要權限的工具，結果仍是 SUCCESS、
-        // 說明只寫在 stderr。轉成警告讓頁面看得到，否則使用者只會看到空回覆。
-        const deniedNotice = findPermissionDeniedNotice(stderrOutput);
-        if (deniedNotice) {
-          send(liveWriter, {
-            sessionId: handler.sessionId,
-            kind: 'task_notification',
-            status: 'warning',
-            summary: `Antigravity 目前以非互動模式執行，需要審批的工具已被自動拒絕。可在設定中切換為跳過權限（bypassPermissions），或在 settings.json 的 permissions.allow 加入允許規則。\n${deniedNotice}`,
-          });
-        }
-        send(liveWriter, { sessionId: handler.sessionId, kind: 'complete', exitCode: 0, success: true });
-        notifyRunStopped({ ...childProcess.notifyContext, sessionId: handler.sessionId, stopReason: 'completed' });
-        resolve();
-      } else {
-        const errorContent = handler.error || stderrOutput.trim() || `Antigravity CLI exited with code ${code}`;
-        if (!handler.errorEmitted) {
-          handler.errorEmitted = true;
-          send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: errorContent });
-        }
-        notifyRunFailed({ ...childProcess.notifyContext, sessionId: handler.sessionId, error: errorContent });
-        reject(new Error(errorContent));
-      }
-    });
-
-    childProcess.on('error', async (err) => {
-      spawnFailed = true;
-      await cleanupTempFiles(tempImagePaths, tempDir);
-      activeAntigravityProcesses.delete(sessionId);
-      if (handler.sessionId && handler.sessionId !== sessionId) {
-        activeAntigravityProcesses.delete(handler.sessionId);
-      }
-      const errorMsg = `Failed to start Antigravity process: ${err.message}`;
-      send(liveWriter, { sessionId: handler.sessionId, kind: 'error', content: errorMsg });
-      notifyRunFailed({ ...childProcess.notifyContext, sessionId: handler.sessionId, error: errorMsg });
-      reject(err);
-    });
-  });
+  if (run.aborted) {
+    send(liveWriter, { sessionId: run.sessionId, kind: 'complete', aborted: true, success: true, exitCode: 0 });
+    return;
+  }
+  if (run.error) {
+    send(liveWriter, { sessionId: run.sessionId, kind: 'error', content: run.error });
+    notifyRunFailed({ ...notifyContext, sessionId: run.sessionId, error: run.error });
+    throw new Error(run.error);
+  }
+  send(liveWriter, { sessionId: run.sessionId, kind: 'complete', exitCode: 0, success: true });
+  notifyRunStopped({ ...notifyContext, sessionId: run.sessionId, stopReason: 'completed' });
 }
 
-/**
- * Aborts an active Antigravity session process.
- */
+/** Aborts an active Antigravity turn (session/cancel). */
 export function abortAntigravitySession(sessionId) {
-  const childProcess = activeAntigravityProcesses.get(sessionId);
-  if (!childProcess) {
-    return false;
-  }
+  const run = activeRuns.get(sessionId);
+  if (!run) return false;
+  void run.abort();
+  return true;
+}
 
-  try {
-    childProcess.aborted = true;
-    childProcess.responseHandler.aborted = true;
-    childProcess.kill('SIGTERM');
-    setTimeout(() => {
-      if (activeAntigravityProcesses.get(sessionId) === childProcess) {
-        try {
-          childProcess.kill('SIGKILL');
-        } catch {
-          // Process already ended
-        }
-        activeAntigravityProcesses.delete(sessionId);
-      }
-    }, 2000).unref();
-
-    notifyRunStopped({ ...childProcess.notifyContext, sessionId, stopReason: 'aborted' });
-    return true;
-  } catch (err) {
-    console.error(`Failed to abort Antigravity session ${sessionId}:`, err);
-    return false;
+/** 執行中插話（ACP D8）。 */
+export function steerAntigravitySession(sessionId, userId, text) {
+  const run = activeRuns.get(sessionId);
+  if (!run) return { ok: false, reason: 'not_running' };
+  if (userId === null || userId === undefined || run.userId === null || run.userId === undefined
+    || String(run.userId) !== String(userId)) {
+    return { ok: false, reason: 'not_owner' };
   }
+  return run.steer(text);
 }
 
 export function isAntigravitySessionActive(sessionId) {
-  return activeAntigravityProcesses.has(sessionId);
+  return activeRuns.has(sessionId);
 }
 
 export function reconnectAntigravitySession(sessionId, writer) {
-  const process = activeAntigravityProcesses.get(sessionId);
-  if (!process?.responseHandler || !writer?.ws) return false;
-  const currentWriter = process.responseHandler.writer;
-  return currentWriter?.reconnect?.(writer) === true;
+  const run = activeRuns.get(sessionId);
+  if (!run || !writer?.ws) return false;
+  return run.writer?.reconnect?.(writer) === true;
 }
 
 export function getActiveAntigravitySessions() {
-  return Array.from(activeAntigravityProcesses.keys());
+  return Array.from(activeRuns.keys());
 }

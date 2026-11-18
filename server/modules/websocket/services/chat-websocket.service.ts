@@ -277,6 +277,18 @@ export function handleChatConnection(
         return;
       }
 
+      // 通用審批決定：provider 的 runtime 實作 resolveApproval（目前 Antigravity）
+      if (messageType === 'permission-decision') {
+        const { id, runtime } = resolveRuntime(registry, data.provider);
+        const ok = typeof data.requestId === 'string' && runtime.resolveApproval
+          ? runtime.resolveApproval(data.requestId, writer.userId, data.decision)
+          : false;
+        if (!ok) sendToClient(writer, createNormalizedMessage({ kind: 'task_notification', provider: id,
+          sessionId: typeof data.sessionId === 'string' ? data.sessionId : null, status: 'warning',
+          summary: 'Approval is no longer valid or does not belong to this session.' }));
+        return;
+      }
+
       if (messageType === 'claude-permission-response') {
         if (typeof data.requestId === 'string' && data.requestId.length > 0) {
           const ok = dependencies.resolveToolApproval(data.requestId, writer.userId, {

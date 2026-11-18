@@ -7,28 +7,28 @@
 
 ## 2. Antigravity ACP：協議與事件映射
 
-- [ ] 2.1 Antigravity 模組內新增 ACP JSON-RPC over stdio 連線類別（請求逾時、行程退出時 reject 未完成請求、stderr 只當診斷、`protocolVersion` 不是 1 時報錯）；以假行程寫單元測試
-- [ ] 2.2 `antigravity-tool-mapper.ts` 新增 `mapAcpUpdate`（ACP design D3 對照表），工具名稱與參數沿用 `mapAgyTool`；以 1.1 fixture 寫測試
+- [x] 2.1 Antigravity 模組內新增 ACP JSON-RPC over stdio 連線類別（請求逾時、行程退出時 reject 未完成請求、stderr 只當診斷、`protocolVersion` 不是 1 時報錯）；以假行程寫單元測試
+- [x] 2.2 `antigravity-tool-mapper.ts` 新增 `mapAcpUpdate`（ACP design D3 對照表），工具名稱與參數沿用 `mapAgyTool`；以 1.1 fixture 寫測試
 
 ## 3. Antigravity ACP：審批池
 
-- [ ] 3.1 審批池：新增（綁定 userId／sessionId／執行個體、`context.decisions`、`context.expiresAt`）、決定（嚴格比對）、逾時拒絕並送 `permission_cancelled`、依執行個體清除、依使用者列出
-- [ ] 3.2 審批池測試：非發起者被拒、缺少 userId 被拒、決定不在選項內被拒、逾時回覆 deny、清除時回覆已取消、列出只含該使用者
+- [x] 3.1 審批池：新增（綁定 userId／sessionId／執行個體、`context.decisions`、`context.expiresAt`）、決定（嚴格比對）、逾時拒絕並送 `permission_cancelled`、依執行個體清除、依使用者列出
+- [x] 3.2 審批池測試：非發起者被拒、缺少 userId 被拒、決定不在選項內被拒、逾時回覆 deny、清除時回覆已取消、列出只含該使用者
 
 ## 4. Antigravity ACP：執行層替換
 
-- [ ] 4.1 改寫 `server/antigravity-cli.js`：每輪 `agy acp` → `initialize` → `session/new`／`session/resume` → `session/set_mode` → 模型 → `session/prompt`；`session/update` 經 `mapAcpUpdate` 轉送；所有 prompt 返回後送一次 `complete`
-- [ ] 4.2 中斷：`session/cancel` → 未決審批回覆已取消 → 等待 `cancelled`，7 秒未返回就結束行程；`abort` 回傳 `emitsTerminal: true`
-- [ ] 4.3 錯誤處理：未登入、初始化失敗、行程意外退出、JSON-RPC 錯誤時送出 `error` 與結束事件、清除待審批；移除 `findPermissionDeniedNotice` 及其測試
-- [ ] 4.4 插話（ACP D8）：計算未返回的 prompt，全部返回才收尾；`steerAntigravitySession` 收尾後回覆 `not_running`；以插話 fixture 寫測試
-- [ ] 4.5 writer 支援 `reconnect`（一般聊天斷線重連，design D7 補充 1）；`antigravity-runtime.provider.ts` 接上 `steer`、`getPendingApprovals`、`resolveApproval`
+- [x] 4.1 改寫 `server/antigravity-cli.js`：每輪 `agy acp` → `initialize` → `session/new`／`session/resume` → `session/set_mode` → 模型 → `session/prompt`；`session/update` 經 `mapAcpUpdate` 轉送；所有 prompt 返回後送一次 `complete`
+- [x] 4.2 中斷：`session/cancel` → 未決審批回覆已取消 → 等待 `cancelled`，7 秒未返回就結束行程；`abort` 回傳 `emitsTerminal: true`
+- [x] 4.3 錯誤處理：未登入、初始化失敗、行程意外退出、JSON-RPC 錯誤時送出 `error` 與結束事件、清除待審批；移除 `findPermissionDeniedNotice` 及其測試
+- [x] 4.4 插話（ACP D8）：計算未返回的 prompt，全部返回才收尾；`steerAntigravitySession` 收尾後回覆 `not_running`；以插話 fixture 寫測試
+- [x] 4.5 writer 支援 `reconnect`（一般聊天斷線重連，design D7 補充 1）；`antigravity-runtime.provider.ts` 接上 `steer`、`getPendingApprovals`、`resolveApproval`
 
 ## 5. Antigravity ACP：WebSocket、前端與設定
 
-- [ ] 5.1 `chat-websocket.service.ts` 新增 `permission-decision { provider, requestId, sessionId, decision }` 分派到 `runtime.resolveApproval`；測試
-- [ ] 5.2 前端審批卡片與送出依 `context.decisions` 判斷，Antigravity 送 `permission-decision`，Codex 維持原訊息；多 Agent 節點詳情的工具審批（`NodeToolApprovals`）同步支援；補 i18n
-- [ ] 5.3 `shared/providers.ts`：Antigravity `midTurnSteer: true`、`permissionModes` 改為 `default`、`acceptEdits`、`auto`、`plan`、`bypassPermissions`；多 Agent 成員預設權限表同步檢查
-- [ ] 5.4 `antigravity-acp-interactive-approvals/proposal.md` 頂部標註「已被 node-live-session-and-agy-acp 取代」
+- [x] 5.1 `chat-websocket.service.ts` 新增 `permission-decision { provider, requestId, sessionId, decision }` 分派到 `runtime.resolveApproval`；測試
+- [x] 5.2 前端審批卡片與送出依 `context.decisions` 判斷，Antigravity 送 `permission-decision`，Codex 維持原訊息；多 Agent 節點詳情的工具審批（`NodeToolApprovals`）同步支援；補 i18n
+- [x] 5.3 `shared/providers.ts`：Antigravity `midTurnSteer: true`、`permissionModes` 改為 `default`、`acceptEdits`、`auto`、`plan`、`bypassPermissions`；多 Agent 成員預設權限表同步檢查
+- [x] 5.4 `antigravity-acp-interactive-approvals/proposal.md` 頂部標註「已被 node-live-session-and-agy-acp 取代」
 
 ## 6. 節點會話：持久化、推送與側邊欄排除
 

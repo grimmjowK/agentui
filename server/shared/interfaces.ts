@@ -77,6 +77,8 @@ export interface IProviderRuntime {
    */
   steer?(sessionId: string, userId: string | number | null, text: string): Promise<{ ok: boolean; reason?: string }>;
   getPendingApprovals?(userId: string | number | null, sessionId?: string): PendingApprovalItem[];
+  /** 通用的審批決定（`permission-decision`）；不是發起者或決定不在選項內時回傳 false。 */
+  resolveApproval?(requestId: string, userId: string | number | null, decision: unknown): boolean;
 }
 
 // ---------------------------

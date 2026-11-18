@@ -75,7 +75,7 @@ export default function PermissionRequestsBanner({
     (r) => r.toolName !== 'ExitPlanMode'
   );
   const hasExpiringCodexRequest = filteredRequests.some(
-    (r) => r.provider === 'codex' && Boolean((r.context as { expiresAt?: number } | undefined)?.expiresAt),
+    (r) => Boolean((r.context as { expiresAt?: number } | undefined)?.expiresAt),
   );
 
   useEffect(() => {
@@ -166,6 +166,60 @@ export default function PermissionRequestsBanner({
             </Confirmation>
           );
         }
+        // 依 context.decisions 顯示選項（不新增 provider 分支）：Antigravity 等走通用的 permission-decision
+        const decisionContext = request.context as { decisions?: string[]; expiresAt?: number } | undefined;
+        if (Array.isArray(decisionContext?.decisions) && decisionContext.decisions.length) {
+          const expired = Boolean(decisionContext.expiresAt && decisionContext.expiresAt <= now);
+          const input = (request.input ?? {}) as Record<string, unknown>;
+          const command = typeof input.command === 'string' ? input.command
+            : typeof input.file_path === 'string' ? input.file_path : null;
+          return (
+            <Confirmation key={request.requestId} approval="pending">
+              <ConfirmationTitle className="flex items-start gap-3">
+                <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <ConfirmationRequest>
+                  <div>
+                    <span className="font-medium text-foreground">{t('approvals.title', 'Permission required')}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{request.toolName}</code>
+                    </span>
+                  </div>
+                  {decisionContext.expiresAt && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {expired
+                        ? t('codex.approvals.expired', 'Expired')
+                        : t('codex.approvals.expires', { defaultValue: 'Expires at {{time}}', time: new Date(decisionContext.expiresAt).toLocaleTimeString() })}
+                    </div>
+                  )}
+                </ConfirmationRequest>
+              </ConfirmationTitle>
+              {command && (
+                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/50 p-2 font-mono text-xs text-foreground">{command}</pre>
+              )}
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                  {t('codex.approvals.viewDetails', 'View request details')}
+                </summary>
+                <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/50 p-2 text-xs text-muted-foreground">
+                  {JSON.stringify(request.input, null, 2)}
+                </pre>
+              </details>
+              <ConfirmationActions>
+                {decisionContext.decisions.map((decision) => (
+                  <ConfirmationAction key={decision} variant={decision === 'allow' ? 'default' : 'outline'}
+                    disabled={expired || submitted.has(request.requestId)}
+                    onClick={() => {
+                      setSubmitted((previous) => new Set(previous).add(request.requestId));
+                      handlePermissionDecision(request.requestId, { updatedInput: decision });
+                    }}>
+                    {t(`approvals.${decision}`, decision)}
+                  </ConfirmationAction>
+                ))}
+              </ConfirmationActions>
+            </Confirmation>
+          );
+        }
+
         const CustomPanel = getPermissionPanel(request.toolName);
         if (CustomPanel) {
           return (

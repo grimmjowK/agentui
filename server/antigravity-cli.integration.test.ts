@@ -7,6 +7,8 @@ import test from 'node:test';
 
 import Database from 'better-sqlite3';
 
+import { acpFakeAgent } from './shared/antigravity-acp-fake.test-helper.js';
+
 import {
   spawnAntigravity,
   abortAntigravitySession,
@@ -30,6 +32,7 @@ test('Antigravity native IDs survive runs, refresh, pagination and cancellation'
     ANTIGRAVITY_HOME: process.env.ANTIGRAVITY_HOME,
     ANTIGRAVITY_CLI_PATH: process.env.ANTIGRAVITY_CLI_PATH,
     ANTIGRAVITY_NATIVE_TITLE_RESYNC_DELAY_MS: process.env.ANTIGRAVITY_NATIVE_TITLE_RESYNC_DELAY_MS,
+    FAKE_AGY_SESSION: process.env.FAKE_AGY_SESSION,
   };
   const workspace = path.join(root, 'workspace');
   const executable = path.join(root, 'agy');
@@ -42,44 +45,25 @@ test('Antigravity native IDs survive runs, refresh, pagination and cancellation'
     await mkdir(workspace);
     await writeFile(process.env.DATABASE_PATH!, '');
     await initializeDatabase();
-    await writeFile(executable, `#!/usr/bin/env node
-const fs = require('node:fs');
-const path = require('node:path');
-const args = process.argv.slice(2);
-const prompt = args[args.indexOf('--prompt') + 1];
-const id = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : prompt === 'wait' ? 'waiting-native' : prompt === 'reconnect' ? 'reconnect-native' : ['allowed', 'default'].includes(prompt) ? 'permission-' + prompt : 'native-session';
-const emit = (event) => process.stdout.write(JSON.stringify(event) + '\\n');
-fs.writeFileSync(path.join(process.env.ANTIGRAVITY_HOME, 'argv.json'), JSON.stringify(args));
-if (prompt === 'fail') { process.stderr.write('CLI startup failure'); process.exit(1); }
-emit({ event: 'init', conversation_id: id, init: { cwd: process.cwd() } });
-if (prompt === 'wait') {
-  process.on('SIGTERM', () => { emit({ event: 'result', result: { conversation_id: id, status: 'ERROR', error: 'interrupted' } }); process.exit(1); });
-  setInterval(() => {}, 1000);
-} else if (prompt === 'stale-error' || prompt === 'new-exit-error') {
-  const error = 'API error (attempt 1): unexpected EOF';
-  emit({ event: 'step_update', step_update: { conversation_id: id, step_index: 552, step_type: 'agent_response', state: 'DONE', text_delta: 'completed answer' } });
-  emit({ event: 'result', result: { conversation_id: id, status: 'ERROR', error } });
-  process.stderr.write(prompt === 'new-exit-error' ? 'new shutdown failure' : error);
-  process.exitCode = 1;
-} else if (prompt === 'reconnect') {
-  setTimeout(() => {
-    emit({ event: 'step_update', step_update: { conversation_id: id, step_type: 'agent_response', state: 'IN_PROGRESS', text_delta: 'during disconnect' } });
-  }, 30);
-  setTimeout(() => {
-    emit({ event: 'step_update', step_update: { conversation_id: id, step_type: 'agent_response', state: 'DONE', text_delta: 'after reconnect' } });
-    emit({ event: 'result', result: { conversation_id: id, status: 'SUCCESS', response: 'after reconnect' } });
-  }, 150);
-} else {
-  const logs = path.join(process.env.ANTIGRAVITY_HOME, 'brain', id, '.system_generated', 'logs');
-  fs.mkdirSync(logs, { recursive: true });
-  for (const entry of [
-    { type: 'USER_INPUT', source: 'USER_EXPLICIT', content: '<USER_REQUEST>' + prompt + '</USER_REQUEST>' },
-    { type: 'PLANNER_RESPONSE', source: 'MODEL', content: 'answer:' + prompt }
-  ]) fs.appendFileSync(path.join(logs, 'transcript.jsonl'), JSON.stringify({ ...entry, created_at: new Date().toISOString() }) + '\\n');
-  emit({ event: 'step_update', step_update: { conversation_id: id, step_type: 'agent_response', state: 'DONE', text_delta: 'answer:' + prompt } });
-  emit({ event: 'result', result: { conversation_id: id, status: 'SUCCESS', response: 'answer:' + prompt } });
-}
-`, { mode: 0o755 });
+    await writeFile(executable, `#!${process.execPath}\n${acpFakeAgent(`
+  fs.writeFileSync(path.join(home, 'argv.json'), JSON.stringify(process.argv.slice(2)));
+  if (text === 'fail') { process.stderr.write('CLI startup failure'); process.exit(1); }
+  if (text === 'wait') {
+    ctx.onCancel(() => out({ jsonrpc: '2.0', id, result: { stopReason: 'cancelled' } }));
+    return undefined;
+  }
+  if (text === 'reconnect') {
+    setTimeout(() => ctx.text('during disconnect'), 30);
+    setTimeout(() => { ctx.text('after reconnect'); out({ jsonrpc: '2.0', id, result: { stopReason: 'end_turn' } }); }, 150);
+    return undefined;
+  }
+  ctx.transcript([
+    { type: 'USER_INPUT', source: 'USER_EXPLICIT', content: '<USER_REQUEST>' + text + '</USER_REQUEST>' },
+    { type: 'PLANNER_RESPONSE', source: 'MODEL', content: 'answer:' + text },
+  ]);
+  ctx.text('answer:' + text);
+  return {};
+`)}`, { mode: 0o755 });
 
     const messages: any[] = [];
     const observed: boolean[] = [];
@@ -94,6 +78,7 @@ if (prompt === 'wait') {
         }
       },
     };
+    process.env.FAKE_AGY_SESSION = 'native-session';
     await spawnAntigravity('first', { cwd: workspace }, writer);
     assert.deepEqual(observed, [true, true]);
     assert.deepEqual(getActiveAntigravitySessions(), []);
@@ -102,8 +87,9 @@ if (prompt === 'wait') {
     assert.ok(sessionsDb.getSessionById('native-session')?.jsonl_path);
 
     await spawnAntigravity('second', { cwd: workspace, sessionId: 'native-session' }, writer);
-    const argv = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
-    assert.equal(argv[argv.indexOf('--conversation') + 1], 'native-session');
+    const resumed = (await readFile(path.join(root, 'acp-calls.jsonl'), 'utf8')).split('\n').filter(Boolean)
+      .map((line) => JSON.parse(line)).filter((call) => call.method === 'session/resume');
+    assert.equal(resumed.at(-1)?.params.sessionId, 'native-session');
     const provider = new AntigravitySessionsProvider();
     const newest = await provider.fetchHistory('native-session', { limit: 2 });
     const older = await provider.fetchHistory('native-session', { limit: 2, offset: 2 });
@@ -124,9 +110,11 @@ if (prompt === 'wait') {
 
     const defaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
     assert.equal(defaultArgs.includes('--dangerously-skip-permissions'), false, JSON.stringify(defaultArgs));
+    process.env.FAKE_AGY_SESSION = 'permission-allowed';
     await spawnAntigravity('allowed', { cwd: workspace, permissionMode: 'bypassPermissions' }, writer);
     const allowedArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
     assert.equal(allowedArgs.includes('--dangerously-skip-permissions'), true, JSON.stringify(allowedArgs));
+    process.env.FAKE_AGY_SESSION = 'permission-default';
     await spawnAntigravity('default', { cwd: workspace, permissionMode: 'default', skipPermissions: true }, writer);
     const backToDefaultArgs = JSON.parse(await readFile(path.join(root, 'argv.json'), 'utf8')) as string[];
     assert.equal(backToDefaultArgs.includes('--dangerously-skip-permissions'), false, JSON.stringify(backToDefaultArgs));
@@ -202,6 +190,7 @@ if (prompt === 'wait') {
         }
       },
     };
+    process.env.FAKE_AGY_SESSION = 'reconnect-native';
     await spawnAntigravity('reconnect', { cwd: workspace }, reconnectWriter);
     // The runtime no longer buffers disconnected events itself; LoggingWriter
     // persists durable rows and replays them after reconnect.
@@ -213,19 +202,15 @@ if (prompt === 'wait') {
     assert.equal(sessionsDb.getSessionById('native-session')?.project_path, workspace);
 
     messages.length = 0;
+    process.env.FAKE_AGY_SESSION = 'waiting-native';
     await spawnAntigravity('wait', { cwd: workspace }, writer);
     assert.ok(observed.every(Boolean));
     assert.deepEqual(getActiveAntigravitySessions(), []);
     assert.equal(messages.filter((message) => message.kind === 'complete' && message.aborted).length, 1);
     assert.equal(messages.filter((message) => message.kind === 'error').length, 0);
 
-    messages.length = 0;
-    await spawnAntigravity('stale-error', { cwd: workspace }, writer);
-    assert.equal(messages.filter((message) => message.kind === 'error').length, 0);
-    assert.equal(messages.filter((message) => message.kind === 'complete' && message.success).length, 1);
-    await assert.rejects(spawnAntigravity('new-exit-error', { cwd: workspace }, writer), /new shutdown failure/);
-
     const beforeFailure = sessionsDb.getAllSessions().length;
+    process.env.FAKE_AGY_SESSION = 'startup-failure';
     await assert.rejects(spawnAntigravity('fail', { cwd: workspace }, writer), /CLI startup failure/);
     assert.equal(sessionsDb.getAllSessions().length, beforeFailure);
     assert.deepEqual(getActiveAntigravitySessions(), []);

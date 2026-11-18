@@ -16,13 +16,17 @@ export default function NodeToolApprovals({ sessionId }: { sessionId: string }) 
   const requests = pendingApprovals.filter((request) => request.sessionId === sessionId);
   if (!requests.length) return null;
 
-  const decide = (requestId: string, provider: string | undefined, allow: boolean) => {
+  const decide = (request: (typeof requests)[number], allow: boolean) => {
+    const { requestId, provider } = request;
+    const decisions = (request.context as { decisions?: string[] } | undefined)?.decisions;
     if (provider === 'codex') {
       sendMessage({ type: 'codex-permission-response', requestId, sessionId, decision: allow ? 'accept' : 'decline' });
+    } else if (Array.isArray(decisions)) {
+      sendMessage({ type: 'permission-decision', provider, requestId, sessionId, decision: allow ? 'allow' : 'deny' });
     } else {
       sendMessage({ type: 'claude-permission-response', requestId, allow });
     }
-    setPendingApprovals((pool) => pool.filter((request) => request.requestId !== requestId));
+    setPendingApprovals((pool) => pool.filter((item) => item.requestId !== requestId));
   };
 
   return (
@@ -47,14 +51,14 @@ export default function NodeToolApprovals({ sessionId }: { sessionId: string }) 
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => decide(request.requestId, request.provider, false)}
+                onClick={() => decide(request, false)}
                 className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent"
               >
                 {t('workflow.tool.deny')}
               </button>
               <button
                 type="button"
-                onClick={() => decide(request.requestId, request.provider, true)}
+                onClick={() => decide(request, true)}
                 className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
               >
                 {t('workflow.tool.allow')}

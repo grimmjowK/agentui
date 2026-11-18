@@ -90,8 +90,10 @@ Optional `sessions` methods:
 - `abort` returns `{ ok, emitsTerminal }`. Set `emitsTerminal: true` only when the
   runtime itself sends the terminal `complete`; the dispatcher sends one otherwise,
   so every abort produces exactly one.
-- `steer(sessionId, userId, text)` (Codex only) must check owner, run state and
+- `steer(sessionId, userId, text)` (Claude, Codex, Antigravity) must check owner, run state and
   current turn before calling the CLI, and must never fail the running turn.
+- `resolveApproval(requestId, userId, decision)` (Antigravity) handles the generic `permission-decision`
+  WebSocket message; reject non-owners and decisions outside `context.decisions`.
 - `getPendingApprovals(userId, sessionId?)` returns only that user's items; without
   `sessionId` it lists all sessions (global approval inbox).
 `sessions` and `sessionSynchronizer` are separate concerns:

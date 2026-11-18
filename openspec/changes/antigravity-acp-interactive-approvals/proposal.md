@@ -1,3 +1,5 @@
+> **狀態：已被 `node-live-session-and-agy-acp` 取代（2026-11-18）**。設計 D1–D8 與 research.md 由該 change 承接並以 agy 1.5.11 重新實測；本目錄保留作為調研紀錄，該 change 歸檔時一併移除。
+
 > **狀態：重啟（2026-11-09）**。2026-11-05 曾暫緩（理由與三家調研見 [research.md](./research.md)）。重啟原因：要對齊 Gemini App 的「send now」，而 agy 的 print 模式（`-p --input-format stream-json`）實測只能把插話排成下一輪，沒有任何欄位能指定投遞方式；`agy acp` 則會把執行中的第二個 `session/prompt` 併入目前這一輪。範圍仍只涵蓋 Antigravity，研究建議的「不分 provider 的 ACP 執行層」不在本 change。
 
 ## Why
