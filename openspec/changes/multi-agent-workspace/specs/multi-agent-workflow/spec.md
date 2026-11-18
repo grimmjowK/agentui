@@ -80,3 +80,18 @@
 #### Scenario: 停止後收到遲到完成事件
 - **WHEN** run 停止後仍收到節點 complete 事件
 - **THEN** 已停止狀態不被改寫，不啟動下游，依 runtime emitsTerminal 契約只產生一次終止結果
+
+### Requirement: 人工確認節點
+工作流 SHALL 支援 `type: "approval"` 的人工確認節點（不需 provider / model）。執行到此節點時 SHALL 暫停，節點顯示「等待確認」並自動打開詳情，顯示確認內容與上游輸出；使用者 SHALL 能填寫備註後核准或駁回。核准後節點輸出 SHALL 為上游輸出加上備註並傳給下游；駁回則節點失敗、下游略過。停止執行時等待中的確認節點 SHALL 視為駁回。
+
+#### Scenario: 核准並帶備註
+- **WHEN** propose 完成後執行到人工確認節點，使用者填寫「只 apply 18350」並核准
+- **THEN** 下游 apply 節點開始執行，其提示包含 propose 的輸出與該備註
+
+#### Scenario: 駁回
+- **WHEN** 使用者駁回人工確認節點
+- **THEN** 該節點標示失敗（rejected），所有下游節點略過，執行狀態為失敗
+
+#### Scenario: 節點內處理工具審批
+- **WHEN** 執行中的節點請求工具審批（含規劃模式的 ExitPlanMode）
+- **THEN** 節點顯示等待審批並自動打開詳情，使用者可直接在詳情中允許或拒絕

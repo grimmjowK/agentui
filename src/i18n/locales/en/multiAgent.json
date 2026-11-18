@@ -66,7 +66,8 @@
       "waiting_approval": "Waiting for approval",
       "succeeded": "Done",
       "failed": "Failed",
-      "skipped": "Skipped"
+      "skipped": "Skipped",
+      "waiting_confirmation": "Waiting for confirmation"
     },
     "node": {
       "instruction": "Instruction",
@@ -79,6 +80,20 @@
       "saved": "Saved",
       "error": "Error",
       "dependsOn": "Depends on"
+    },
+    "approvalNode": "Manual confirmation",
+    "approval": {
+      "waiting": "Waiting for your confirmation",
+      "notePlaceholder": "Optional note for the next steps, e.g. which tickets to apply or what to change",
+      "approve": "Approve & continue",
+      "reject": "Reject",
+      "instruction": "What to confirm"
+    },
+    "tool": {
+      "title": "Tool approval: {{tool}}",
+      "planTitle": "The model finished planning and wants to proceed",
+      "allow": "Allow",
+      "deny": "Deny"
     }
   },
   "chatroom": {

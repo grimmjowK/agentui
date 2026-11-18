@@ -109,3 +109,40 @@ test('審批中節點顯示 waiting_approval', async () => {
     assert.equal(seen.at(-1), 'succeeded');
   });
 });
+
+test('人工確認節點：暫停直到核准，備註與上游輸出傳給下游；駁回則下游略過', async () => {
+  await withDb(async () => {
+    const gate = { id: 'gate', title: '確認', instruction: '請確認方案', type: 'approval' as const, dependsOn: ['a'] };
+    const def = { nodes: [node('a'), gate, node('b', ['gate'])] } as WorkflowDef;
+    const { mock, runner, agent } = setup(def, async (ctx) => say(ctx.prompt.includes('do a') ? 'PLAN' : 'APPLIED')(ctx));
+    const started = runner.start(agent)!;
+    while (multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.gate.state !== 'waiting_confirmation') await tick(5);
+    assert.equal(mock.calls.length, 1, '確認前不執行下游');
+    assert.equal(runner.confirm(started.run.id, 'b', true), false);
+    assert.equal(runner.confirm(started.run.id, 'gate', true, '只做 18350'), true);
+    await started.done;
+    const run = multiAgentsDb.getRun(agent.id, started.run.id)!;
+    assert.equal(run.status, 'succeeded');
+    assert.match(mock.calls[1].prompt, /PLAN[\s\S]*只做 18350/);
+
+    const second = runner.start(agent)!;
+    while (multiAgentsDb.getRun(agent.id, second.run.id)!.nodeStates.gate.state !== 'waiting_confirmation') await tick(5);
+    runner.confirm(second.run.id, 'gate', false);
+    await second.done;
+    const rejected = multiAgentsDb.getRun(agent.id, second.run.id)!;
+    assert.equal(rejected.nodeStates.gate.error, 'rejected');
+    assert.equal(rejected.nodeStates.b.state, 'skipped');
+  });
+});
+
+test('停止時等待中的人工確認節點被駁回', async () => {
+  await withDb(async () => {
+    const def = { nodes: [{ id: 'gate', title: 'g', instruction: 'x', type: 'approval' as const, dependsOn: [] }] } as WorkflowDef;
+    const { runner, agent } = setup(def, say('x'));
+    const started = runner.start(agent)!;
+    await tick(10);
+    await runner.stop(started.run.id);
+    await started.done;
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.status, 'stopped');
+  });
+});

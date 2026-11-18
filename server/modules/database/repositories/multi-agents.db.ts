@@ -367,7 +367,7 @@ export const multiAgentsDb = {
       for (const run of runs) {
         const states = parse<Record<string, NodeRunStatus>>(run.node_states_json, {});
         for (const state of Object.values(states)) {
-          if (state.state === 'running' || state.state === 'waiting_approval') {
+          if (state.state === 'running' || state.state === 'waiting_approval' || state.state === 'waiting_confirmation') {
             state.state = 'failed';
             state.error = 'interrupted';
           } else if (state.state === 'pending') {

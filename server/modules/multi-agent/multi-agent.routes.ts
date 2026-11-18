@@ -13,12 +13,14 @@ import { MULTI_AGENT_WORKSPACE_ROOT } from '@/shared/multi-agent-workspace.js';
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
 import {
+  isApprovalNode,
   validateDefinition,
   validateModels,
   type ChatroomDef,
   type MultiAgent,
   type MultiAgentDefinition,
   type MultiAgentKind,
+  type WorkflowDef,
 } from '../../../shared/multiAgent.js';
 import type { LLMProvider } from '../../../shared/providers.js';
 
@@ -46,7 +48,7 @@ const badRequest = (message: string, details?: unknown) =>
 
 const providersOf = (kind: MultiAgentKind, def: MultiAgentDefinition): LLMProvider[] => [...new Set(
   kind === 'workflow'
-    ? (def as { nodes: { provider: LLMProvider }[] }).nodes.map((n) => n.provider)
+    ? (def as WorkflowDef).nodes.filter((n) => !isApprovalNode(n)).map((n) => n.provider as LLMProvider)
     : (def as ChatroomDef).members.map((m) => m.provider),
 )];
 
@@ -161,6 +163,18 @@ router.get('/:id/runs/:runId', asyncHandler(async (req: Request, res: Response) 
   const run = multiAgentsDb.getRun(agent.id, String(req.params.runId));
   if (!run) throw new AppError('Run not found', { statusCode: 404, code: 'NOT_FOUND' });
   res.json(createApiSuccessResponse(run));
+}));
+
+/** 人工確認節點：{ approved, note } */
+router.post('/:id/runs/:runId/nodes/:nodeId/confirm', asyncHandler(async (req: Request, res: Response) => {
+  const agent = requireAgent(req);
+  const run = multiAgentsDb.getRun(agent.id, String(req.params.runId));
+  if (!run) throw new AppError('Run not found', { statusCode: 404, code: 'NOT_FOUND' });
+  if (typeof req.body?.approved !== 'boolean') throw badRequest('approved must be boolean');
+  const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 20_000) : '';
+  const ok = workflowRunner.confirm(run.id, String(req.params.nodeId), req.body.approved, note);
+  if (!ok) throw new AppError('Node is not waiting for confirmation', { statusCode: 409, code: 'NOT_WAITING' });
+  res.json(createApiSuccessResponse({ ok }));
 }));
 
 router.post('/:id/runs/:runId/stop', asyncHandler(async (req: Request, res: Response) => {

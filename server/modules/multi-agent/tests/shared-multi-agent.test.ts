@@ -71,3 +71,11 @@ test('resolveMentions', () => {
   assert.deepEqual(resolveMentions('沒有提及', members, 'none'), []);
   assert.deepEqual(resolveMentions('@審稿人，@產品經理 看看', members, 'none'), ['pm', 'rv']);
 });
+
+test('validateDefinition: 人工確認節點', () => {
+  const gate = { id: 'g', title: 'g', instruction: 'x', type: 'approval', dependsOn: ['a'] };
+  assert.deepEqual(validateDefinition('workflow', { nodes: [node('a'), gate] }), []);
+  assert.match(validateDefinition('workflow', { nodes: [node('a'), { ...gate, provider: 'claude', model: 'sonnet' }] }).join(), /不需要/);
+  assert.match(validateDefinition('workflow', { nodes: [{ ...gate, type: 'x', dependsOn: [] }] }).join(), /type/);
+  assert.deepEqual(validateModels('workflow', { nodes: [node('a'), gate] } as WorkflowDef, { claude: ['sonnet'] }), []);
+});

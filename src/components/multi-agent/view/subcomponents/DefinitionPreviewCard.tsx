@@ -2,10 +2,10 @@
  * 建立器聊天中 multi-agent-json 區塊的預覽卡片（multi-agent-builder spec）。
  */
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, MessagesSquare, Sparkles, Workflow } from 'lucide-react';
+import { AlertTriangle, Check, MessagesSquare, Sparkles, UserCheck, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { validateDefinition, validateModels } from '../../../../../shared/multiAgent';
+import { isApprovalNode, validateDefinition, validateModels } from '../../../../../shared/multiAgent';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import { modelLabel, type ModelsByProvider } from '../../hooks/useProviderModels';
 import type { ChatroomDef, MultiAgentDefinition, MultiAgentKind, WorkflowDef } from '../../types/types';
@@ -92,8 +92,12 @@ export default function DefinitionPreviewCard({ kind, code, models, isEditing, o
             <div className="flex h-full flex-col justify-center rounded-lg border border-border/70 bg-background px-2.5 shadow-sm">
               <span className="truncate text-xs font-medium text-foreground">{node.title}</span>
               <span className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-muted-foreground">
-                <SessionProviderLogo provider={node.provider} className="h-2.5 w-2.5 flex-shrink-0" />
-                {modelLabel(models, node.provider, node.model)}
+                {isApprovalNode(node) ? (
+                  <><UserCheck className="h-2.5 w-2.5 flex-shrink-0 text-amber-500" />{t('workflow.approvalNode')}</>
+                ) : (
+                  <><SessionProviderLogo provider={node.provider!} className="h-2.5 w-2.5 flex-shrink-0" />
+                  {modelLabel(models, node.provider!, node.model!)}</>
+                )}
               </span>
             </div>
           )}

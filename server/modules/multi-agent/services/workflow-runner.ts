@@ -5,7 +5,7 @@
 import { multiAgentsDb } from '@/modules/database/index.js';
 import { sendToUser } from '@/modules/websocket/index.js';
 
-import type { MultiAgent, NodeRunStatus, WorkflowDef, WorkflowNode, WorkflowRun } from '../../../../shared/multiAgent.js';
+import { isApprovalNode, type MultiAgent, type NodeRunStatus, type WorkflowDef, type WorkflowNode, type WorkflowRun } from '../../../../shared/multiAgent.js';
 import { getDefaultPermissionMode } from '../../../../shared/providers.js';
 
 import { AgentCall, truncateCodePoints, type RuntimeResolver } from './agent-call.js';
@@ -41,6 +41,8 @@ export function buildNodePrompt(node: WorkflowNode, def: WorkflowDef, states: Re
 
 class ActiveRun {
   readonly calls = new Map<string, AgentCall>();
+  /** 等待人工確認的節點：resolve 後 runner 繼續（true=核准） */
+  readonly confirmations = new Map<string, (approved: boolean, note: string) => void>();
   stopping = false;
   constructor(readonly run: WorkflowRun, readonly agent: MultiAgent & { userId: number }) {}
 }
@@ -82,6 +84,7 @@ export class WorkflowRunner {
     }
     this.persist(active);
     this.emitRun(active);
+    for (const resolve of [...active.confirmations.values()]) resolve(false, '');
     await Promise.all([...active.calls.values()].map((call) => call.abort()));
     return true;
   }
@@ -95,7 +98,7 @@ export class WorkflowRunner {
   }
 
   private async execute(active: ActiveRun): Promise<void> {
-    const { run } = active;
+    const { run, agent } = active;
     const def = run.definition;
     const running = new Map<string, Promise<void>>();
 
@@ -128,6 +131,10 @@ export class WorkflowRunner {
   private async runNode(active: ActiveRun, node: WorkflowNode): Promise<void> {
     const { run, agent } = active;
     const state = run.nodeStates[node.id];
+    if (isApprovalNode(node)) {
+      await this.awaitConfirmation(active, node);
+      return;
+    }
     state.state = 'running';
     state.progress = 10;
     this.emitNode(active, node.id);
@@ -136,9 +143,9 @@ export class WorkflowRunner {
     let lastEmit = 0;
     const call = new AgentCall({
       userId: agent.userId,
-      provider: node.provider,
-      model: node.model,
-      permissionMode: node.permissionMode ?? getDefaultPermissionMode(node.provider),
+      provider: node.provider!,
+      model: node.model!,
+      permissionMode: node.permissionMode ?? getDefaultPermissionMode(node.provider!),
       cwd: agent.workspacePath,
       sessionId: null,
       prompt: buildNodePrompt(node, run.definition, run.nodeStates),
@@ -149,6 +156,7 @@ export class WorkflowRunner {
         if (t - lastEmit > 300) { lastEmit = t; this.emitNode(active, node.id); }
       },
       onOutput: (text) => { state.output = text; },
+      onSessionId: (sessionId) => { state.sessionId = sessionId; this.emitNode(active, node.id); },
       onApprovalChange: (waiting) => {
         if (state.state === 'running' || state.state === 'waiting_approval') {
           state.state = waiting ? 'waiting_approval' : 'running';
@@ -173,6 +181,39 @@ export class WorkflowRunner {
     }
     this.persist(active);
     this.emitNode(active, node.id);
+  }
+
+  /** 人工確認節點：暫停執行，等使用者核准／駁回；停止時直接略過。 */
+  private awaitConfirmation(active: ActiveRun, node: WorkflowNode): Promise<void> {
+    const state = active.run.nodeStates[node.id];
+    state.state = 'waiting_confirmation';
+    state.progress = 50;
+    state.output = node.instruction;
+    this.persist(active);
+    this.emitNode(active, node.id);
+    return new Promise((resolve) => {
+      active.confirmations.set(node.id, (approved, note) => {
+        active.confirmations.delete(node.id);
+        state.state = approved ? 'succeeded' : 'failed';
+        state.progress = 100;
+        // 下游只看得到直接上游：把確認前的上游輸出原樣傳下去，再附上使用者備註
+        const upstream = node.dependsOn.map((id) => active.run.nodeStates[id]?.output ?? '').filter(Boolean);
+        state.output = [...upstream, note ? `## 人工確認備註\n${note}` : '## 人工確認\n已核准，無備註'].join('\n\n');
+        if (!approved) state.error = 'rejected';
+        this.persist(active);
+        this.emitNode(active, node.id);
+        resolve();
+      });
+    });
+  }
+
+  /** 使用者在畫布上核准／駁回人工確認節點。找不到等待中的節點時回傳 false。 */
+  confirm(runId: string, nodeId: string, approved: boolean, note = ''): boolean {
+    const active = this.active.get(runId);
+    const resolve = active?.confirmations.get(nodeId);
+    if (!active || !resolve) return false;
+    resolve(approved, note.trim());
+    return true;
   }
 
   private persist(active: ActiveRun, finished = false): void {

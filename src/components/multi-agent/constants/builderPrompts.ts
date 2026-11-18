@@ -19,7 +19,8 @@ function modelSection(hints: ModelHint[]): string {
 const WORKFLOW_EXAMPLE = `{
   "nodes": [
     { "id": "collect", "title": "收集資料", "instruction": "……", "provider": "claude", "model": "sonnet", "dependsOn": [] },
-    { "id": "summarize", "title": "撰寫摘要", "instruction": "……", "provider": "codex", "model": "gpt-5", "dependsOn": ["collect"] }
+    { "id": "review", "title": "人工確認", "instruction": "確認資料是否齊全", "type": "approval", "dependsOn": ["collect"] },
+    { "id": "summarize", "title": "撰寫摘要", "instruction": "……", "provider": "codex", "model": "gpt-5", "dependsOn": ["review"] }
   ]
 }`;
 
@@ -43,6 +44,8 @@ export function buildBuilderPrompt(kind: MultiAgentKind, hints: ModelHint[], cur
       `這是一個工作流：由 1–${MAX_WORKFLOW_NODES} 個步驟（節點）組成，依 dependsOn 形成無環的依賴關係；`,
       '沒有依賴的步驟會並行執行，上游步驟的輸出會自動附在下游步驟的提示中。',
       'id 用簡短的英文小寫；instruction 要具體寫出該步驟要做什麼、輸出什麼。',
+      '需要人工確認、評審或決策才能往下走時，插入人工確認節點：{ "id", "title", "instruction"（寫明要使用者確認什麼）, "type": "approval", "dependsOn" }，不要填 provider / model。',
+      '執行到人工確認節點時整個工作流暫停，使用者核准（可附備註）後才繼續；駁回則下游全部略過。上游輸出與使用者備註會一起傳給下游。',
       `格式範例：\n${WORKFLOW_EXAMPLE}`,
     ]
     : [

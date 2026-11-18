@@ -70,6 +70,15 @@ export function useWorkflowRun(multiAgentId: string) {
     }
   }, [multiAgentId, run]);
 
+  const confirm = useCallback(async (nodeId: string, approved: boolean, note: string) => {
+    if (!run) return;
+    try {
+      await readData(api.multiAgent.confirmNode(multiAgentId, run.id, nodeId, approved, note));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [multiAgentId, run]);
+
   const isRunning = run?.status === 'running' || run?.status === 'stopping';
-  return { run, isRunning, start, stop, error, clearError: () => setError(null), setRun };
+  return { run, isRunning, start, stop, confirm, error, clearError: () => setError(null), setRun };
 }

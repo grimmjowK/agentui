@@ -119,6 +119,11 @@ export const api = {
     startRun: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs`, { method: 'POST' }),
     listRuns: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs`),
     latestRun: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs/latest`),
+    confirmNode: (id, runId, nodeId, approved, note) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/confirm`,
+        { method: 'POST', body: JSON.stringify({ approved, note }) },
+      ),
     stopRun: (id, runId) =>
       authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' }),
     messages: (id, { beforeSeq, limit } = {}) => {

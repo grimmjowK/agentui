@@ -5,16 +5,24 @@ import { isLLMProvider, PROVIDER_INFO, type LLMProvider, type PermissionMode } f
 
 export type MultiAgentKind = 'chatroom' | 'workflow';
 
+/**
+ * 工作流節點。`agent`（預設）呼叫模型執行；`approval` 暫停整個執行，等使用者在畫布上按核准／駁回。
+ * 核准節點不需要 provider / model，核准時的備註會成為它的輸出，傳給下游。
+ */
 export type WorkflowNode = {
   id: string;
   title: string;
   instruction: string;
-  provider: LLMProvider;
-  model: string;
+  /** 未設定視為 agent */
+  type?: 'agent' | 'approval';
+  provider?: LLMProvider;
+  model?: string;
   /** 未設定時用 provider 預設權限模式 */
   permissionMode?: PermissionMode;
   dependsOn: string[];
 };
+
+export const isApprovalNode = (node: WorkflowNode): boolean => node.type === 'approval';
 export type WorkflowDef = { nodes: WorkflowNode[] };
 
 export type ChatMember = {
@@ -50,8 +58,19 @@ export type MultiAgent = {
   updatedAt: string;
 };
 
-export type NodeRunState = 'pending' | 'running' | 'waiting_approval' | 'succeeded' | 'failed' | 'skipped';
-export type NodeRunStatus = { state: NodeRunState; progress: number; output?: string; error?: string };
+/**
+ * waiting_approval：tool 審批（模型要調用工具，等全域審批收件匣處理）
+ * waiting_confirmation：人工確認節點，等使用者在畫布上核准／駁回
+ */
+export type NodeRunState = 'pending' | 'running' | 'waiting_approval' | 'waiting_confirmation' | 'succeeded' | 'failed' | 'skipped';
+export type NodeRunStatus = {
+  state: NodeRunState;
+  progress: number;
+  output?: string;
+  error?: string;
+  /** 節點的 provider sessionId；前端用它找出該節點的工具審批請求 */
+  sessionId?: string;
+};
 export type RunStatus = 'running' | 'stopping' | 'succeeded' | 'failed' | 'stopped' | 'interrupted';
 export type WorkflowRun = {
   id: string;
@@ -168,9 +187,17 @@ export function validateDefinition(kind: MultiAgentKind, def: unknown): string[]
       else ids.add(n.id);
       if (!isNonEmptyString(n.title)) errors.push(`${label}: 缺少標題`);
       if (!isNonEmptyString(n.instruction)) errors.push(`${label}: 缺少執行內容`);
-      if (!isLLMProvider(n.provider)) errors.push(`${label}: provider 不合法`);
-      else checkPermissionMode(errors, label, n.provider, n.permissionMode);
-      if (!isNonEmptyString(n.model)) errors.push(`${label}: 缺少模型`);
+      if (n.type !== undefined && n.type !== 'agent' && n.type !== 'approval') {
+        errors.push(`${label}: type 必須是 agent 或 approval`);
+      }
+      if (isApprovalNode(n as WorkflowNode)) {
+        if (n.provider !== undefined || n.model !== undefined) errors.push(`${label}: 人工確認節點不需要 provider / model`);
+      } else if (!isLLMProvider(n.provider)) {
+        errors.push(`${label}: provider 不合法`);
+      } else {
+        checkPermissionMode(errors, label, n.provider, n.permissionMode);
+        if (!isNonEmptyString(n.model)) errors.push(`${label}: 缺少模型`);
+      }
       if (!Array.isArray(n.dependsOn) || n.dependsOn.some((d) => typeof d !== 'string')) {
         errors.push(`${label}: dependsOn 必須是字串陣列`);
       }
@@ -233,7 +260,8 @@ export function validateModels(
   modelsByProvider: Partial<Record<LLMProvider, string[]>>,
 ): string[] {
   const items = kind === 'workflow'
-    ? (def as WorkflowDef).nodes.map((n) => ({ label: `節點 ${n.id}`, provider: n.provider, model: n.model }))
+    ? (def as WorkflowDef).nodes.filter((n) => !isApprovalNode(n))
+      .map((n) => ({ label: `節點 ${n.id}`, provider: n.provider as LLMProvider, model: n.model as string }))
     : (def as ChatroomDef).members.map((m) => ({ label: `成員 ${m.name}`, provider: m.provider, model: m.model }));
   const errors: string[] = [];
   for (const item of items) {

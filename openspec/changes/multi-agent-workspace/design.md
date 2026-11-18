@@ -72,6 +72,10 @@ type ChatroomDef  = { members: ChatMember[]; rules: ChatRules };
 - 並行寫入：同層並行節點共用工作目錄，可能互相覆蓋檔案。第一版不做隔離，只在開始確認彈窗提示「並行節點共用工作目錄」；使用者可透過依賴關係讓寫檔節點串行。
 - 替代方案：前端驅動執行 → 關掉頁面即中斷，且需多連線協調；後端驅動更可靠。
 
+### D5.1 人工確認節點
+節點 `type: "approval"` 不呼叫模型：runner 執行到時把節點設為 `waiting_confirmation` 並在記憶體中掛起一個 resolver；`POST /:id/runs/:runId/nodes/:nodeId/confirm { approved, note }` 解除。核准時輸出 = 上游輸出 + 備註（下游只看得到直接上游，所以要原樣傳遞）。服務重啟視同中斷。建立器提示加入此節點格式，AI 會在需要人工評審處插入。
+節點狀態另記錄 provider sessionId，前端據此在節點詳情中列出該節點的工具審批（審批池為全域，原本只能在側邊欄收件匣處理）。
+
 ### D6 聊天室調度：後端 dispatcher + 硬性限制
 `POST /api/multi-agent/:id/messages { content }`：
 1. 保存使用者訊息。若該聊天室有 running/stopping 回合，訊息標記 `queued` 並推送給前端（顯示「排隊中」），不回傳錯誤；本輪結束（完成／停止／達限）後 dispatcher 依 seq 順序為每則排隊訊息各開一個新回合。使用者可在前端取消尚未開始的排隊訊息（`DELETE /messages/:msgId`，僅限 queued）。回合期間修改成員／群規照常保存，於下一回合生效（回合使用建立時的定義快照）。

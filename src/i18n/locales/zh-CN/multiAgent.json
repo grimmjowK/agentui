@@ -66,7 +66,8 @@
       "waiting_approval": "等待审批",
       "succeeded": "完成",
       "failed": "失败",
-      "skipped": "已跳过"
+      "skipped": "已跳过",
+      "waiting_confirmation": "等待确认"
     },
     "node": {
       "instruction": "执行内容",
@@ -79,6 +80,20 @@
       "saved": "已保存",
       "error": "错误",
       "dependsOn": "依赖"
+    },
+    "approvalNode": "人工确认",
+    "approval": {
+      "waiting": "等待你确认",
+      "notePlaceholder": "可选：给后续步骤的备注，例如只 apply 哪些工单、需要调整什么",
+      "approve": "确认并继续",
+      "reject": "驳回",
+      "instruction": "确认内容"
+    },
+    "tool": {
+      "title": "工具审批：{{tool}}",
+      "planTitle": "模型完成规划，请求继续执行",
+      "allow": "允许",
+      "deny": "拒绝"
     }
   },
   "chatroom": {
