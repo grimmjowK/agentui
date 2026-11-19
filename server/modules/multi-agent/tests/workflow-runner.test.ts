@@ -247,3 +247,15 @@ test('waiting_input：以目前輸出完成、標記失敗、工作流停止', a
     });
   }
 });
+
+test('建立器與聊天室成員的會話也不出現在專案會話列表', async () => {
+  await withDb(async () => {
+    const created = multiAgentsDb.create(1, { kind: 'workflow', name: 'wf', workspacePath: '/proj' });
+    multiAgentsDb.setBuilderSession(1, created.id, { provider: 'claude', sessionId: 'builder' });
+    multiAgentsDb.setMemberSessions(created.id, { m: { provider: 'codex', model: 'x', sessionId: 'member', lastDeliveredSeq: 0 } });
+    for (const id of ['builder', 'member', 'plain']) sessionsDb.createSession(id, 'claude', '/proj', id);
+    assert.deepEqual(sessionsDb.getSessionsByProjectPath('/proj').map((r) => r.session_id), ['plain']);
+    assert.equal(sessionsDb.countSessionsByProjectPath('/proj'), 1);
+    assert.ok(sessionsDb.getSessionById('builder'), '按 id 仍可載入');
+  });
+});

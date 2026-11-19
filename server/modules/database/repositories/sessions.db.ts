@@ -2,6 +2,15 @@ import { getConnection } from '@/modules/database/connection.js';
 import { projectsDb } from '@/modules/database/repositories/projects.db.js';
 import { normalizeProjectPath } from '@/shared/utils.js';
 
+/**
+ * 多 Agent 擁有的會話：工作流節點、建立器、聊天室成員。側邊欄、計數、封存與檢索一律排除
+ * （node-live-session D2.1）；查詢時判斷，舊資料與工作目錄設為一般專案的情況都涵蓋。
+ */
+const MULTI_AGENT_SESSION_IDS = `
+  SELECT session_id FROM workflow_sessions
+  UNION SELECT json_extract(builder_session_json, '$.sessionId') FROM multi_agents WHERE builder_session_json IS NOT NULL
+  UNION SELECT json_extract(member.value, '$.sessionId') FROM multi_agents, json_each(multi_agents.member_sessions_json) AS member`;
+
 type SessionRow = {
   session_id: string;
   provider: string;
@@ -143,7 +152,7 @@ export const sessionsDb = {
         `SELECT session_id, provider, project_path, jsonl_path, custom_name, isArchived, isStarred, created_at, updated_at
          FROM sessions
          WHERE isArchived = 0
-           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)`
+           AND session_id NOT IN (${MULTI_AGENT_SESSION_IDS})`
       )
       .all() as SessionRow[];
   },
@@ -159,7 +168,7 @@ export const sessionsDb = {
         `SELECT session_id, provider, project_path, jsonl_path, custom_name, isArchived, isStarred, created_at, updated_at
          FROM sessions
          WHERE isArchived = 1
-           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)
+           AND session_id NOT IN (${MULTI_AGENT_SESSION_IDS})
          ORDER BY datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC`
       )
       .all() as SessionRow[];
@@ -174,7 +183,7 @@ export const sessionsDb = {
          FROM sessions
          WHERE project_path = ?
            AND isArchived = 0
-           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)`
+           AND session_id NOT IN (${MULTI_AGENT_SESSION_IDS})`
       )
       .all(normalizedProjectPath) as SessionRow[];
   },
@@ -204,7 +213,7 @@ export const sessionsDb = {
          FROM sessions
          WHERE project_path = ?
            AND isArchived = 0
-           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)
+           AND session_id NOT IN (${MULTI_AGENT_SESSION_IDS})
          ORDER BY isStarred DESC, datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC
          LIMIT ? OFFSET ?`
       )
@@ -220,7 +229,7 @@ export const sessionsDb = {
          FROM sessions
          WHERE project_path = ?
            AND isArchived = 0
-           AND session_id NOT IN (SELECT session_id FROM workflow_sessions)`
+           AND session_id NOT IN (${MULTI_AGENT_SESSION_IDS})`
       )
       .get(normalizedProjectPath) as { count: number } | undefined;
 

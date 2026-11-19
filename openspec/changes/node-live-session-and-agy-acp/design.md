@@ -67,6 +67,7 @@ runtime.start(prompt, opts, loggingWriter)
 ### D2.1 側邊欄與檢索排除工作流會話
 
 - `sessions.db.ts` 的 `getSessionsByProjectPath`、`getSessionsByProjectPathPage`、`countSessionsByProjectPath`、`getArchivedSessions`、`getAllSessions` 一律加上 `AND session_id NOT IN (SELECT session_id FROM workflow_sessions)`。
+  - 排除範圍擴大到多 Agent 擁有的所有會話：除了 `workflow_sessions`，也包括建立器會話（`multi_agents.builder_session_json`）與聊天室成員會話（`member_sessions_json`）。建立器在工作目錄設為一般專案時同樣會出現在側邊欄，從多 Agent 頁面進入即可。
   - 涵蓋側邊欄專案下的會話列表與計數、封存視圖、全文檢索（⌘K，來源是 `getAllSessions`）、`@session` 引用的候選。
   - `getSessionById`、`getSessionsByProjectPathIncludingArchived`（刪除專案時清理檔案）**不**排除：前者是聊天頁按 id 載入所需，後者需要看到全部檔案。
 - 專案列表本身不受影響：工作流會話所在的專案（例如 `dm_pm`）如果還有一般會話，照常顯示；只是工作流產生的會話不在其下。工作流使用專屬目錄時，該目錄原本就已被排除。
