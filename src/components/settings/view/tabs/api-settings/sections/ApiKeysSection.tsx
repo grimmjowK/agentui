@@ -1,6 +1,9 @@
-import { ExternalLink, Key, Plus, Trash2 } from 'lucide-react';
+import { ExternalLink, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Button, Input } from '../../../../../../shared/view/ui';
+import SettingsCard from '../../../SettingsCard';
+import SettingsRow from '../../../SettingsRow';
+import SettingsSection from '../../../SettingsSection';
+import SettingsToggle from '../../../SettingsToggle';
 import type { ApiKeyItem } from '../types';
 
 type ApiKeysSectionProps = {
@@ -29,80 +32,108 @@ export default function ApiKeysSection({
   const { t } = useTranslation('settings');
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Key className="h-5 w-5" />
-          <h3 className="text-lg font-semibold">{t('apiKeys.title')}</h3>
-        </div>
-        <Button size="sm" onClick={() => onShowNewKeyFormChange(!showNewKeyForm)}>
-          <Plus className="mr-1 h-4 w-4" />
-          {t('apiKeys.newButton')}
-        </Button>
-      </div>
-
-      <div className="mb-4">
-        <p className="mb-2 text-sm text-muted-foreground">{t('apiKeys.description')}</p>
-        <a
-          href="/api-docs.html"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+    <SettingsSection
+      title={t('apiKeys.title')}
+      description={t('apiKeys.description')}
+    >
+      <SettingsCard divided>
+        <SettingsRow
+          label={t('apiKeys.title')}
+          description={
+            <a
+              href="/api-docs.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              {t('apiKeys.apiDocsLink')}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          }
         >
-          {t('apiKeys.apiDocsLink')}
-          <ExternalLink className="h-3 w-3" />
-        </a>
-      </div>
+          <button
+            type="button"
+            onClick={() => onShowNewKeyFormChange(!showNewKeyForm)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-muted/40 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>{t('apiKeys.newButton')}</span>
+          </button>
+        </SettingsRow>
 
-      {showNewKeyForm && (
-        <div className="mb-4 rounded-lg border bg-card p-4">
-          <Input
-            placeholder={t('apiKeys.form.placeholder')}
-            value={newKeyName}
-            onChange={(event) => onNewKeyNameChange(event.target.value)}
-            className="mb-2"
-          />
-          <div className="flex gap-2">
-            <Button onClick={onCreateApiKey}>{t('apiKeys.form.createButton')}</Button>
-            <Button variant="outline" onClick={onCancelCreateApiKey}>
-              {t('apiKeys.form.cancelButton')}
-            </Button>
+        {showNewKeyForm && (
+          <div className="space-y-3 bg-muted/15 px-5 py-4">
+            <input
+              type="text"
+              placeholder={t('apiKeys.form.placeholder')}
+              value={newKeyName}
+              onChange={(event) => onNewKeyNameChange(event.target.value)}
+              className="h-9 w-full rounded-xl border border-border/70 bg-background px-3 text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onCancelCreateApiKey}
+                className="h-8 rounded-lg border border-border/70 bg-muted/40 px-3 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                {t('apiKeys.form.cancelButton')}
+              </button>
+              <button
+                type="button"
+                onClick={onCreateApiKey}
+                disabled={!newKeyName.trim()}
+                className="h-8 rounded-lg bg-foreground px-3.5 text-xs font-medium text-background hover:opacity-90 disabled:opacity-40"
+              >
+                {t('apiKeys.form.createButton')}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="space-y-2">
         {apiKeys.length === 0 ? (
-          <p className="text-sm italic text-muted-foreground">{t('apiKeys.empty')}</p>
+          <div className="px-5 py-6 text-center text-xs text-muted-foreground">
+            {t('apiKeys.empty')}
+          </div>
         ) : (
           apiKeys.map((key) => (
-            <div key={key.id} className="flex items-center justify-between rounded-lg border p-3">
-              <div className="flex-1">
-                <div className="font-medium">{key.key_name}</div>
-                <code className="text-xs text-muted-foreground">{key.api_key}</code>
-                <div className="mt-1 text-xs text-muted-foreground">
+            <SettingsRow
+              key={key.id}
+              label={
+                <span className="flex items-center gap-2">
+                  <span>{key.key_name}</span>
+                  <code className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px] font-normal text-muted-foreground">
+                    {key.api_key}
+                  </code>
+                </span>
+              }
+              description={
+                <span>
                   {t('apiKeys.list.created')} {new Date(key.created_at).toLocaleDateString()}
                   {key.last_used
-                    ? ` - ${t('apiKeys.list.lastUsed')} ${new Date(key.last_used).toLocaleDateString()}`
+                    ? ` · ${t('apiKeys.list.lastUsed')} ${new Date(key.last_used).toLocaleDateString()}`
                     : ''}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant={key.is_active ? 'outline' : 'secondary'}
-                  onClick={() => onToggleApiKey(key.id, key.is_active)}
+                </span>
+              }
+            >
+              <div className="flex items-center gap-3">
+                <SettingsToggle
+                  checked={key.is_active}
+                  onChange={() => onToggleApiKey(key.id, key.is_active)}
+                  ariaLabel={key.key_name}
+                />
+                <button
+                  type="button"
+                  onClick={() => onDeleteApiKey(key.id)}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  aria-label="Delete API key"
                 >
-                  {key.is_active ? t('apiKeys.status.active') : t('apiKeys.status.inactive')}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => onDeleteApiKey(key.id)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
-            </div>
+            </SettingsRow>
           ))
         )}
-      </div>
-    </div>
+      </SettingsCard>
+    </SettingsSection>
   );
 }

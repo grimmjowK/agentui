@@ -29,11 +29,12 @@ function DarkModeToggle({
 
   return (
     <button
+      type="button"
       onClick={handleToggle}
       className={cn(
-        'relative inline-flex h-7 w-12 flex-shrink-0 touch-manipulation cursor-pointer items-center rounded-full border-2 transition-colors duration-200',
+        'relative inline-flex h-6 w-11 flex-shrink-0 touch-manipulation cursor-pointer items-center rounded-full p-0.5 transition-colors duration-200',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-        isEnabled ? 'border-primary bg-primary' : 'border-border bg-muted',
+        isEnabled ? 'bg-[#3b82f6] dark:bg-[#3b82f6]' : 'bg-foreground/15 dark:bg-white/15',
       )}
       role="switch"
       aria-checked={isEnabled}
@@ -42,14 +43,14 @@ function DarkModeToggle({
       <span className="sr-only">{ariaLabel}</span>
       <span
         className={cn(
-          'flex h-5 w-5 transform items-center justify-center rounded-full shadow-sm transition-transform duration-200',
-          isEnabled ? 'translate-x-[22px] bg-white' : 'translate-x-[2px] bg-foreground/60 dark:bg-foreground/80',
+          'flex h-5 w-5 transform items-center justify-center rounded-full bg-white shadow-sm transition-transform duration-200',
+          isEnabled ? 'translate-x-5' : 'translate-x-0',
         )}
       >
         {isEnabled ? (
-          <Moon className="h-3 w-3 text-primary" />
+          <Moon className="h-3 w-3 text-[#3b82f6]" />
         ) : (
-          <Sun className="h-3 w-3 text-white dark:text-background" />
+          <Sun className="h-3 w-3 text-amber-500" />
         )}
       </span>
     </button>

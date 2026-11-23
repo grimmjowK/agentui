@@ -15,18 +15,21 @@ export default function SettingsToggle({ checked, onChange, ariaLabel, disabled 
       aria-checked={checked}
       aria-label={ariaLabel}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onChange(!checked);
+      }}
       className={cn(
-        'relative inline-flex h-7 w-12 flex-shrink-0 touch-manipulation cursor-pointer items-center rounded-full border-2 transition-colors duration-200',
+        'relative inline-flex h-6 w-11 flex-shrink-0 touch-manipulation cursor-pointer items-center rounded-full p-0.5 transition-colors duration-200',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-        checked ? 'border-primary bg-primary' : 'border-border bg-muted',
+        checked ? 'bg-[#3b82f6] dark:bg-[#3b82f6]' : 'bg-foreground/15 dark:bg-white/15',
         disabled && 'cursor-not-allowed opacity-50',
       )}
     >
       <span
         className={cn(
-          'pointer-events-none inline-block h-5 w-5 rounded-full shadow-sm transition-transform duration-200',
-          checked ? 'translate-x-[22px] bg-white' : 'translate-x-[2px] bg-foreground/60 dark:bg-foreground/80',
+          'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200',
+          checked ? 'translate-x-5' : 'translate-x-0',
         )}
       />
     </button>

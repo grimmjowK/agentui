@@ -36,11 +36,17 @@ export type ProviderInfo = {
   settingsStorageKey: string;
 };
 
-/** Antigravity headless 模式無法互動審批：使用者明確同意跳過權限時預設 bypass。 */
+/** Antigravity（ACP）預設權限模式：由設定頁儲存於 localStorage 的 antigravity-settings 決定。 */
 function antigravityDefaultPermissionMode(): PermissionMode {
   try {
     const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem('antigravity-settings');
     const settings = JSON.parse(raw || '{}');
+    if (
+      typeof settings.permissionMode === 'string'
+      && ['default', 'acceptEdits', 'auto', 'plan', 'bypassPermissions'].includes(settings.permissionMode)
+    ) {
+      return settings.permissionMode as PermissionMode;
+    }
     return settings.explicitConsent === true && settings.skipPermissions === true ? 'bypassPermissions' : 'default';
   } catch {
     return 'default';

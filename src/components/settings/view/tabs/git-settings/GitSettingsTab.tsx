@@ -1,8 +1,8 @@
 import { AlertCircle, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useGitSettings } from '../../../hooks/useGitSettings';
-import { Button, Input } from '../../../../../shared/view/ui';
 import SettingsCard from '../../SettingsCard';
+import SettingsRow from '../../SettingsRow';
 import SettingsSection from '../../SettingsSection';
 
 export default function GitSettingsTab() {
@@ -20,67 +20,65 @@ export default function GitSettingsTab() {
   } = useGitSettings();
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       <SettingsSection
         title={t('git.title')}
         description={t('git.description')}
       >
-        <SettingsCard className="p-4">
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="settings-git-name" className="mb-2 block text-sm font-medium text-foreground">
-                {t('git.name.label')}
-              </label>
-              <Input
-                id="settings-git-name"
-                type="text"
-                value={gitName}
-                onChange={(event) => setGitName(event.target.value)}
-                placeholder="John Doe"
-                disabled={isLoading}
-                className="w-full"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">{t('git.name.help')}</p>
-            </div>
+        <SettingsCard divided>
+          <SettingsRow
+            label={t('git.name.label')}
+            description={t('git.name.help')}
+          >
+            <input
+              id="settings-git-name"
+              type="text"
+              value={gitName}
+              onChange={(event) => setGitName(event.target.value)}
+              placeholder="John Doe"
+              disabled={isLoading}
+              className="h-8 w-52 rounded-lg border border-border/70 bg-muted/30 px-3 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:bg-background focus:outline-none disabled:opacity-50"
+            />
+          </SettingsRow>
 
-            <div>
-              <label htmlFor="settings-git-email" className="mb-2 block text-sm font-medium text-foreground">
-                {t('git.email.label')}
-              </label>
-              <Input
-                id="settings-git-email"
-                type="email"
-                value={gitEmail}
-                onChange={(event) => setGitEmail(event.target.value)}
-                placeholder="john@example.com"
-                disabled={isLoading}
-                className="w-full"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">{t('git.email.help')}</p>
-            </div>
+          <SettingsRow
+            label={t('git.email.label')}
+            description={t('git.email.help')}
+          >
+            <input
+              id="settings-git-email"
+              type="email"
+              value={gitEmail}
+              onChange={(event) => setGitEmail(event.target.value)}
+              placeholder="john@example.com"
+              disabled={isLoading}
+              className="h-8 w-52 rounded-lg border border-border/70 bg-muted/30 px-3 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:bg-background focus:outline-none disabled:opacity-50"
+            />
+          </SettingsRow>
 
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={saveGitConfig}
-                disabled={isSaving || !gitName.trim() || !gitEmail.trim()}
-              >
-                {isSaving ? t('git.actions.saving') : t('git.actions.save')}
-              </Button>
-
+          <div className="flex items-center justify-between gap-3 px-5 py-3.5">
+            <div className="text-xs">
               {saveStatus === 'success' && (
-                <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                  <Check className="h-4 w-4" />
+                <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <Check className="h-3.5 w-3.5" />
                   {t('git.status.success')}
-                </div>
+                </span>
               )}
-
               {saveStatus === 'error' && (
-                <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
-                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                <span className="inline-flex items-center gap-1.5 text-destructive">
+                  <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
                   {saveError || t('git.status.error')}
-                </div>
+                </span>
               )}
             </div>
+            <button
+              type="button"
+              onClick={saveGitConfig}
+              disabled={isSaving || !gitName.trim() || !gitEmail.trim()}
+              className="inline-flex h-8 items-center rounded-lg border border-border/70 bg-muted/40 px-3.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-40"
+            >
+              {isSaving ? t('git.actions.saving') : t('git.actions.save')}
+            </button>
           </div>
         </SettingsCard>
       </SettingsSection>

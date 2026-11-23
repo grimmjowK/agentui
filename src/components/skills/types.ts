@@ -8,6 +8,7 @@ export type SkillItem = {
   name: string;
   scope: SkillScope;
   filename: string;
+  description?: string;
   content: string;
 };
 

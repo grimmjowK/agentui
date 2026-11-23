@@ -8,6 +8,7 @@ import {
 } from '../constants/constants';
 import type {
   AgentProvider,
+  AntigravityPermissionMode,
   AntigravityPermissionsState,
   ClaudePermissionsState,
   CodeEditorSettingsState,
@@ -42,6 +43,7 @@ type CursorSettingsStorage = {
 };
 
 type AntigravitySettingsStorage = {
+  permissionMode?: AntigravityPermissionMode;
   skipPermissions?: boolean;
   explicitConsent?: boolean;
 };
@@ -88,6 +90,19 @@ const toCodexPermissionMode = (value: unknown): CodexPermissionMode => {
   return 'default';
 };
 
+const toAntigravityPermissionMode = (storage: AntigravitySettingsStorage): AntigravityPermissionMode => {
+  if (
+    storage.permissionMode === 'default'
+    || storage.permissionMode === 'acceptEdits'
+    || storage.permissionMode === 'auto'
+    || storage.permissionMode === 'plan'
+    || storage.permissionMode === 'bypassPermissions'
+  ) {
+    return storage.permissionMode;
+  }
+  return storage.explicitConsent === true && storage.skipPermissions === true ? 'bypassPermissions' : 'default';
+};
+
 const readCodeEditorSettings = (): CodeEditorSettingsState => ({
   theme: localStorage.getItem('codeEditorTheme') === 'light' ? 'light' : 'dark',
   wordWrap: localStorage.getItem('codeEditorWordWrap') === 'true',
@@ -109,7 +124,7 @@ const createEmptyCursorPermissions = (): CursorPermissionsState => ({
 });
 
 const createDefaultAntigravityPermissions = (): AntigravityPermissionsState => ({
-  skipPermissions: false,
+  permissionMode: 'default',
 });
 
 const createDefaultNotificationPreferences = (): NotificationPreferencesState => ({
@@ -186,7 +201,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         {},
       );
       setAntigravityPermissions({
-        skipPermissions: savedAntigravitySettings.explicitConsent === true && savedAntigravitySettings.skipPermissions === true,
+        permissionMode: toAntigravityPermissionMode(savedAntigravitySettings),
       });
 
       const savedCodexSettings = parseJson<CodexSettingsStorage>(
@@ -271,13 +286,14 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
         localStorage.getItem('antigravity-settings'), {},
       );
       localStorage.setItem('antigravity-settings', JSON.stringify({
-        skipPermissions: antigravityPermissions.skipPermissions,
+        permissionMode: antigravityPermissions.permissionMode,
+        skipPermissions: antigravityPermissions.permissionMode === 'bypassPermissions',
         explicitConsent: true,
         lastUpdated: now,
       }));
-      if (previousAntigravitySettings.skipPermissions !== antigravityPermissions.skipPermissions) {
+      if (toAntigravityPermissionMode(previousAntigravitySettings) !== antigravityPermissions.permissionMode) {
         window.dispatchEvent(new CustomEvent('antigravity-permissions-change', {
-          detail: antigravityPermissions.skipPermissions,
+          detail: antigravityPermissions.permissionMode,
         }));
       }
 
@@ -307,7 +323,7 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     cursorPermissions.allowedCommands,
     cursorPermissions.disallowedCommands,
     cursorPermissions.skipPermissions,
-    antigravityPermissions.skipPermissions,
+    antigravityPermissions.permissionMode,
     notificationPreferences,
     projectSortOrder,
   ]);

@@ -1,8 +1,10 @@
 import { CheckCircle2, Download, Loader2, LogIn } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { IS_PLATFORM } from '../../../../../../../constants/config';
-import { Badge, Button } from '../../../../../../../shared/view/ui';
 import SessionProviderLogo from '../../../../../../llm-logo-provider/SessionProviderLogo';
+import SettingsCard from '../../../../SettingsCard';
+import SettingsRow from '../../../../SettingsRow';
+import SettingsSection from '../../../../SettingsSection';
 import type { AgentProvider, AuthStatus } from '../../../../../types/types';
 
 type AccountContentProps = {
@@ -12,173 +14,118 @@ type AccountContentProps = {
   onInstall?: () => void;
 };
 
-type AgentVisualConfig = {
-  name: string;
-  bgClass: string;
-  borderClass: string;
-  textClass: string;
-  subtextClass: string;
-  buttonClass: string;
-  description?: string;
-};
-
-const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
-  claude: {
-    name: 'Claude',
-    bgClass: 'bg-blue-50 dark:bg-blue-900/20',
-    borderClass: 'border-blue-200 dark:border-blue-800',
-    textClass: 'text-blue-900 dark:text-blue-100',
-    subtextClass: 'text-blue-700 dark:text-blue-300',
-    buttonClass: 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800',
-  },
-  cursor: {
-    name: 'Cursor',
-    bgClass: 'bg-purple-50 dark:bg-purple-900/20',
-    borderClass: 'border-purple-200 dark:border-purple-800',
-    textClass: 'text-purple-900 dark:text-purple-100',
-    subtextClass: 'text-purple-700 dark:text-purple-300',
-    buttonClass: 'bg-purple-600 hover:bg-purple-700 active:bg-purple-800',
-  },
-  codex: {
-    name: 'Codex',
-    bgClass: 'bg-muted/50',
-    borderClass: 'border-gray-300 dark:border-gray-600',
-    textClass: 'text-gray-900 dark:text-gray-100',
-    subtextClass: 'text-gray-700 dark:text-gray-300',
-    buttonClass: 'bg-gray-800 hover:bg-gray-900 active:bg-gray-950 dark:bg-gray-700 dark:hover:bg-gray-600 dark:active:bg-gray-500',
-  },
-  antigravity: {
-    name: 'Antigravity',
-    description: 'Antigravity CLI Agent (agy)',
-    bgClass: 'bg-indigo-50 dark:bg-indigo-900/20',
-    borderClass: 'border-indigo-200 dark:border-indigo-800',
-    textClass: 'text-indigo-900 dark:text-indigo-100',
-    subtextClass: 'text-indigo-700 dark:text-indigo-300',
-    buttonClass: 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800',
-  },
+const AGENT_NAMES: Record<AgentProvider, string> = {
+  claude: 'Claude',
+  cursor: 'Cursor',
+  codex: 'Codex',
+  antigravity: 'Antigravity',
 };
 
 export default function AccountContent({ agent, authStatus, onLogin, onInstall }: AccountContentProps) {
   const { t } = useTranslation('settings');
-  const config = agentConfig[agent];
+  const agentName = AGENT_NAMES[agent];
   const showInstallButton = !IS_PLATFORM && !authStatus.loading && (!authStatus.installed || Boolean(authStatus.installing)) && Boolean(onInstall);
   const showLoginButton = !authStatus.loading && authStatus.installed && !authStatus.installing && authStatus.method !== 'api_key';
   const showLoginSection = showLoginButton || showInstallButton;
 
   return (
     <div className="space-y-6">
-      <div className="mb-4 flex items-center gap-3">
-        <SessionProviderLogo provider={agent} className="h-6 w-6" />
-        <div>
-          <h3 className="text-lg font-medium text-foreground">{config.name}</h3>
-          <p className="text-sm text-muted-foreground">{t(`agents.account.${agent}.description`)}</p>
-        </div>
-      </div>
-
-      <div className={`${config.bgClass} border ${config.borderClass} rounded-lg p-4`}>
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="flex-1">
-              <div className={`font-medium ${config.textClass}`}>
-                {t('agents.connectionStatus')}
-              </div>
-              <div className={`text-sm ${config.subtextClass}`}>
-                {authStatus.loading ? (
-                  t('agents.authStatus.checkingAuth')
-                ) : authStatus.authenticated ? (
-                  t('agents.authStatus.loggedInAs', {
+      <SettingsSection title={t('tabs.account')}>
+        <SettingsCard divided>
+          <SettingsRow
+            label={
+              <span className="flex items-center gap-2.5">
+                <SessionProviderLogo provider={agent} className="h-4 w-4" />
+                <span>{t('agents.connectionStatus')}</span>
+              </span>
+            }
+            description={
+              authStatus.loading
+                ? t('agents.authStatus.checkingAuth')
+                : authStatus.authenticated
+                  ? t('agents.authStatus.loggedInAs', {
                     email: authStatus.email || t('agents.authStatus.authenticatedUser'),
                   })
-                ) : (
-                  t('agents.authStatus.notConnected')
-                )}
-              </div>
-            </div>
-            <div>
-              {authStatus.loading ? (
-                <Badge variant="secondary" className="bg-muted">
-                  {t('agents.authStatus.checking')}
-                </Badge>
-              ) : authStatus.authenticated ? (
-                <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                  {t('agents.authStatus.connected')}
-                </Badge>
-              ) : (
-                <Badge variant="secondary" className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300">
-                  {t('agents.authStatus.disconnected')}
-                </Badge>
-              )}
-            </div>
-          </div>
+                  : t('agents.authStatus.notConnected')
+            }
+          >
+            {authStatus.loading ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {t('agents.authStatus.checking')}
+              </span>
+            ) : authStatus.authenticated ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                {t('agents.authStatus.connected')}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+                {t('agents.authStatus.disconnected')}
+              </span>
+            )}
+          </SettingsRow>
 
           {showLoginSection && (
-            <div className="border-t border-border/50 pt-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className={`font-medium ${config.textClass}`}>
-                    {authStatus.authenticated ? t('agents.login.reAuthenticate') : t('agents.login.title')}
-                  </div>
-                  <div className={`text-sm ${config.subtextClass}`}>
-                    {authStatus.authenticated
-                      ? t('agents.login.reAuthDescription')
-                      : t('agents.login.description', { agent: config.name })}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {showInstallButton && (
-                    <Button
-                      onClick={onInstall}
-                      variant="outline"
-                      size="sm"
-                      disabled={authStatus.installing}
-                    >
-                      {authStatus.installing ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          {t('agents.install.installing', { defaultValue: 'Installing...' })}
-                        </>
-                      ) : (
-                        <>
-                          <Download className="mr-2 h-4 w-4" />
-                          {t('agents.install.button', { defaultValue: 'Install' })}
-                        </>
-                      )}
-                    </Button>
-                  )}
-                  {showLoginButton && (
-                    <Button
-                      onClick={onLogin}
-                      className={`${config.buttonClass} text-white`}
-                      size="sm"
-                      disabled={authStatus.installing}
-                    >
-                      <LogIn className="mr-2 h-4 w-4" />
-                      {authStatus.authenticated ? t('agents.login.reLoginButton') : t('agents.login.button')}
-                    </Button>
-                  )}
-                </div>
+            <SettingsRow
+              label={authStatus.authenticated ? t('agents.login.reAuthenticate') : t('agents.login.title')}
+              description={
+                authStatus.authenticated
+                  ? t('agents.login.reAuthDescription')
+                  : t('agents.login.description', { agent: agentName })
+              }
+            >
+              <div className="flex items-center gap-2">
+                {showInstallButton && (
+                  <button
+                    type="button"
+                    onClick={onInstall}
+                    disabled={authStatus.installing}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-muted/40 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                  >
+                    {authStatus.installing ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        {t('agents.install.installing', { defaultValue: 'Installing...' })}
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-3.5 w-3.5" />
+                        {t('agents.install.button', { defaultValue: 'Install' })}
+                      </>
+                    )}
+                  </button>
+                )}
+                {showLoginButton && (
+                  <button
+                    type="button"
+                    onClick={onLogin}
+                    disabled={authStatus.installing}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-muted/40 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                  >
+                    <LogIn className="h-3.5 w-3.5" />
+                    {authStatus.authenticated ? t('agents.login.reLoginButton') : t('agents.login.button')}
+                  </button>
+                )}
               </div>
-            </div>
+            </SettingsRow>
           )}
 
           {authStatus.installSuccess && (
-            <div className="border-t border-border/50 pt-4">
-              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                <span>{t('agents.install.success', { defaultValue: 'CLI installed successfully' })}</span>
-              </div>
+            <div className="flex items-center gap-2 px-5 py-3 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+              <span>{t('agents.install.success', { defaultValue: 'CLI installed successfully' })}</span>
             </div>
           )}
 
           {authStatus.error && (
-            <div className="border-t border-border/50 pt-4">
-              <div className="text-sm text-red-600 dark:text-red-400">
-                {t('agents.error', { error: authStatus.error })}
-              </div>
+            <div className="px-5 py-3 text-xs text-destructive">
+              {t('agents.error', { error: authStatus.error })}
             </div>
           )}
-        </div>
-      </div>
+        </SettingsCard>
+      </SettingsSection>
     </div>
   );
 }

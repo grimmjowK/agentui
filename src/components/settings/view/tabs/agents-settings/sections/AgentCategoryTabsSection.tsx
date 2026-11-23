@@ -12,19 +12,21 @@ export default function AgentCategoryTabsSection({
   const { t } = useTranslation('settings');
 
   return (
-    <div className="flex-shrink-0 border-b border-border">
-      <div role="tablist" className="flex overflow-x-auto px-2 md:px-4">
-        {AGENT_CATEGORIES.map((category) => (
+    <div role="tablist" className="flex flex-wrap gap-1.5">
+      {AGENT_CATEGORIES.map((category) => {
+        const isActive = selectedCategory === category;
+        return (
           <button
             key={category}
+            type="button"
             role="tab"
-            aria-selected={selectedCategory === category}
+            aria-selected={isActive}
             onClick={() => onSelectCategory(category)}
             className={cn(
-              'whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium touch-manipulation transition-colors duration-150',
-              selectedCategory === category
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
+              'rounded-xl px-3.5 py-1.5 text-[13px] font-medium transition-colors duration-150',
+              isActive
+                ? 'bg-foreground text-background dark:bg-foreground dark:text-background'
+                : 'bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground',
             )}
           >
             {category === 'account' && t('tabs.account')}
@@ -32,8 +34,8 @@ export default function AgentCategoryTabsSection({
             {category === 'mcp' && t('tabs.mcpServers')}
             {category === 'skills' && t('tabs.skills')}
           </button>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }

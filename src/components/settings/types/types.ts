@@ -8,6 +8,7 @@ export type AgentCategory = 'account' | 'permissions' | 'mcp' | 'skills';
 export type ProjectSortOrder = 'name' | 'date';
 export type SaveStatus = 'success' | 'error' | null;
 export type CodexPermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
+export type AntigravityPermissionMode = 'default' | 'acceptEdits' | 'auto' | 'plan' | 'bypassPermissions';
 
 export type SettingsProject = {
   name: string;
@@ -43,7 +44,7 @@ export type CursorPermissionsState = {
 };
 
 export type AntigravityPermissionsState = {
-  skipPermissions: boolean;
+  permissionMode: AntigravityPermissionMode;
 };
 
 export type CodeEditorSettingsState = {

@@ -429,10 +429,38 @@
       }
     },
     "antigravity": {
-      "headlessNotice": "Antigravity（agy）以 headless 模式运行，无法交互式审批工具权限。默认模式下工具操作可能被拒绝；聊天界面的权限按钮显示每次运行实际使用的模式。",
-      "skipPermissions": {
-        "label": "新会话默认自动放行所有工具",
-        "description": "将新会话初始模式设为跳过权限；每个会话仍可通过聊天界面的权限按钮覆盖。"
+      "permissionMode": "默认权限模式（ACP）",
+      "description": "Antigravity（agy）通过 ACP 协议运行，支持交互式工具审批。选择新会话的默认权限模式：",
+      "modes": {
+        "default": {
+          "title": "默认（需审批）",
+          "description": "执行命令或修改文件前在聊天界面弹出交互式审批卡片，由您允许或拒绝。"
+        },
+        "acceptEdits": {
+          "title": "自动接受编辑",
+          "description": "自动允许文件编辑操作，危险或外部命令仍会请求审批。"
+        },
+        "auto": {
+          "title": "自动模式",
+          "description": "由 Agent 根据安全策略自动放行常规操作，高风险操作请求审批。"
+        },
+        "plan": {
+          "title": "规划模式（只读）",
+          "description": "仅进行分析与方案规划，不执行修改文件或写操作。"
+        },
+        "bypassPermissions": {
+          "title": "跳过权限",
+          "description": "自动放行所有工具调用与命令执行，不弹出审批提示。请仅在可信环境中使用。"
+        }
+      },
+      "technicalDetails": "技术详情",
+      "technicalInfo": {
+        "default": "ACP modeId=default。通过 session/request_permission 进行交互式审批。",
+        "acceptEdits": "ACP modeId=accept-edits。自动批准工作区内的文件修改。",
+        "auto": "ACP modeId=auto。按 agy 内置自动策略运行。",
+        "plan": "ACP modeId=plan。只读规划模式。",
+        "bypassPermissions": "启动参数 --dangerously-skip-permissions。跳过所有权限检查。",
+        "overrideNote": "您可以使用聊天界面中的模式按钮或工作流节点配置按需覆盖此默认设置。"
       }
     },
     "actions": {
