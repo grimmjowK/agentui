@@ -46,6 +46,7 @@
   },
   "workflow": {
     "start": "Start",
+    "startAnother": "New run",
     "stop": "Stop",
     "running": "Running",
     "succeeded": "Succeeded",
@@ -81,13 +82,17 @@
       "saved": "Saved",
       "error": "Error",
       "dependsOn": "Depends on",
-      "openChat": "Open chat"
+      "openChat": "Open chat",
+      "continueDownstream": "Continue downstream",
+      "continueHint": "Sync the latest AI reply from this node's chat and continue downstream steps"
     },
     "approvalNode": "Manual confirmation",
     "approval": {
       "waiting": "Waiting for your confirmation",
-      "notePlaceholder": "Optional note for the next steps, e.g. which tickets to apply or what to change",
+      "notePlaceholder": "Optional note for next steps; or enter feedback here and click 'Send back for rework' to revise the previous step",
       "approve": "Approve & continue",
+      "rework": "Send back for rework",
+      "reworkHint": "Send the note above back to the upstream step to revise in the same session, then return here",
       "reject": "Reject",
       "instruction": "What to confirm"
     },

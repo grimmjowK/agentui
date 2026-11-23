@@ -52,13 +52,18 @@ test('依序執行並把上游輸出帶入下游', async () => {
   });
 });
 
-test('並行上限 3 且重複開始被拒', async () => {
+test('單一 run 節點並行上限 3；同一工作流最多允許 5 個並行 run', async () => {
   await withDb(async () => {
     const { mock, runner, agent } = setup({ nodes: ['a', 'b', 'c', 'd', 'e'].map((id) => node(id)) }, say('ok', 20));
     const started = runner.start(agent)!;
-    assert.equal(runner.start(agent), null);
     await started.done;
     assert.equal(mock.maxConcurrent, 3);
+
+    const { runner: r2, agent: a2 } = setup({ nodes: [node('a')] }, say('ok', 30));
+    const active = [1, 2, 3, 4, 5].map((i) => r2.start(a2, `ticket-${i}`)!);
+    assert.equal(active.every(Boolean), true, '前 5 個並行實例都可啟動');
+    assert.equal(r2.start(a2, 'ticket-6'), null, '第 6 個並行實例被拒');
+    await Promise.all(active.map((x) => x.done));
   });
 });
 
@@ -215,12 +220,98 @@ test('聊天頁中斷 → waiting_input → 新指示續接 → 成功，輸出�
     await started.done;
     const run = multiAgentsDb.getRun(agent.id, started.run.id)!;
     assert.equal(run.status, 'succeeded');
-    assert.equal(run.nodeStates.a.output, 'PART1\n\nPART2');
+    assert.equal(run.nodeStates.a.output, 'PART2');
     assert.equal(mock.calls[1].options.sessionId, 's1');
     assert.equal(mock.calls[1].options.resume, true);
-    assert.match(mock.calls[2].prompt, /PART1\n\nPART2/);
+    assert.match(mock.calls[2].prompt, /PART2/);
     const users = sessionMessagesDb.list('s1', { afterSeq: null, limit: null }).messages.filter((m) => m.role === 'user');
     assert.ok(users.some((m) => m.content === 'fix it'), '新指示記入節點會話');
+  });
+});
+
+test('節點輸出只保留最後一段最終回覆，過濾工具調用前的過場白', async () => {
+  await withDb(async () => {
+    const { runner, agent } = setup({ nodes: [node('a')] }, async ({ writer, sessionId }) => {
+      writer.send({ kind: 'text', role: 'assistant', content: '正在查詢工單欄位...', sessionId });
+      writer.send({ kind: 'tool_use', id: 't1', toolName: 'Bash', sessionId });
+      writer.send({ kind: 'text', role: 'assistant', content: '最終結論報告', sessionId });
+    });
+    const started = runner.start(agent)!;
+    await started.done;
+    const run = multiAgentsDb.getRun(agent.id, started.run.id)!;
+    assert.equal(run.nodeStates.a.output, '最終結論報告');
+  });
+});
+
+test('人工確認節點「退回重做」：將修改意見帶回上游節點續接同一 session，完成後再次回到確認節點', async () => {
+  await withDb(async () => {
+    const gate = { id: 'gate', title: '確認倉庫映射', instruction: '請確認', type: 'approval' as const, dependsOn: ['analyze'] };
+    const def = { nodes: [node('analyze'), gate, node('clone', ['gate'])] } as WorkflowDef;
+    let analyzeRound = 0;
+    const { mock, runner, agent } = setup(def, async (ctx) => {
+      if (ctx.prompt.includes('do analyze') || ctx.prompt.includes('退回重做')) {
+        analyzeRound += 1;
+        await say(analyzeRound === 1 ? 'WRONG_20489' : 'FIXED_20200')(ctx);
+      } else {
+        await say('CLONED')(ctx);
+      }
+    });
+    const started = runner.start(agent)!;
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.gate.state === 'waiting_confirmation');
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.analyze.output, 'WRONG_20489');
+
+    // 在確認節點點選「退回重做」並附上修改意見
+    assert.equal(runner.confirm(started.run.id, 'gate', 'rework', '只分析 20200，其他不管'), true);
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.analyze.output === 'FIXED_20200'
+      && multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.gate.state === 'waiting_confirmation');
+
+    assert.equal(mock.calls.length, 2, '上游節點重跑了一輪');
+    assert.equal(mock.calls[1].options.sessionId, 's1', '沿用上游節點原本的 sessionId');
+    assert.equal(mock.calls[1].options.resume, true);
+    assert.match(mock.calls[1].prompt, /只分析 20200，其他不管/);
+
+    // 修正後在確認節點核准，繼續往後跑 clone
+    assert.equal(runner.confirm(started.run.id, 'gate', 'approve', '確認無誤'), true);
+    await started.done;
+    const finalRun = multiAgentsDb.getRun(agent.id, started.run.id)!;
+    assert.equal(finalRun.status, 'succeeded');
+    assert.match(mock.calls[2].prompt, /FIXED_20200[\s\S]*確認無誤/);
+  });
+});
+
+test('確認節點駁回後，在上游節點對話頁追問會自動重啟並流轉回確認節點', async () => {
+  await withDb(async () => {
+    const gate = { id: 'gate', title: '確認倉庫映射', instruction: '請確認', type: 'approval' as const, dependsOn: ['analyze'] };
+    const def = { nodes: [node('analyze'), gate, node('clone', ['gate'])] } as WorkflowDef;
+    const { mock, runner, agent } = setup(def, async (ctx) => {
+      if (ctx.prompt.includes('do analyze')) await say('WRONG_20489')(ctx);
+      else if (ctx.prompt.includes('只分析 20200')) await say('FIXED_20200')(ctx);
+      else await say('CLONED')(ctx);
+    });
+    const started = runner.start(agent)!;
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.gate.state === 'waiting_confirmation');
+    // 使用者在確認節點點了駁回，導致整條 run 結束
+    runner.confirm(started.run.id, 'gate', false);
+    await started.done;
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.status, 'failed');
+
+    // 使用者打開上游 analyze 的對話頁（s1）並送出追問
+    const cId = '33333333-3333-4333-8333-333333333333';
+    const res = await workflowSessions.continueSession('s1', 1, '只分析 20200 就好', cId);
+    assert.equal(res, 'continued');
+
+    // 自動重跑 analyze 並再次流轉到 gate 等待確認
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.gate.state === 'waiting_confirmation');
+    const midRun = multiAgentsDb.getRun(agent.id, started.run.id)!;
+    assert.equal(midRun.status, 'running');
+    assert.equal(midRun.nodeStates.analyze.output, 'FIXED_20200');
+    assert.equal(mock.calls[1].options.sessionId, 's1');
+    assert.equal(mock.calls[1].options.resume, true);
+
+    // 核准確認節點，完成後續節點
+    runner.confirm(started.run.id, 'gate', true, 'OK');
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.status === 'succeeded');
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.clone.output, 'CLONED');
   });
 });
 

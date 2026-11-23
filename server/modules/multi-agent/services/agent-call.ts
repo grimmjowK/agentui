@@ -77,12 +77,13 @@ export class AgentCall {
   }
 
   get text(): string {
-    return [...this.completed, this.segment].filter(Boolean).join('\n\n');
+    // 只取目前串流段落或最後一個非空段落，過濾工具調用前的過場白與舊輪次輸出
+    return this.segment || this.completed.at(-1) || '';
   }
 
   /**
    * 執行一輪。prompt 省略時用建構時的提示；之後的輪次（中斷後續接）以同一 sessionId 續接，
-   * 輸出累加在前面已有的文字之後。clientId 用於前端對應樂觀顯示的使用者訊息。
+   * 輸出以最新一輪的最終回覆為準。clientId 用於前端對應樂觀顯示的使用者訊息。
    */
   async run(prompt = this.options.prompt, clientId: string = randomUUID()): Promise<AgentCallResult> {
     const { provider, permissionMode } = this.options;
@@ -207,7 +208,7 @@ export class AgentCall {
       case 'text':
         if (event.role === 'assistant' && typeof event.content === 'string' && !this.aborted) {
           this.clearWaiting();
-          this.completed.push(event.content);
+          if (event.content.trim()) this.completed.push(event.content);
           this.segment = '';
           this.options.onOutput?.(this.text);
         }

@@ -1,8 +1,9 @@
 /**
  * 工作流頁面：流程圖 + 節點詳情抽屜 + 開始／停止（multi-agent-workflow spec）。
+ * 支援同一工作流同時啟動多個執行實例（Run），頂部可切換不同實例並獨立確認／停止。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, CircleDashed, History, Loader2, MessageSquare, PauseCircle, UserCheck, Play, ShieldQuestion, SkipForward, Square, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, CircleDashed, History, Loader2, MessageSquare, PauseCircle, Plus, RotateCcw, UserCheck, Play, ShieldQuestion, SkipForward, Square, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -24,6 +25,7 @@ import WorkflowGraph from './WorkflowGraph';
 
 const NODE_W = 220;
 const NODE_H = 92;
+const MAX_CONCURRENT_RUNS = 5;
 
 const STATE_STYLE: Record<NodeRunState, { icon: typeof Check; className: string; bar: string }> = {
   pending: { icon: CircleDashed, className: 'text-muted-foreground', bar: 'bg-muted-foreground/30' },
@@ -36,34 +38,54 @@ const STATE_STYLE: Record<NodeRunState, { icon: typeof Check; className: string;
   skipped: { icon: SkipForward, className: 'text-muted-foreground', bar: 'bg-muted-foreground/30' },
 };
 
+function isRunWaitingHuman(run: WorkflowRun): boolean {
+  return Object.values(run.nodeStates).some(
+    (s) => s.state === 'waiting_confirmation' || s.state === 'waiting_approval' || s.state === 'waiting_input',
+  );
+}
+
 type WorkflowViewProps = {
   agent: MultiAgent;
   onAgentChange: (agent: MultiAgent) => void;
 };
 
 export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps) {
-  const { t } = useTranslation('multiAgent');
+  const { t, i18n } = useTranslation('multiAgent');
   const models = useProviderModels();
-  const { run: latestRun, isRunning, start, stop, confirm, finishNode, error, clearError } = useWorkflowRun(agent.id);
-  /** 查看歷史執行時的快照；null 表示看最近一次 */
-  const [historyRun, setHistoryRun] = useState<WorkflowRun | null>(null);
-  const run = historyRun ?? latestRun;
-  const viewingHistory = Boolean(historyRun);
+  const {
+    run,
+    runs,
+    activeRuns,
+    selectedRunId,
+    selectRun,
+    isRunning,
+    hasAnyRunning,
+    start,
+    stop,
+    confirm,
+    continueNode,
+    finishNode,
+    error,
+    clearError,
+  } = useWorkflowRun(agent.id);
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
-  // 執行中或看歷史時以 run 快照顯示，否則用目前定義
-  const def = ((isRunning || viewingHistory) && run ? run.definition : agent.definition) as WorkflowDef;
+  const viewingOlderRun = Boolean(run && runs[0] && run.id !== runs[0].id && !isRunning);
+  // 執行中或查看舊實例時以 run 快照顯示，否則用目前定義
+  const def = ((isRunning || viewingOlderRun) && run ? run.definition : agent.definition) as WorkflowDef;
   const states = run?.nodeStates ?? {};
   const selected = def.nodes.find((n) => n.id === selectedId) ?? null;
   const nodeModelText = (node: WorkflowNode) => (isApprovalNode(node)
     ? t('workflow.approvalNode')
     : modelLabel(models, node.provider!, node.model!));
 
-  // 執行到人工確認節點時自動打開它的詳情，方便直接核准
-  const waitingId = viewingHistory ? null
-    : Object.entries(states).find(([, s]) => s.state === 'waiting_confirmation' || s.state === 'waiting_approval' || s.state === 'waiting_input')?.[0] ?? null;
-  useEffect(() => { if (waitingId) setSelectedId(waitingId); }, [waitingId]);
+  // 當前檢視的實例執行到人工確認／等待審批／等待指示節點時，自動打開它的詳情
+  const waitingId = Object.entries(states).find(
+    ([, s]) => s.state === 'waiting_confirmation' || s.state === 'waiting_approval' || s.state === 'waiting_input',
+  )?.[0] ?? null;
+  useEffect(() => { if (waitingId) setSelectedId(waitingId); }, [waitingId, run?.id]);
 
   const saveNode = useCallback(async (next: WorkflowNode) => {
     const current = agent.definition as WorkflowDef;
@@ -77,43 +99,116 @@ export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps
 
   const statusLabel = run ? t(`workflow.${run.status === 'stopping' ? 'running' : run.status}`) : t('workflow.idle');
 
+  // 頂部標籤列：顯示所有執行中的實例 + 當前選中的實例（若已結束）
+  const pillRuns = useMemo(() => {
+    const list = [...activeRuns];
+    if (run && !list.some((r) => r.id === run.id)) {
+      list.unshift(run);
+    }
+    return list;
+  }, [activeRuns, run]);
+
+  const formatShortTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' });
+
   return (
     <div className="flex h-full min-h-0">
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className={cn('h-2 w-2 rounded-full', isRunning ? 'animate-pulse bg-primary'
-              : run?.status === 'succeeded' ? 'bg-emerald-500'
-                : run && run.status !== 'running' ? 'bg-destructive' : 'bg-muted-foreground/40')} />
-            {statusLabel}
-            {run?.startInput && (
-              <span className="max-w-xs truncate rounded-md bg-muted px-2 py-0.5" title={run.startInput}>{run.startInput}</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+            {pillRuns.length <= 1 ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className={cn(
+                  'h-2 w-2 flex-shrink-0 rounded-full',
+                  run && isRunWaitingHuman(run)
+                    ? 'animate-pulse bg-amber-500'
+                    : isRunning
+                      ? 'animate-pulse bg-primary'
+                      : run?.status === 'succeeded'
+                        ? 'bg-emerald-500'
+                        : run && run.status !== 'running'
+                          ? 'bg-destructive'
+                          : 'bg-muted-foreground/40',
+                )} />
+                <span>{statusLabel}</span>
+                {run?.startInput && (
+                  <span className="max-w-xs truncate rounded-md bg-muted px-2 py-0.5 text-foreground/85" title={run.startInput}>
+                    {run.startInput}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                {pillRuns.map((item) => {
+                  const selectedPill = item.id === run?.id;
+                  const itemRunning = item.status === 'running' || item.status === 'stopping';
+                  const waitingHuman = isRunWaitingHuman(item);
+                  const label = item.startInput?.trim() || formatShortTime(item.startedAt);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => { selectRun(item.id); setSelectedId(null); }}
+                      title={item.startInput || formatShortTime(item.startedAt)}
+                      className={cn(
+                        'flex max-w-[180px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
+                        selectedPill
+                          ? 'border-primary/50 bg-primary/10 text-foreground'
+                          : 'border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground',
+                      )}
+                    >
+                      <span className={cn(
+                        'h-2 w-2 flex-shrink-0 rounded-full',
+                        waitingHuman
+                          ? 'animate-pulse bg-amber-500'
+                          : itemRunning
+                            ? 'animate-pulse bg-primary'
+                            : item.status === 'succeeded'
+                              ? 'bg-emerald-500'
+                              : 'bg-destructive',
+                      )} />
+                      <span className="truncate">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
-          <div className="flex items-center gap-2">
-          <RunHistory
-            multiAgentId={agent.id}
-            currentId={historyRun?.id ?? null}
-            onSelect={(picked) => { setHistoryRun(picked); setSelectedId(null); }}
-          />
-          {isRunning ? (
+
+          <div className="flex flex-shrink-0 items-center gap-2">
+            <RunHistory
+              runs={runs}
+              currentId={selectedRunId}
+              onSelect={(pickedId) => { selectRun(pickedId); setSelectedId(null); }}
+            />
+            {isRunning && (
+              <button
+                type="button"
+                onClick={() => void stop()}
+                disabled={run?.status === 'stopping'}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+              >
+                <Square className="h-3 w-3 fill-current" />{t('workflow.stop')}
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => void stop()}
-              disabled={run?.status === 'stopping'}
-              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+              disabled={activeRuns.length >= MAX_CONCURRENT_RUNS}
+              onClick={() => setConfirming(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
-              <Square className="h-3 w-3 fill-current" />{t('workflow.stop')}
+              {hasAnyRunning ? (
+                <>
+                  <Plus className="h-3.5 w-3.5" />
+                  {t('workflow.startAnother', { defaultValue: '新执行' })}
+                </>
+              ) : (
+                <>
+                  <Play className="h-3 w-3 fill-current" />
+                  {t('workflow.start')}
+                </>
+              )}
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => { setHistoryRun(null); setConfirming(true); }}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              <Play className="h-3 w-3 fill-current" />{t('workflow.start')}
-            </button>
-          )}
           </div>
         </div>
 
@@ -146,14 +241,15 @@ export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps
 
       {selected && (
         <NodeDetailPanel
-          key={selected.id}
+          key={`${run?.id ?? 'def'}:${selected.id}`}
           node={selected}
           status={run ? states[selected.id] : undefined}
           upstream={states}
           def={def}
-          readonly={isRunning || viewingHistory}
-          canConfirm={!viewingHistory}
-          onConfirm={(approved, note) => confirm(selected.id, approved, note)}
+          readonly={hasAnyRunning || viewingOlderRun}
+          canConfirm={Boolean(run)}
+          onConfirm={(approved, note, rework) => confirm(selected.id, approved, note, rework)}
+          onContinue={() => continueNode(selected.id)}
           onFinish={(outcome) => finishNode(selected.id, outcome)}
           models={models}
           onSave={saveNode}
@@ -225,7 +321,7 @@ function NodeCard({ node, status, modelText, selected, onClick }: {
   );
 }
 
-function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, onConfirm, onFinish, models, onSave, onClose }: {
+function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, onConfirm, onContinue, onFinish, models, onSave, onClose }: {
   node: WorkflowNode;
   status?: NodeRunStatus;
   /** 人工確認時要審閱的上游輸出 */
@@ -233,7 +329,8 @@ function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, on
   def: WorkflowDef;
   readonly: boolean;
   canConfirm: boolean;
-  onConfirm: (approved: boolean, note: string) => Promise<void>;
+  onConfirm: (approved: boolean, note: string, rework?: boolean) => Promise<void>;
+  onContinue: () => Promise<void>;
   onFinish: (outcome: 'complete' | 'fail') => Promise<void>;
   models: ReturnType<typeof useProviderModels>;
   onSave: (node: WorkflowNode) => Promise<void>;
@@ -252,6 +349,9 @@ function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, on
   const waitingConfirmation = canConfirm && status?.state === 'waiting_confirmation';
   const waitingInput = canConfirm && status?.state === 'waiting_input';
   const viewingHistoryPanel = !canConfirm;
+  const hasDownstream = def.nodes.some((n) => n.dependsOn.includes(node.id));
+  const canContinueDownstream = !viewingHistoryPanel && !approval && hasDownstream && Boolean(status?.sessionId)
+    && (status?.state === 'succeeded' || status?.state === 'failed');
   const upstreamOutputs = node.dependsOn.map((id) => ({
     id,
     title: def.nodes.find((n) => n.id === id)?.title ?? id,
@@ -259,9 +359,13 @@ function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, on
   }));
   const [note, setNote] = useState('');
   const [confirmingAction, setConfirmingAction] = useState(false);
-  const decide = async (approved: boolean) => {
+  const decide = async (approved: boolean, rework = false) => {
     setConfirmingAction(true);
-    try { await onConfirm(approved, note); } finally { setConfirmingAction(false); }
+    try { await onConfirm(approved, note, rework); } finally { setConfirmingAction(false); }
+  };
+  const continueDownstream = async () => {
+    setConfirmingAction(true);
+    try { await onContinue(); } finally { setConfirmingAction(false); }
   };
   const finish = async (outcome: 'complete' | 'fail') => {
     setConfirmingAction(true);
@@ -293,13 +397,26 @@ function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, on
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {readonly && !waitingConfirmation && <p className="rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">{t('workflow.node.readonly')}</p>}
         {status?.sessionId && !approval && (
-          <button
-            type="button"
-            onClick={() => navigate(`/session/${encodeURIComponent(status.sessionId!)}`)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            <MessageSquare className="h-3.5 w-3.5" />{t('workflow.node.openChat')}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => navigate(`/session/${encodeURIComponent(status.sessionId!)}`)}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />{t('workflow.node.openChat')}
+            </button>
+            {canContinueDownstream && (
+              <button
+                type="button"
+                disabled={confirmingAction}
+                onClick={() => void continueDownstream()}
+                title={t('workflow.node.continueHint')}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/15 disabled:opacity-50"
+              >
+                <Play className="h-3 w-3 fill-current" />{t('workflow.node.continueDownstream')}
+              </button>
+            )}
+          </div>
         )}
         {status?.sessionId && !viewingHistoryPanel && <NodeToolApprovals sessionId={status.sessionId} />}
         {waitingInput && (
@@ -349,19 +466,30 @@ function NodeDetailPanel({ node, status, upstream, def, readonly, canConfirm, on
               placeholder={t('workflow.approval.notePlaceholder')}
               className="w-full resize-y rounded-lg border border-border/70 bg-background px-3 py-2 text-sm leading-relaxed focus:border-primary/50 focus:outline-none"
             />
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
                 disabled={confirmingAction}
-                onClick={() => void decide(false)}
+                onClick={() => void decide(false, false)}
                 className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-50"
               >
                 {t('workflow.approval.reject')}
               </button>
+              {node.dependsOn.length > 0 && (
+                <button
+                  type="button"
+                  disabled={confirmingAction || !note.trim()}
+                  onClick={() => void decide(false, true)}
+                  title={t('workflow.approval.reworkHint')}
+                  className="flex items-center gap-1 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-500/20 disabled:opacity-50 dark:text-amber-300"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />{t('workflow.approval.rework')}
+                </button>
+              )}
               <button
                 type="button"
                 disabled={confirmingAction}
-                onClick={() => void decide(true)}
+                onClick={() => void decide(true, false)}
                 className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 <Check className="h-3.5 w-3.5" />{t('workflow.approval.approve')}
@@ -527,19 +655,13 @@ function StartConfirm({ def, hasParallel, workspacePath, modelText, onCancel, on
   );
 }
 
-function RunHistory({ multiAgentId, currentId, onSelect }: {
-  multiAgentId: string;
+function RunHistory({ runs, currentId, onSelect }: {
+  runs: WorkflowRun[];
   currentId: string | null;
-  onSelect: (run: WorkflowRun | null) => void;
+  onSelect: (runId: string) => void;
 }) {
   const { t, i18n } = useTranslation('multiAgent');
   const [open, setOpen] = useState(false);
-  const [runs, setRuns] = useState<WorkflowRun[]>([]);
-
-  useEffect(() => {
-    if (!open) return;
-    readData<WorkflowRun[]>(api.multiAgent.listRuns(multiAgentId)).then(setRuns).catch(() => setRuns([]));
-  }, [open, multiAgentId]);
 
   const format = (iso: string) => new Date(iso).toLocaleString(i18n.language, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -548,35 +670,47 @@ function RunHistory({ multiAgentId, currentId, onSelect }: {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={cn('flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs transition-colors hover:bg-accent',
-          currentId ? 'bg-accent text-foreground' : 'text-muted-foreground')}
+        className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         <History className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">{t('workflow.history')}</span>
         <ChevronDown className="h-3 w-3" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-xl border border-border/60 bg-popover p-1 shadow-lg" onMouseLeave={() => setOpen(false)}>
-          <button
-            type="button"
-            onClick={() => { onSelect(null); setOpen(false); }}
-            className={cn('flex w-full items-center rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent', !currentId && 'font-medium text-foreground')}
-          >
-            {t('workflow.latest')}
-          </button>
-          {runs.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => { onSelect(item); setOpen(false); }}
-              className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent', currentId === item.id && 'bg-accent/60')}
-            >
-              <span className={cn('h-1.5 w-1.5 flex-shrink-0 rounded-full',
-                item.status === 'succeeded' ? 'bg-emerald-500' : item.status === 'running' || item.status === 'stopping' ? 'bg-primary' : 'bg-destructive')} />
-              <span className="flex-1 text-foreground">{format(item.startedAt)}</span>
-              <span className="text-muted-foreground">{t(`workflow.${item.status === 'stopping' ? 'running' : item.status}`)}</span>
-            </button>
-          ))}
+        <div className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-y-auto rounded-xl border border-border/60 bg-popover p-1 shadow-lg" onMouseLeave={() => setOpen(false)}>
+          {runs.length === 0 && (
+            <div className="px-2 py-2 text-center text-xs text-muted-foreground">
+              {t('workflow.idle')}
+            </div>
+          )}
+          {runs.map((item) => {
+            const waitingHuman = isRunWaitingHuman(item);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => { onSelect(item.id); setOpen(false); }}
+                className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent', currentId === item.id && 'bg-accent/60 font-medium')}
+              >
+                <span className={cn(
+                  'h-1.5 w-1.5 flex-shrink-0 rounded-full',
+                  waitingHuman
+                    ? 'animate-pulse bg-amber-500'
+                    : item.status === 'succeeded'
+                      ? 'bg-emerald-500'
+                      : item.status === 'running' || item.status === 'stopping'
+                        ? 'animate-pulse bg-primary'
+                        : 'bg-destructive',
+                )} />
+                <span className="min-w-0 flex-1 truncate text-foreground">
+                  {item.startInput ? `${item.startInput} · ${format(item.startedAt)}` : format(item.startedAt)}
+                </span>
+                <span className="flex-shrink-0 text-muted-foreground">
+                  {t(`workflow.${item.status === 'stopping' ? 'running' : item.status}`)}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

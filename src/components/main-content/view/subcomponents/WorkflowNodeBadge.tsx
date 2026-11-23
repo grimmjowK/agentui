@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { api } from '../../../../utils/api';
 
-type WorkflowInfo = { multiAgentId: string; nodeTitle: string | null };
+type WorkflowInfo = { multiAgentId: string; runId?: string; nodeTitle: string | null };
 
 export default function WorkflowNodeBadge({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation('multiAgent');
@@ -28,10 +28,13 @@ export default function WorkflowNodeBadge({ sessionId }: { sessionId: string }) 
   }, [sessionId]);
 
   if (!info) return null;
+  const targetUrl = info.runId
+    ? `/multi-agent/${encodeURIComponent(info.multiAgentId)}?runId=${encodeURIComponent(info.runId)}`
+    : `/multi-agent/${encodeURIComponent(info.multiAgentId)}`;
   return (
     <button
       type="button"
-      onClick={() => navigate(`/multi-agent/${encodeURIComponent(info.multiAgentId)}`)}
+      onClick={() => navigate(targetUrl)}
       title={t('session.back')}
       className="flex min-w-0 items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary hover:bg-primary/15"
     >

@@ -16,7 +16,17 @@ export type LiveWorkflowSession = {
   resume(text: string, clientId: string): boolean;
 };
 
+export type WorkflowContinueResult = 'not_workflow' | 'continued' | 'busy';
+
+type ContinueHandler = (
+  sessionId: string,
+  userId: string | number | null,
+  text: string,
+  clientId: string,
+) => Promise<WorkflowContinueResult> | WorkflowContinueResult;
+
 const live = new Map<string, LiveWorkflowSession>();
+let continueHandler: ContinueHandler | null = null;
 
 export const workflowSessions = {
   register(sessionId: string, entry: LiveWorkflowSession): void {
@@ -27,5 +37,18 @@ export const workflowSessions = {
   },
   get(sessionId: string | null | undefined): LiveWorkflowSession | null {
     return (sessionId && live.get(sessionId)) || null;
+  },
+  /** 由 WorkflowRunner 註冊：當使用者在已完成／失敗的節點對話頁發送新訊息時，自動續接該節點並往後流轉下游 */
+  onContinue(handler: ContinueHandler): void {
+    continueHandler = handler;
+  },
+  async continueSession(
+    sessionId: string | null | undefined,
+    userId: string | number | null,
+    text: string,
+    clientId: string,
+  ): Promise<WorkflowContinueResult> {
+    if (!sessionId || !continueHandler) return 'not_workflow';
+    return continueHandler(sessionId, userId, text, clientId);
   },
 };

@@ -227,14 +227,14 @@ export const multiAgentsDb = {
 
   // ----------------- 工作流執行 -----------------
 
-  /** 建立 run 並保存定義快照；已有 running/stopping run 時回傳 null */
+  /** 建立 run 並保存定義快照；單一工作流同時最多允許 5 個並行執行實例 */
   createRun(agent: MultiAgent, nodeStates: Record<string, NodeRunStatus>, startInput: string | null = null): WorkflowRun | null {
     const db = getConnection();
     return db.transaction(() => {
-      const active = db.prepare(
-        "SELECT 1 FROM multi_agent_runs WHERE multi_agent_id = ? AND status IN ('running', 'stopping')",
-      ).get(agent.id);
-      if (active) return null;
+      const { count } = db.prepare(
+        "SELECT COUNT(*) AS count FROM multi_agent_runs WHERE multi_agent_id = ? AND status IN ('running', 'stopping')",
+      ).get(agent.id) as { count: number };
+      if (count >= 5) return null;
       const id = crypto.randomUUID();
       db.prepare(`INSERT INTO multi_agent_runs
                   (id, multi_agent_id, status, definition_version, definition_snapshot_json, node_states_json, start_input, started_at)
@@ -250,6 +250,7 @@ export const multiAgentsDb = {
     if (patch.status) { sets.push('status = ?'); args.push(patch.status); }
     if (patch.nodeStates) { sets.push('node_states_json = ?'); args.push(JSON.stringify(patch.nodeStates)); }
     if (patch.finished) { sets.push('finished_at = ?'); args.push(now()); }
+    else if (patch.status === 'running') { sets.push('finished_at = NULL'); }
     if (!sets.length) return;
     getConnection().prepare(`UPDATE multi_agent_runs SET ${sets.join(', ')} WHERE id = ?`).run(...args, runId);
   },

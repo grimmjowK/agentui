@@ -193,6 +193,18 @@ export function handleChatConnection(
           }
           return;
         }
+        // 已完成／失敗的工作流節點會話：使用者在對話頁追問時，交由執行器續接並自動往後流轉下游（如確認節點）
+        if (requestedSessionId) {
+          const cwd = typeof data.options?.cwd === 'string' ? data.options.cwd : null;
+          const command = await expandSessionMentions(data.command ?? '', cwd);
+          const continued = await workflowSessions.continueSession(requestedSessionId, writer.userId, command, clientId);
+          if (continued === 'continued') return;
+          if (continued === 'busy') {
+            sendToClient(writer, createNormalizedMessage({ kind: 'task_notification', provider: id,
+              sessionId: requestedSessionId, status: 'warning', summary: 'Workflow is currently busy running another step.' }));
+            return;
+          }
+        }
         const loggingWriter = new LoggingWriter(writer, {
           initialSessionId: requestedSessionId,
           userId: writer.userId,

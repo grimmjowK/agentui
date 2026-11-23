@@ -46,6 +46,7 @@
   },
   "workflow": {
     "start": "开始",
+    "startAnother": "新执行",
     "stop": "停止",
     "running": "执行中",
     "succeeded": "已完成",
@@ -81,13 +82,17 @@
       "saved": "已保存",
       "error": "错误",
       "dependsOn": "依赖",
-      "openChat": "打开对话"
+      "openChat": "打开对话",
+      "continueDownstream": "继续流转下游",
+      "continueHint": "同步此节点会话中的最新 AI 回复，并继续向后执行下游步骤"
     },
     "approvalNode": "人工确认",
     "approval": {
       "waiting": "等待你确认",
-      "notePlaceholder": "可选：给后续步骤的备注，例如只 apply 哪些工单、需要调整什么",
+      "notePlaceholder": "填写给后续步骤的备注；若需退回上一步修改，请在此填写修改意见后点击「退回重做」",
       "approve": "确认并继续",
+      "rework": "退回重做",
+      "reworkHint": "将上方备注发回上一步继续对话修正，完成后再次回到此确认节点",
       "reject": "驳回",
       "instruction": "确认内容"
     },

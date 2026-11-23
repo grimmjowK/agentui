@@ -125,10 +125,15 @@ export const api = {
         `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/finish`,
         { method: 'POST', body: JSON.stringify({ outcome }) },
       ),
-    confirmNode: (id, runId, nodeId, approved, note) =>
+    confirmNode: (id, runId, nodeId, approved, note, rework = false) =>
       authenticatedFetch(
         `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/confirm`,
-        { method: 'POST', body: JSON.stringify({ approved, note }) },
+        { method: 'POST', body: JSON.stringify({ approved, note, rework }) },
+      ),
+    continueNode: (id, runId, nodeId) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/continue`,
+        { method: 'POST' },
       ),
     stopRun: (id, runId) =>
       authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' }),

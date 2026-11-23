@@ -171,7 +171,7 @@ router.post('/:id/runs', asyncHandler(async (req: Request, res: Response) => {
   await assertValid('workflow', agent.definition);
   const input = typeof req.body?.input === 'string' ? req.body.input.slice(0, 20_000) : '';
   const started = workflowRunner.start(agent, input);
-  if (!started) throw new AppError('Workflow is already running', { statusCode: 409, code: 'BUSY' });
+  if (!started) throw new AppError('Too many concurrent workflow runs (max 5)', { statusCode: 409, code: 'BUSY' });
   res.status(201).json(createApiSuccessResponse(started.run));
 }));
 
@@ -192,15 +192,27 @@ router.get('/:id/runs/:runId', asyncHandler(async (req: Request, res: Response) 
   res.json(createApiSuccessResponse(run));
 }));
 
-/** 人工確認節點：{ approved, note } */
+/** 人工確認節點：{ approved, rework?, note } */
 router.post('/:id/runs/:runId/nodes/:nodeId/confirm', asyncHandler(async (req: Request, res: Response) => {
   const agent = requireAgent(req);
   const run = multiAgentsDb.getRun(agent.id, String(req.params.runId));
   if (!run) throw new AppError('Run not found', { statusCode: 404, code: 'NOT_FOUND' });
-  if (typeof req.body?.approved !== 'boolean') throw badRequest('approved must be boolean');
+  const rework = req.body?.rework === true;
+  if (!rework && typeof req.body?.approved !== 'boolean') throw badRequest('approved must be boolean');
   const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 20_000) : '';
-  const ok = workflowRunner.confirm(run.id, String(req.params.nodeId), req.body.approved, note);
+  const decision = rework ? 'rework' : req.body.approved ? 'approve' : 'reject';
+  const ok = workflowRunner.confirm(run.id, String(req.params.nodeId), decision, note);
   if (!ok) throw new AppError('Node is not waiting for confirmation', { statusCode: 409, code: 'NOT_WAITING' });
+  res.json(createApiSuccessResponse({ ok }));
+}));
+
+/** 同步該節點會話中最新 AI 回覆並繼續往後流轉下游（含人工確認節點） */
+router.post('/:id/runs/:runId/nodes/:nodeId/continue', asyncHandler(async (req: Request, res: Response) => {
+  const agent = requireAgent(req);
+  const run = multiAgentsDb.getRun(agent.id, String(req.params.runId));
+  if (!run) throw new AppError('Run not found', { statusCode: 404, code: 'NOT_FOUND' });
+  const ok = workflowRunner.continueDownstream(agent.id, run.id, String(req.params.nodeId));
+  if (!ok) throw new AppError('Cannot continue workflow from this node', { statusCode: 409, code: 'CANNOT_CONTINUE' });
   res.json(createApiSuccessResponse({ ok }));
 }));
 
