@@ -242,7 +242,11 @@ export function useChatRealtimeHandlers({
             pendingViewSessionRef.current.sessionId = newSessionId;
           }
           setCurrentSessionId(newSessionId);
-          onNavigateToSession?.(newSessionId);
+          const createdProvider: LLMProvider =
+            msg.provider === 'cursor' || msg.provider === 'codex' || msg.provider === 'antigravity' || msg.provider === 'claude'
+              ? msg.provider
+              : provider;
+          onNavigateToSession?.(newSessionId, { provider: createdProvider });
         }
         break;
       }

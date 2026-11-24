@@ -119,6 +119,7 @@ export interface Question {
 
 export type SessionNavigationOptions = {
   replace?: boolean;
+  provider?: LLMProvider;
 };
 
 export interface ChatInterfaceProps {

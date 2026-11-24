@@ -123,6 +123,7 @@ class ActiveRun {
   /** 退回重做或對話頁追問時，指定某節點下一輪要續接的提示詞 */
   readonly followUps = new Map<string, { prompt: string; clientId?: string }>();
   stopping = false;
+  done: Promise<void> = Promise.resolve();
   private wakeResolve: (() => void) | null = null;
   constructor(readonly run: WorkflowRun, readonly agent: MultiAgent & { userId: number }) {}
 
@@ -161,6 +162,7 @@ export class WorkflowRunner {
     this.active.set(run.id, active);
     this.emitRun(active);
     const done = this.execute(active).finally(() => this.active.delete(run.id));
+    active.done = done;
     return { run, done };
   }
 
@@ -192,7 +194,9 @@ export class WorkflowRunner {
   }
 
   async stopByAgent(multiAgentId: string): Promise<void> {
-    await Promise.all([...this.active.values()].filter((a) => a.agent.id === multiAgentId).map((a) => this.stop(a.run.id)));
+    const targets = [...this.active.values()].filter((a) => a.agent.id === multiAgentId);
+    await Promise.all(targets.map((a) => this.stop(a.run.id)));
+    await Promise.all(targets.map((a) => a.done));
   }
 
   private async execute(active: ActiveRun): Promise<void> {
@@ -265,6 +269,7 @@ export class WorkflowRunner {
       },
       onOutput: (text) => { state.output = text; },
       onSessionId: (sessionId) => {
+        if (active.stopping) return;
         // 先登記再讓事件繼續：同步器第一次索引這個會話時它已在側邊欄排除名單
         multiAgentsDb.addWorkflowSession({ sessionId, multiAgentId: agent.id, runId: run.id, nodeId: node.id, userId: agent.userId });
         if (state.sessionId && state.sessionId !== sessionId) workflowSessions.unregister(state.sessionId, live);
@@ -436,8 +441,9 @@ export class WorkflowRunner {
     if (active) {
       if (active.stopping) return 'busy';
       const downstream = collectDownstream(active.run.definition, [entry.nodeId]);
+      // 不可重設仍由 runNode 持有的狀態（也包含 waiting_input）
       for (const id of downstream) {
-        if (active.calls.has(id) && !active.inputs.has(id)) return 'busy';
+        if (active.calls.has(id)) return 'busy';
       }
       for (const id of downstream) {
         active.confirmations.get(id)?.('reset', '');
@@ -467,7 +473,7 @@ export class WorkflowRunner {
     this.active.set(run.id, reopened);
     this.persist(reopened);
     this.emitRun(reopened);
-    void this.execute(reopened).finally(() => this.active.delete(run.id));
+    reopened.done = this.execute(reopened).finally(() => this.active.delete(run.id));
     return 'continued';
   }
 
@@ -480,15 +486,15 @@ export class WorkflowRunner {
       if (active.agent.id !== multiAgentId || active.stopping || active.calls.has(nodeId)) return false;
       const state = active.run.nodeStates[nodeId];
       if (!state) return false;
+      const downstream = collectDownstream(active.run.definition, [nodeId]);
+      downstream.delete(nodeId);
+      for (const id of downstream) {
+        if (active.calls.has(id)) return false;
+      }
       syncLatestAssistantOutput(state);
       state.state = 'succeeded';
       state.progress = 100;
       delete state.error;
-      const downstream = collectDownstream(active.run.definition, [nodeId]);
-      downstream.delete(nodeId);
-      for (const id of downstream) {
-        if (active.calls.has(id) && !active.inputs.has(id)) return false;
-      }
       for (const id of downstream) active.confirmations.get(id)?.('reset', '');
       resetNodesForRerun(active.run, downstream);
       this.persist(active);
@@ -520,7 +526,7 @@ export class WorkflowRunner {
     this.active.set(run.id, reopened);
     this.persist(reopened);
     this.emitRun(reopened);
-    void this.execute(reopened).finally(() => this.active.delete(run.id));
+    reopened.done = this.execute(reopened).finally(() => this.active.delete(run.id));
     return true;
   }
 

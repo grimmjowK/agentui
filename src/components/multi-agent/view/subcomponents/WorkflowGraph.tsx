@@ -105,6 +105,8 @@ export default function WorkflowGraph({
         el.scrollTop = drag.current.top - (event.clientY - drag.current.y);
       } : undefined}
       onPointerUp={pannable ? () => { drag.current = null; setDragging(false); } : undefined}
+      onPointerCancel={pannable ? () => { drag.current = null; setDragging(false); } : undefined}
+      onLostPointerCapture={pannable ? () => { drag.current = null; setDragging(false); } : undefined}
     >
       <div className="relative" style={{ width: layout.width, height: layout.height, marginLeft: center.x, marginTop: center.y }}>
         <svg className="pointer-events-none absolute inset-0" width={layout.width} height={layout.height} aria-hidden>

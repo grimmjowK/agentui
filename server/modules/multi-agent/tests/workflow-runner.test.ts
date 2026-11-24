@@ -386,3 +386,58 @@ test('受影響分支仍在執行或等待輸入時拒絕退回重做', async ()
     await started.done;
   });
 });
+
+test('stopByAgent 等待背景任務真正結束，且停止後延遲到達的 sessionId 不再寫入 workflow_sessions', async () => {
+  await withDb(async () => {
+    let releaseAbort: (() => void) | null = null;
+    let delayedWriter: { setSessionId?: (id: string) => void; send: (d: unknown) => void } | null = null;
+    const mock = createMockRuntime(async ({ writer }) => {
+      delayedWriter = writer;
+      await new Promise<void>((resolve) => { releaseAbort = resolve; });
+      writer.setSessionId?.('late-session');
+      writer.send({ kind: 'complete', aborted: true, sessionId: 'late-session' });
+    });
+    const runner = new WorkflowRunner({ resolveRuntime: () => mock.runtime, publish: () => {} });
+    const created = multiAgentsDb.create(1, { kind: 'workflow', name: 'wf', workspacePath: '/tmp' });
+    const agent = { ...multiAgentsDb.setDefinition(1, created.id, { nodes: [node('a')] })!, userId: 1 };
+
+    runner.start(agent)!;
+    await waitFor(() => Boolean(delayedWriter));
+
+    let stopSettled = false;
+    const stopPromise = runner.stopByAgent(agent.id).then(() => { stopSettled = true; });
+    await tick(15);
+    assert.equal(stopSettled, false, '底層節點尚未結束前 stopByAgent 不可提前返回');
+
+    releaseAbort!();
+    await stopPromise;
+    multiAgentsDb.delete(1, agent.id);
+    assert.equal(multiAgentsDb.getWorkflowSession('late-session'), null, '已停止／刪除的工作流不得殘留孤兒會話');
+  });
+});
+
+test('下游節點處於 waiting_input 時拒絕上游追問與 continueDownstream，且不污染上游狀態', async () => {
+  await withDb(async () => {
+    const { runner, agent, mock } = setup(
+      { nodes: [node('a'), node('b', ['a'])] },
+      async (ctx) => say(ctx.prompt.includes('do a') ? 'A1' : 'B1', ctx.prompt.includes('do b') ? 5000 : 0)(ctx),
+    );
+    const started = runner.start(agent)!;
+    await waitFor(() => Boolean(workflowSessions.get('s2')));
+    await interruptFromChat(mock, 's2');
+    await waitFor(() => started.run.nodeStates.b.state === 'waiting_input');
+
+    // 手動把上游設為 failed 以驗證 continueDownstream 失敗時不會提前把 state 改為 succeeded
+    started.run.nodeStates.a.state = 'failed';
+    started.run.nodeStates.a.error = 'manual';
+
+    const contRes = await workflowSessions.continueSession('s1', 1, '補充一點', 'c-follow');
+    assert.equal(contRes, 'busy', '下游仍在 waiting_input 時上游對話追問應回 busy');
+
+    assert.equal(runner.continueDownstream(agent.id, started.run.id, 'a'), false, '下游 waiting_input 時拒絕繼續流轉');
+    assert.equal(started.run.nodeStates.a.state, 'failed', '前置檢查未通過時不可污染節點狀態');
+
+    await runner.stop(started.run.id);
+    await started.done;
+  });
+});

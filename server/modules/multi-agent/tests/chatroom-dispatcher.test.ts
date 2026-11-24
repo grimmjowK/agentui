@@ -202,3 +202,38 @@ test('刪除前停止並等待，不派發排隊訊息', async () => {
     assert.deepEqual(multiAgentsDb.listMessages(id), []);
   });
 });
+
+test('群規文字被清空時提示「群規已清除」', () => {
+  const def: ChatroomDef = { members: [member('pm', '產品經理')], rules: { ...defaultChatRules(1), text: '' } };
+  const seen = { name: '產品經理', persona: '產品經理 persona', rulesText: '只能用英文', maxReplyChars: 800, allowAiMentions: false };
+  const session = { provider: 'claude' as const, model: 'sonnet', sessionId: 'x', lastDeliveredSeq: 0, seen };
+  assert.deepEqual(settingNotes(session, def.members[0], def), ['群規已清除']);
+});
+
+test('標記刪除中時拒絕新訊息，且回合中移除成員後發言結束不會把已刪除成員寫回 member_sessions', async () => {
+  await withDb(async () => {
+    let finishSpeak: (() => void) | null = null;
+    const { dispatcher, agent, id } = setup(twoMembers(), async ({ writer, sessionId }) => {
+      await new Promise<void>((resolve) => { finishSpeak = resolve; });
+      writer.send({ kind: 'text', role: 'assistant', content: 'done', sessionId });
+      writer.send({ kind: 'complete', exitCode: 0, sessionId });
+    });
+
+    dispatcher.send(agent(), '@審稿人 請看');
+    await tick(15);
+
+    // 回合進行中從定義裡移除「審稿人 (rv)」
+    const nextDef: ChatroomDef = { members: [member('pm', '產品經理')], rules: defaultChatRules(1) };
+    multiAgentsDb.setDefinition(1, id, nextDef);
+    dispatcher.pruneMemberSessions(id, nextDef);
+
+    finishSpeak!();
+    await dispatcher.idle(id);
+    assert.equal(multiAgentsDb.getMemberSessions(id).rv, undefined, '已從定義移除的成員不可殘留 session');
+
+    dispatcher.markDeleting(id);
+    assert.equal(dispatcher.isDeleting(id), true);
+    assert.throws(() => dispatcher.send(agent(), '@產品經理 再發一則'), /deleting/i);
+    dispatcher.clearDeleting(id);
+  });
+});

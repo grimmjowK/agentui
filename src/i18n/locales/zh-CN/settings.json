@@ -1,5 +1,16 @@
 {
   "title": "设置",
+  "searchPlaceholder": "搜索",
+  "navGroups": {
+    "general": "常规",
+    "coding": "编码",
+    "integrations": "集成"
+  },
+  "about": {
+    "description": "开源 AI 编程助手工作台",
+    "license": "基于 AGPL-3.0 协议开源",
+    "starOnGithub": "在 GitHub 上点亮 Star"
+  },
   "tabs": {
     "account": "账户",
     "permissions": "权限",
@@ -358,6 +369,11 @@
   },
   "permissions": {
     "title": "权限设置",
+    "defaultMode": {
+      "label": "默认权限",
+      "claudeDescription": "默认情况下，Claude 可以读取工作区文件，并在执行命令或写入文件前请求您的批准。",
+      "cursorDescription": "默认情况下，Cursor 在执行未授权的 Shell 命令前会请求确认。"
+    },
     "skipPermissions": {
       "label": "跳过权限提示（请谨慎使用）",
       "claudeDescription": "等同于 --dangerously-skip-permissions 标志",
@@ -472,9 +488,17 @@
     "description": {
       "claude": "Model Context Protocol 服务器为 Claude 提供额外的工具和数据源",
       "cursor": "Model Context Protocol 服务器为 Cursor 提供额外的工具和数据源",
-      "codex": "Model Context Protocol 服务器为 Codex 提供额外的工具和数据源"
+      "codex": "Model Context Protocol 服务器为 Codex 提供额外的工具和数据源",
+      "antigravity": "Model Context Protocol 服务器为 Antigravity 提供额外的工具和数据源"
     },
     "addButton": "添加 MCP 服务器",
+    "addGlobalButton": "全局添加",
+    "addProviderButton": "添加到 {{provider}}",
+    "globalAddDescription": "将同一个 stdio 或 HTTP MCP 服务器同时写入 Claude、Cursor、Codex 与 Antigravity。",
+    "providerAddDescription": "仅为 {{provider}} 添加此 MCP 服务器。",
+    "globalModalDescription": "将此 MCP 服务器同步添加到 Claude、Cursor、Codex 与 Antigravity（仅支持通用的 stdio 与 HTTP 传输协议）。",
+    "syncingProjectScopes": "正在同步项目级配置...",
+    "loading": "正在加载 MCP 服务器...",
     "empty": "未配置 MCP 服务器",
     "serverType": "类型",
     "scope": {
@@ -507,6 +531,7 @@
     "unsupported": "当前 Agent 不支持 Skills。",
     "addButton": "新建 Skill",
     "uploadButton": "上传",
+    "loading": "正在加载技能列表...",
     "empty": "暂无 Skill",
     "emptyHint": "创建新 Skill 或上传 .md/.zip 文件开始使用。",
     "scope": {

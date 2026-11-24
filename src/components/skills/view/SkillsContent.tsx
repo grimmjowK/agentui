@@ -211,7 +211,7 @@ export default function SkillsContent({ selectedProvider, currentProjects }: Ski
           {isLoading && (
             <div className="flex items-center justify-center gap-2 px-5 py-8 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              <span>正在加载技能列表...</span>
+              <span>{t('skills.loading', { defaultValue: 'Loading skills...' })}</span>
             </div>
           )}
 

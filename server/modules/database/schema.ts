@@ -203,6 +203,16 @@ CREATE TABLE IF NOT EXISTS multi_agent_messages (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_multi_agent_messages_seq ON multi_agent_messages(multi_agent_id, seq);
 
+-- 多 Agent 擁有的所有 provider 會話索引（工作流節點、建立器、聊天室成員）：供側邊欄／檢索排除與擁有者檢查
+CREATE TABLE IF NOT EXISTS multi_agent_sessions (
+    session_id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('workflow', 'builder', 'member')),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_sessions_agent ON multi_agent_sessions(multi_agent_id);
+
 -- 工作流節點產生的 provider 會話：側邊欄與檢索排除、聊天頁顯示節點標記（node-live-session D2）
 CREATE TABLE IF NOT EXISTS workflow_sessions (
     session_id TEXT PRIMARY KEY,

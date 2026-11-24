@@ -1,14 +1,14 @@
 /**
  * 工作流執行狀態：支援同一工作流多個並行／歷史 run，依 multi-agent-run 事件按 runId 即時更新。
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWebSocket } from '../../../contexts/WebSocketContext';
 import { api } from '../../../utils/api';
 import type { NodeRunStatus, WorkflowRun } from '../types/types';
 import { readData } from '../utils/fetchJson';
 
-type RunEvent = {
+export type RunEvent = {
   type: 'multi-agent-run';
   multiAgentId: string;
   runId: string;
@@ -17,6 +17,21 @@ type RunEvent = {
   nodeId?: string;
   node?: NodeRunStatus;
 };
+
+/** 純函式更新單筆已知 run；若 runId 不在目前清單中回傳 null，由外部觸發一次 reload。 */
+export function applyWorkflowRunEvent(current: WorkflowRun[], event: RunEvent): WorkflowRun[] | null {
+  const idx = current.findIndex((r) => r.id === event.runId);
+  if (idx === -1) return null;
+  const target = current[idx];
+  const nodeStates = event.nodeStates
+    ? event.nodeStates
+    : event.nodeId && event.node
+      ? { ...target.nodeStates, [event.nodeId]: event.node }
+      : target.nodeStates;
+  const next = [...current];
+  next[idx] = { ...target, status: event.status, nodeStates };
+  return next;
+}
 
 export function useWorkflowRun(multiAgentId: string) {
   const { latestMessage, isConnected } = useWebSocket();
@@ -29,18 +44,30 @@ export function useWorkflowRun(multiAgentId: string) {
     }
   });
   const [error, setError] = useState<string | null>(null);
+  const requestSeqRef = useRef(0);
+  const runsRef = useRef<WorkflowRun[]>(runs);
+  runsRef.current = runs;
+  const reloadingUnknownRef = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
+    const seq = ++requestSeqRef.current;
     try {
       const list = await readData<WorkflowRun[]>(api.multiAgent.listRuns(multiAgentId));
+      if (seq !== requestSeqRef.current) return;
       setRuns(list);
     } catch (err) {
+      if (seq !== requestSeqRef.current) return;
       setError((err as Error).message);
+    } finally {
+      if (seq === requestSeqRef.current) reloadingUnknownRef.current = null;
     }
   }, [multiAgentId]);
 
   // 切換工作流時重置選中 runId（除非 URL 帶了 runId）
   useEffect(() => {
+    requestSeqRef.current += 1;
+    reloadingUnknownRef.current = null;
+    setRuns([]);
     try {
       setSelectedRunId(new URLSearchParams(window.location.search).get('runId'));
     } catch {
@@ -54,23 +81,15 @@ export function useWorkflowRun(multiAgentId: string) {
   useEffect(() => {
     const event = latestMessage as RunEvent | null;
     if (event?.type !== 'multi-agent-run' || event.multiAgentId !== multiAgentId) return;
-    setRuns((current) => {
-      const idx = current.findIndex((r) => r.id === event.runId);
-      if (idx === -1) {
-        // 新的 run（例如其他分頁開始的）：重新拉完整清單
+    if (!runsRef.current.some((r) => r.id === event.runId)) {
+      // 新的 run（例如其他分頁開始的）：不在 state updater 內觸發副作用，並合併同一未知 runId 的重複拉取
+      if (reloadingUnknownRef.current !== event.runId) {
+        reloadingUnknownRef.current = event.runId;
         void reload();
-        return current;
       }
-      const target = current[idx];
-      const nodeStates = event.nodeStates
-        ? event.nodeStates
-        : event.nodeId && event.node
-          ? { ...target.nodeStates, [event.nodeId]: event.node }
-          : target.nodeStates;
-      const next = [...current];
-      next[idx] = { ...target, status: event.status, nodeStates };
-      return next;
-    });
+      return;
+    }
+    setRuns((current) => applyWorkflowRunEvent(current, event) ?? current);
   }, [latestMessage, multiAgentId, reload]);
 
   const run = (selectedRunId ? runs.find((r) => r.id === selectedRunId) : null) ?? runs[0] ?? null;

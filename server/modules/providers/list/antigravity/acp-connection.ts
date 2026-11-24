@@ -40,6 +40,9 @@ export type AcpConnectionHandlers = {
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
 };
 
+export const DEFAULT_MAX_LINE_BYTES = 16 * 1024 * 1024;
+const DEFAULT_SIGKILL_DELAY_MS = 2000;
+
 export class AcpConnection {
   private nextId = 1;
   private readonly pending = new Map<JsonRpcId, Pending>();
@@ -53,6 +56,7 @@ export class AcpConnection {
     private readonly child: Pick<ChildProcessWithoutNullStreams, 'stdin' | 'stdout' | 'stderr' | 'on' | 'kill'>,
     private readonly handlers: AcpConnectionHandlers = {},
     private readonly requestTimeoutMs = 60_000,
+    private readonly maxBufferChars = DEFAULT_MAX_LINE_BYTES,
   ) {
     child.stdout.on('data', (chunk: Buffer) => this.onData(chunk));
     child.stderr.on('data', (chunk: Buffer) => {
@@ -93,18 +97,26 @@ export class AcpConnection {
     if (!this.exited) this.write({ jsonrpc: '2.0', method, params });
   }
 
-  /** 關閉 stdin 讓 agent 自行結束；graceMs 後仍未結束就強制結束。 */
+  /** 關閉 stdin 讓 agent 自行結束；graceMs 後仍未結束就強制結束（SIGTERM → SIGKILL）。 */
   close(graceMs = 2000): void {
     if (this.exited) return;
     try { this.child.stdin.end(); } catch { /* already closed */ }
     const timer = setTimeout(() => {
-      if (!this.exited) this.child.kill('SIGTERM');
+      if (!this.exited) this.kill();
     }, graceMs);
     timer.unref?.();
   }
 
-  kill(): void {
-    if (!this.exited) this.child.kill('SIGTERM');
+  /** 發送 SIGTERM；若 forceMs 後行程仍未觸發 exit，補送 SIGKILL 並強制收斂連線狀態。 */
+  kill(forceMs = DEFAULT_SIGKILL_DELAY_MS): void {
+    if (this.exited) return;
+    try { this.child.kill('SIGTERM'); } catch { /* ignore */ }
+    const timer = setTimeout(() => {
+      if (this.exited) return;
+      try { this.child.kill('SIGKILL'); } catch { /* ignore */ }
+      this.onExit(null, 'SIGKILL');
+    }, forceMs);
+    timer.unref?.();
   }
 
   private write(message: JsonRpcMessage): void {
@@ -116,12 +128,20 @@ export class AcpConnection {
   }
 
   private onData(chunk: Buffer): void {
+    if (this.exited) return;
     this.buffer += this.decoder.write(chunk);
     const lines = this.buffer.split('\n');
     this.buffer = lines.pop() ?? '';
     for (const line of lines) {
       const trimmed = line.trim();
       if (trimmed) this.onLine(trimmed);
+    }
+    if (this.buffer.length > this.maxBufferChars) {
+      const err = new Error(`ACP stdout line exceeded buffer limit (${this.maxBufferChars} chars)`);
+      this.buffer = '';
+      this.failAll(err);
+      this.kill(500);
+      this.onExit(null, 'SIGKILL');
     }
   }
 

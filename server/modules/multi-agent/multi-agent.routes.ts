@@ -2,15 +2,15 @@
  * 多 Agent REST API（multi-agent-workspace design D2–D7）。掛在 `/api/multi-agent`，走 JWT 驗證。
  */
 import crypto from 'node:crypto';
-import { mkdir, stat } from 'node:fs/promises';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import express, { type Request, type Response } from 'express';
 
-import { multiAgentsDb, projectsDb } from '@/modules/database/index.js';
+import { multiAgentsDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { providerModelsService } from '@/modules/providers/index.js';
-import { MULTI_AGENT_WORKSPACE_ROOT } from '@/shared/multi-agent-workspace.js';
+import { isMultiAgentWorkspace, MULTI_AGENT_WORKSPACE_ROOT } from '@/shared/multi-agent-workspace.js';
 import { AppError, asyncHandler, createApiSuccessResponse, validateWorkspacePath } from '@/shared/utils.js';
 
 import {
@@ -23,7 +23,7 @@ import {
   type MultiAgentKind,
   type WorkflowDef,
 } from '../../../shared/multiAgent.js';
-import type { LLMProvider } from '../../../shared/providers.js';
+import { isLLMProvider, type LLMProvider } from '../../../shared/providers.js';
 
 import { chatroomDispatcher } from './services/chatroom-dispatcher.js';
 import { workflowRunner } from './services/workflow-runner.js';
@@ -93,10 +93,15 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim().slice(0, 100) : null;
   const projectId = typeof req.body?.projectId === 'string' ? req.body.projectId : null;
 
-  // 優先使用明確指定的目錄，其次綁定目前選中的專案路徑，否則用專屬目錄
-  const projectPath = typeof req.body?.workspacePath === 'string' && req.body.workspacePath.trim()
-    ? await resolveWorkspace(req.body.workspacePath)
-    : projectId ? projectsDb.getProjectPathById(projectId) : null;
+  // 優先使用明確指定的目錄，其次綁定目前選中的專案路徑（同樣校驗目錄有效），否則用專屬目錄
+  let projectPath: string | null = null;
+  if (typeof req.body?.workspacePath === 'string' && req.body.workspacePath.trim()) {
+    projectPath = await resolveWorkspace(req.body.workspacePath);
+  } else if (projectId) {
+    const rawProjectPath = projectsDb.getProjectPathById(projectId);
+    if (!rawProjectPath) throw badRequest('Project not found');
+    projectPath = await resolveWorkspace(rawProjectPath);
+  }
   const id = crypto.randomUUID();
   const workspacePath = projectPath ?? path.join(MULTI_AGENT_WORKSPACE_ROOT, id);
   if (!projectPath) await mkdir(workspacePath, { recursive: true });
@@ -134,10 +139,19 @@ router.patch('/:id', asyncHandler(async (req: Request, res: Response) => {
     multiAgentsDb.setWorkspacePath(agent.userId, agent.id, workspacePath);
   }
   const builderSession = req.body?.builderSession;
-  if (builderSession && typeof builderSession.sessionId === 'string' && typeof builderSession.provider === 'string') {
+  if (builderSession !== undefined && builderSession !== null) {
+    const sid = typeof builderSession.sessionId === 'string' ? builderSession.sessionId.trim() : '';
+    const prov = builderSession.provider;
+    if (!sid || sid.length > 200 || !/^[A-Za-z0-9._:-]+$/.test(sid) || !isLLMProvider(prov)) {
+      throw badRequest('Invalid builderSession');
+    }
+    const existingOwner = multiAgentsDb.getMultiAgentSessionOwner(sid);
+    if (existingOwner && String(existingOwner.userId) !== String(agent.userId)) {
+      throw new AppError('Session belongs to another user', { statusCode: 403, code: 'FORBIDDEN' });
+    }
     multiAgentsDb.setBuilderSession(agent.userId, agent.id, {
-      provider: builderSession.provider,
-      sessionId: builderSession.sessionId,
+      provider: prov,
+      sessionId: sid,
       ...(Number.isInteger(builderSession.promptVersion) ? { promptVersion: builderSession.promptVersion } : {}),
     });
   }
@@ -146,9 +160,19 @@ router.patch('/:id', asyncHandler(async (req: Request, res: Response) => {
 
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   const agent = requireAgent(req);
-  await workflowRunner.stopByAgent(agent.id);
-  await chatroomDispatcher.stopAndWait(agent.id);
-  multiAgentsDb.delete(agent.userId, agent.id);
+  chatroomDispatcher.markDeleting(agent.id);
+  try {
+    await workflowRunner.stopByAgent(agent.id);
+    await chatroomDispatcher.stopAndWait(agent.id);
+    multiAgentsDb.delete(agent.userId, agent.id);
+    if (isMultiAgentWorkspace(agent.workspacePath)) {
+      sessionsDb.deleteSessionsByProjectPath(agent.workspacePath);
+      projectsDb.deleteProjectPath(agent.workspacePath);
+      await rm(agent.workspacePath, { recursive: true, force: true }).catch(() => {});
+    }
+  } finally {
+    chatroomDispatcher.clearDeleting(agent.id);
+  }
   res.json(createApiSuccessResponse({ id: agent.id }));
 }));
 
@@ -253,6 +277,9 @@ router.get('/:id/messages', asyncHandler(async (req: Request, res: Response) => 
 router.post('/:id/messages', asyncHandler(async (req: Request, res: Response) => {
   const agent = requireAgent(req);
   if (agent.kind !== 'chatroom' || !agent.definition) throw badRequest('Not a chatroom with a definition');
+  if (chatroomDispatcher.isDeleting(agent.id)) {
+    throw new AppError('Chatroom is being deleted', { statusCode: 409, code: 'DELETING' });
+  }
   const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
   if (!content) throw badRequest('content is required');
   if (content.length > 20_000) throw badRequest('content is too long');

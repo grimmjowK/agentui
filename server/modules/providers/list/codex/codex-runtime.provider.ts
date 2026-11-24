@@ -1,4 +1,5 @@
 import type { IProviderRuntime, PendingApprovalItem, ProviderRuntimeWriter } from '@/shared/interfaces.js';
+import { workflowSessions } from '@/shared/workflow-session-registry.js';
 
 import {
   abortCodexSession,
@@ -17,6 +18,12 @@ export class CodexRuntimeProvider implements IProviderRuntime {
   }
 
   async abort(sessionId: string, writer: ProviderRuntimeWriter): Promise<{ ok: boolean; emitsTerminal: boolean }> {
+    // 工作流節點執行中由 AgentCall 的 fanout writer 持有，不可 reconnect 搶占
+    if (workflowSessions.get(sessionId)) {
+      const uid = writer.userId === null ? undefined : writer.userId;
+      const ok = Boolean(abortCodexSession(sessionId, uid));
+      return { ok, emitsTerminal: true };
+    }
     // Re-attach first so the cancellation terminal event reaches the requesting client
     // (also verifies the caller owns the run).
     const ok = this.reconnect(sessionId, writer) && Boolean(abortCodexSession(sessionId));

@@ -33,20 +33,34 @@ export function useChatroom(multiAgentId: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadingMore = useRef(false);
+  const requestSeqRef = useRef(0);
 
   const reload = useCallback(async () => {
+    const seq = ++requestSeqRef.current;
     try {
       const data = await readData<{ messages: ChatMessage[]; activeTurnId: string | null }>(
         api.multiAgent.messages(multiAgentId, { limit: PAGE }),
       );
+      if (seq !== requestSeqRef.current) return;
       setMessages(data.messages);
       setActiveTurnId(data.activeTurnId);
       setHasMore(data.messages.length === PAGE);
     } catch (err) {
+      if (seq !== requestSeqRef.current) return;
       setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) setLoading(false);
     }
+  }, [multiAgentId]);
+
+  useEffect(() => {
+    requestSeqRef.current += 1;
+    loadingMore.current = false;
+    setMessages([]);
+    setActiveTurnId(null);
+    setHasMore(false);
+    setLoading(true);
+    setError(null);
   }, [multiAgentId]);
 
   useEffect(() => { void reload(); }, [reload, isConnected]);

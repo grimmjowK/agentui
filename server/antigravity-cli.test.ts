@@ -14,6 +14,7 @@ import { LoggingWriter } from './modules/websocket/services/logging-writer.servi
 import {
   abortAntigravitySession,
   getActiveAntigravitySessions,
+  linkLiveIdsToTranscript,
   spawnAntigravity,
   steerAntigravitySession,
 } from './antigravity-cli.js';
@@ -254,4 +255,32 @@ test('LoggingWriter：即時 tool/text 寫入日誌，並在結束後對上 tran
   const textRow = rows.find((r) => r.payload.kind === 'text' && r.payload.role === 'assistant');
   assert.ok(toolRow?.providerIds.includes('agy_tool_2'), JSON.stringify(toolRow?.providerIds));
   assert.ok(textRow?.providerIds.includes(`agy_${sessionId}_step_3`), JSON.stringify(textRow?.providerIds));
+});
+
+test('linkLiveIdsToTranscript：優先讀 transcript_full.jsonl，且插話合併多筆 PLANNER_RESPONSE 時一併綁定所有歷史文字 id', async () => {
+  const sid = 'acp-link-test';
+  const dir = path.join(root, 'brain', sid, '.system_generated', 'logs');
+  await mkdir(dir, { recursive: true });
+  const compactPath = path.join(dir, 'transcript.jsonl');
+  const fullPath = path.join(dir, 'transcript_full.jsonl');
+
+  await writeFile(compactPath, `${JSON.stringify({ step_index: 0, type: 'USER_INPUT', content: 'hi' })}\n`, 'utf8');
+  await writeFile(
+    fullPath,
+    [
+      JSON.stringify({ step_index: 0, type: 'USER_INPUT', content: 'hi' }),
+      JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: 'part A ' }),
+      JSON.stringify({ step_index: 2, type: 'USER_INPUT', content: 'steer' }),
+      JSON.stringify({ step_index: 3, type: 'PLANNER_RESPONSE', content: 'part B' }),
+    ].join('\n') + '\n',
+    'utf8',
+  );
+
+  const writer = new LoggingWriter({ send() {}, setSessionId() {}, userId: 7 }, { initialSessionId: sid, provider: 'antigravity', userId: 7 });
+  writer.send({ kind: 'text', role: 'assistant', id: 'live-merged-1', content: 'part A part B', sessionId: sid });
+  writer.finish();
+
+  linkLiveIdsToTranscript(sid, compactPath, -1, [], ['live-merged-1']);
+  const textRow = sessionMessagesDb.listAll(sid).find((r) => r.id === 'live-merged-1');
+  assert.deepEqual(textRow?.providerIds, [`agy_${sid}_step_1`, `agy_${sid}_step_3`]);
 });

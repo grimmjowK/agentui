@@ -4,12 +4,9 @@ import { normalizeProjectPath } from '@/shared/utils.js';
 
 /**
  * 多 Agent 擁有的會話：工作流節點、建立器、聊天室成員。側邊欄、計數、封存與檢索一律排除
- * （node-live-session D2.1）；查詢時判斷，舊資料與工作目錄設為一般專案的情況都涵蓋。
+ * （node-live-session D2.1）；透過 multi_agent_sessions 主鍵索引表查詢避免重複解析 JSON。
  */
-const MULTI_AGENT_SESSION_IDS = `
-  SELECT session_id FROM workflow_sessions
-  UNION SELECT json_extract(builder_session_json, '$.sessionId') FROM multi_agents WHERE builder_session_json IS NOT NULL
-  UNION SELECT json_extract(member.value, '$.sessionId') FROM multi_agents, json_each(multi_agents.member_sessions_json) AS member`;
+const MULTI_AGENT_SESSION_IDS = `SELECT session_id FROM multi_agent_sessions`;
 
 type SessionRow = {
   session_id: string;
@@ -200,6 +197,24 @@ export const sessionsDb = {
         `SELECT session_id, provider, project_path, jsonl_path, custom_name, isArchived, isStarred, created_at, updated_at
          FROM sessions
          WHERE project_path = ?`
+      )
+      .all(normalizedProjectPath) as SessionRow[];
+  },
+
+  /**
+   * Archive view lists all user sessions under an archived project, while still
+   * excluding internal multi-agent sessions (workflow nodes, builder, chatroom members).
+   */
+  getUserSessionsByProjectPathIncludingArchived(projectPath: string): SessionRow[] {
+    const db = getConnection();
+    const normalizedProjectPath = normalizeProjectPath(projectPath);
+    return db
+      .prepare(
+        `SELECT session_id, provider, project_path, jsonl_path, custom_name, isArchived, isStarred, created_at, updated_at
+         FROM sessions
+         WHERE project_path = ?
+           AND session_id NOT IN (${MULTI_AGENT_SESSION_IDS})
+         ORDER BY isStarred DESC, datetime(COALESCE(updated_at, created_at)) DESC, session_id DESC`
       )
       .all(normalizedProjectPath) as SessionRow[];
   },

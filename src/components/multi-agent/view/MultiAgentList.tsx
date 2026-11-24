@@ -149,7 +149,26 @@ function MultiAgentRow({ item, active, onOpen, onRename, onDelete }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [name, setName] = useState(item.name);
+  const menuRef = useRef<HTMLDivElement>(null);
   const Icon = KIND_ICON[item.kind];
+
+  useEffect(() => {
+    if (!editing) setName(item.name);
+  }, [editing, item.name]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuOpen(false); };
+    const onClick = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [menuOpen]);
 
   const submitRename = async () => {
     const next = name.trim();
@@ -223,7 +242,7 @@ function MultiAgentRow({ item, active, onOpen, onRename, onDelete }: RowProps) {
         </button>
       )}
       {!editing && (
-        <div className="relative flex-shrink-0 md:hidden md:group-hover:block">
+        <div ref={menuRef} className="relative flex-shrink-0 md:hidden md:group-hover:block">
           <button
             type="button"
             onClick={() => setMenuOpen((open) => !open)}
@@ -237,7 +256,7 @@ function MultiAgentRow({ item, active, onOpen, onRename, onDelete }: RowProps) {
               className="absolute right-0 top-full z-20 mt-1 w-32 rounded-lg border border-border/60 bg-popover p-1 shadow-lg"
               onMouseLeave={() => setMenuOpen(false)}
             >
-              <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent" onClick={() => { setMenuOpen(false); setEditing(true); }}>
+              <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent" onClick={() => { setMenuOpen(false); setName(item.name); setEditing(true); }}>
                 <Pencil className="h-3 w-3" />{t('list.rename')}
               </button>
               <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10" onClick={() => { setMenuOpen(false); setConfirmDelete(true); }}>

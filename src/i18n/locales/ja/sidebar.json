@@ -125,6 +125,7 @@
     "inbox_other": "承認待ち {{count}} 件"
   },
   "search": {
+    "modeProjects": "プロジェクト",
     "modeMultiAgent": "マルチエージェント",
     "multiAgentPlaceholder": "マルチエージェントを検索..."
   }

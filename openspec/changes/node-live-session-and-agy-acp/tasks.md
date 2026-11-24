@@ -66,4 +66,4 @@
 - [x] 10.4 節點聊天頁中斷 → 畫布顯示等待指示 → 聊天頁送出新指示 → 節點成功、下游執行；另測「以目前輸出完成」與工作流停止
 - [x] 10.5 專屬目錄的工作流，節點對話以正確 provider 與工作目錄載入
 - [x] 10.5a 工作目錄設為一般專案（如 `dm_pm`）執行後：側邊欄該專案的會話列表、計數、⌘K 搜尋都看不到節點會話；重啟服務後仍看不到；從節點「打開對話」可進入
-- [ ] 10.6 `npm run typecheck`、`npm run lint`（0 錯誤）、`npm test`、`npm run build` 全部通過；更新 `server/SERVER.md`、`server/modules/MODULES.md`、`server/modules/providers/README.md`
+- [x] 10.6 `npm run typecheck`、`npm run lint`（0 錯誤）、`npm test`、`npm run build` 全部通過；更新 `server/SERVER.md`、`server/modules/MODULES.md`、`server/modules/providers/README.md`

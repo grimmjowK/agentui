@@ -570,7 +570,15 @@ export function useProjectsState({
       return;
     }
 
-    if (!selectedProject) {
+    // 只有剛在本頁建立的一般會話（pendingSessionId）才在 getSessionInfo 返回前用目前專案與預設 provider 搶先初始化；
+    // 從網址列或工作流節點打開的未知會話等待上方 getSessionInfo 回傳正確的 provider 與專案，避免送出錯誤的 check-session-status。
+    let isPendingNewSession = false;
+    try {
+      isPendingNewSession = sessionStorage.getItem('pendingSessionId') === sessionId;
+    } catch {
+      isPendingNewSession = false;
+    }
+    if (!isPendingNewSession || !selectedProject) {
       return;
     }
 

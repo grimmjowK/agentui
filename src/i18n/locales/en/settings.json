@@ -1,5 +1,16 @@
 {
   "title": "Settings",
+  "searchPlaceholder": "Search",
+  "navGroups": {
+    "general": "General",
+    "coding": "Coding",
+    "integrations": "Integrations"
+  },
+  "about": {
+    "description": "Open-source AI coding assistant interface",
+    "license": "Licensed under AGPL-3.0",
+    "starOnGithub": "Star on GitHub"
+  },
   "tabs": {
     "account": "Account",
     "permissions": "Permissions",
@@ -358,6 +369,11 @@
   },
   "permissions": {
     "title": "Permission Settings",
+    "defaultMode": {
+      "label": "Default permissions",
+      "claudeDescription": "By default, Claude can read workspace files and asks for approval before running commands or writing files.",
+      "cursorDescription": "By default, Cursor asks for confirmation before running unapproved shell commands."
+    },
     "skipPermissions": {
       "label": "Skip permission prompts (use with caution)",
       "claudeDescription": "Equivalent to --dangerously-skip-permissions flag",
@@ -472,9 +488,17 @@
     "description": {
       "claude": "Model Context Protocol servers provide additional tools and data sources to Claude",
       "cursor": "Model Context Protocol servers provide additional tools and data sources to Cursor",
-      "codex": "Model Context Protocol servers provide additional tools and data sources to Codex"
+      "codex": "Model Context Protocol servers provide additional tools and data sources to Codex",
+      "antigravity": "Model Context Protocol servers provide additional tools and data sources to Antigravity"
     },
     "addButton": "Add MCP Server",
+    "addGlobalButton": "Add Globally",
+    "addProviderButton": "Add to {{provider}}",
+    "globalAddDescription": "Add the same stdio or HTTP MCP server across Claude, Cursor, Codex, and Antigravity.",
+    "providerAddDescription": "Add this MCP server only to {{provider}}.",
+    "globalModalDescription": "Sync this MCP server across Claude, Cursor, Codex, and Antigravity (supports stdio and HTTP transports).",
+    "syncingProjectScopes": "Syncing project-level configurations...",
+    "loading": "Loading MCP servers...",
     "empty": "No MCP servers configured",
     "serverType": "Type",
     "scope": {
@@ -507,6 +531,7 @@
     "unsupported": "Skills are not supported for this agent.",
     "addButton": "New Skill",
     "uploadButton": "Upload",
+    "loading": "Loading skills...",
     "empty": "No skills configured",
     "emptyHint": "Create a new skill or upload .md/.zip files to get started.",
     "scope": {

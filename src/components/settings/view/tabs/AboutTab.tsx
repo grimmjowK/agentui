@@ -29,7 +29,7 @@ export default function AboutTab() {
                 <span>EAO</span>
               </span>
             }
-            description="Open-source AI coding assistant interface"
+            description={t('about.description', { defaultValue: 'Open-source AI coding assistant interface' })}
           >
             <span className="rounded-lg bg-muted/60 px-2.5 py-1 font-mono text-xs font-medium text-muted-foreground">
               v{currentVersion}
@@ -38,7 +38,7 @@ export default function AboutTab() {
 
           <SettingsRow
             label="GitHub"
-            description="Licensed under AGPL-3.0"
+            description={t('about.license', { defaultValue: 'Licensed under AGPL-3.0' })}
           >
             <a
               href={GITHUB_REPO_URL}
@@ -48,7 +48,7 @@ export default function AboutTab() {
             >
               <GitHubIcon className="h-3.5 w-3.5" />
               <Star className="h-3 w-3" />
-              <span>Star on GitHub</span>
+              <span>{t('about.starOnGithub', { defaultValue: 'Star on GitHub' })}</span>
               <ExternalLink className="h-3 w-3 opacity-60" />
             </a>
           </SettingsRow>

@@ -179,9 +179,18 @@ export const multiAgentsDb = {
   },
 
   setBuilderSession(userId: UserId, id: string, session: { provider: LLMProvider; sessionId: string; promptVersion?: number }): boolean {
-    return getConnection()
-      .prepare('UPDATE multi_agents SET builder_session_json = ? WHERE id = ? AND user_id = ?')
-      .run(JSON.stringify(session), id, userId).changes > 0;
+    const db = getConnection();
+    return db.transaction(() => {
+      const changed = db
+        .prepare('UPDATE multi_agents SET builder_session_json = ? WHERE id = ? AND user_id = ?')
+        .run(JSON.stringify(session), id, userId).changes > 0;
+      if (changed) {
+        db.prepare("DELETE FROM multi_agent_sessions WHERE multi_agent_id = ? AND role = 'builder'").run(id);
+        db.prepare(`INSERT OR REPLACE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
+          VALUES (?, ?, ?, 'builder', ?)`).run(session.sessionId, id, userId, now());
+      }
+      return changed;
+    })();
   },
 
   getMemberSessions(id: string): Record<string, MemberSession> {
@@ -191,8 +200,73 @@ export const multiAgentsDb = {
   },
 
   setMemberSessions(id: string, sessions: Record<string, MemberSession>): void {
-    getConnection().prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
-      .run(JSON.stringify(sessions), id);
+    const db = getConnection();
+    db.transaction(() => {
+      const row = db.prepare('SELECT user_id FROM multi_agents WHERE id = ?').get(id) as { user_id: number } | undefined;
+      db.prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
+        .run(JSON.stringify(sessions), id);
+      if (row) {
+        db.prepare("DELETE FROM multi_agent_sessions WHERE multi_agent_id = ? AND role = 'member'").run(id);
+        const ts = now();
+        const ins = db.prepare(`INSERT OR REPLACE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
+          VALUES (?, ?, ?, 'member', ?)`);
+        for (const s of Object.values(sessions)) {
+          if (s.sessionId) ins.run(s.sessionId, id, row.user_id, ts);
+        }
+      }
+    })();
+  },
+
+  /** 原子更新單一成員 session（僅當該成員仍存在於目前定義時寫入） */
+  upsertMemberSession(id: string, memberId: string, session: MemberSession): void {
+    const db = getConnection();
+    db.transaction(() => {
+      const row = db.prepare('SELECT user_id, definition_json, member_sessions_json FROM multi_agents WHERE id = ?')
+        .get(id) as { user_id: number; definition_json: string | null; member_sessions_json: string } | undefined;
+      if (!row) return;
+      const def = parse<{ members?: Array<{ id: string }> } | null>(row.definition_json, null);
+      if (def?.members && !def.members.some((m) => m.id === memberId)) return;
+      const sessions = parse<Record<string, MemberSession>>(row.member_sessions_json, {});
+      const prev = sessions[memberId];
+      if (prev?.sessionId && prev.sessionId !== session.sessionId) {
+        db.prepare("DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ? AND role = 'member'")
+          .run(prev.sessionId, id);
+      }
+      sessions[memberId] = session;
+      db.prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
+        .run(JSON.stringify(sessions), id);
+      if (session.sessionId) {
+        db.prepare(`INSERT OR REPLACE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
+          VALUES (?, ?, ?, 'member', ?)`).run(session.sessionId, id, row.user_id, now());
+      }
+    })();
+  },
+
+  /** 原子清除已不在定義中的成員 session */
+  pruneMemberSessions(id: string, validMemberIds: Iterable<string>): void {
+    const valid = new Set(validMemberIds);
+    const db = getConnection();
+    db.transaction(() => {
+      const row = db.prepare('SELECT member_sessions_json FROM multi_agents WHERE id = ?')
+        .get(id) as { member_sessions_json: string } | undefined;
+      if (!row) return;
+      const sessions = parse<Record<string, MemberSession>>(row.member_sessions_json, {});
+      let changed = false;
+      for (const [key, val] of Object.entries(sessions)) {
+        if (!valid.has(key)) {
+          if (val?.sessionId) {
+            db.prepare("DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ? AND role = 'member'")
+              .run(val.sessionId, id);
+          }
+          delete sessions[key];
+          changed = true;
+        }
+      }
+      if (changed) {
+        db.prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
+          .run(JSON.stringify(sessions), id);
+      }
+    })();
   },
 
   touch(id: string): void {
@@ -209,20 +283,34 @@ export const multiAgentsDb = {
       db.prepare('DELETE FROM multi_agent_turns WHERE multi_agent_id = ?').run(id);
       db.prepare('DELETE FROM multi_agent_messages WHERE multi_agent_id = ?').run(id);
       db.prepare('DELETE FROM workflow_sessions WHERE multi_agent_id = ?').run(id);
+      db.prepare('DELETE FROM multi_agent_sessions WHERE multi_agent_id = ?').run(id);
       return true;
     })();
   },
 
   /** 節點取得 sessionId 時登記；同一會話續接時保留第一次的登記 */
   addWorkflowSession(entry: { sessionId: string; multiAgentId: string; runId: string; nodeId: string; userId: UserId }): void {
-    getConnection().prepare(`INSERT OR IGNORE INTO workflow_sessions (session_id, multi_agent_id, run_id, node_id, user_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)`).run(entry.sessionId, entry.multiAgentId, entry.runId, entry.nodeId, entry.userId, now());
+    const db = getConnection();
+    const ts = now();
+    db.transaction(() => {
+      db.prepare(`INSERT OR IGNORE INTO workflow_sessions (session_id, multi_agent_id, run_id, node_id, user_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(entry.sessionId, entry.multiAgentId, entry.runId, entry.nodeId, entry.userId, ts);
+      db.prepare(`INSERT OR IGNORE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
+        VALUES (?, ?, ?, 'workflow', ?)`).run(entry.sessionId, entry.multiAgentId, entry.userId, ts);
+    })();
   },
 
   getWorkflowSession(sessionId: string): { multiAgentId: string; runId: string; nodeId: string; userId: number } | null {
     const row = getConnection().prepare('SELECT multi_agent_id, run_id, node_id, user_id FROM workflow_sessions WHERE session_id = ?')
       .get(sessionId) as { multi_agent_id: string; run_id: string; node_id: string; user_id: number } | undefined;
     return row ? { multiAgentId: row.multi_agent_id, runId: row.run_id, nodeId: row.node_id, userId: row.user_id } : null;
+  },
+
+  /** 查詢會話是否屬於某個多 Agent（工作流節點／建立器／聊天室成員），供擁有者授權檢查 */
+  getMultiAgentSessionOwner(sessionId: string): { multiAgentId: string; userId: number; role: 'workflow' | 'builder' | 'member' } | null {
+    const row = getConnection().prepare('SELECT multi_agent_id, user_id, role FROM multi_agent_sessions WHERE session_id = ?')
+      .get(sessionId) as { multi_agent_id: string; user_id: number; role: 'workflow' | 'builder' | 'member' } | undefined;
+    return row ? { multiAgentId: row.multi_agent_id, userId: row.user_id, role: row.role } : null;
   },
 
   // ----------------- 工作流執行 -----------------
@@ -257,7 +345,7 @@ export const multiAgentsDb = {
 
   listRuns(multiAgentId: string, limit = 20): WorkflowRun[] {
     const rows = getConnection()
-      .prepare('SELECT * FROM multi_agent_runs WHERE multi_agent_id = ? ORDER BY started_at DESC LIMIT ?')
+      .prepare('SELECT * FROM multi_agent_runs WHERE multi_agent_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?')
       .all(multiAgentId, limit) as RunRow[];
     return rows.map(toRun);
   },

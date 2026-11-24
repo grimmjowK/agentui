@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { authenticatedFetch } from '../../../utils/api';
@@ -59,9 +60,9 @@ type NotificationPreferencesResponse = {
 
 type ActiveLoginProvider = AgentProvider | '';
 
-const KNOWN_MAIN_TABS: SettingsMainTab[] = ['agents', 'appearance', 'git', 'api', 'tasks', 'notifications', 'plugins'];
+const KNOWN_MAIN_TABS: SettingsMainTab[] = ['agents', 'appearance', 'git', 'api', 'tasks', 'notifications', 'plugins', 'about'];
 
-const normalizeMainTab = (tab: string): SettingsMainTab => {
+export const normalizeMainTab = (tab: string): SettingsMainTab => {
   // Keep backwards compatibility with older callers that still pass "tools".
   if (tab === 'tools') {
     return 'agents';
@@ -69,6 +70,17 @@ const normalizeMainTab = (tab: string): SettingsMainTab => {
 
   return KNOWN_MAIN_TABS.includes(tab as SettingsMainTab) ? (tab as SettingsMainTab) : 'agents';
 };
+
+export const computeAntigravityStoragePayload = (
+  permissionMode: AntigravityPermissionMode,
+  previous: AntigravitySettingsStorage,
+  lastUpdated: string,
+) => ({
+  permissionMode,
+  skipPermissions: permissionMode === 'bypassPermissions',
+  explicitConsent: permissionMode === 'bypassPermissions' ? true : Boolean(previous.explicitConsent),
+  lastUpdated,
+});
 
 const parseJson = <T>(value: string | null, fallback: T): T => {
   if (!value) {
@@ -285,12 +297,10 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
       const previousAntigravitySettings = parseJson<AntigravitySettingsStorage>(
         localStorage.getItem('antigravity-settings'), {},
       );
-      localStorage.setItem('antigravity-settings', JSON.stringify({
-        permissionMode: antigravityPermissions.permissionMode,
-        skipPermissions: antigravityPermissions.permissionMode === 'bypassPermissions',
-        explicitConsent: true,
-        lastUpdated: now,
-      }));
+      localStorage.setItem(
+        'antigravity-settings',
+        JSON.stringify(computeAntigravityStoragePayload(antigravityPermissions.permissionMode, previousAntigravitySettings, now)),
+      );
       if (toAntigravityPermissionMode(previousAntigravitySettings) !== antigravityPermissions.permissionMode) {
         window.dispatchEvent(new CustomEvent('antigravity-permissions-change', {
           detail: antigravityPermissions.permissionMode,
@@ -335,11 +345,47 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     [],
   );
 
+  // Auto-save permissions and sort order with debounce — only after user interaction (dirtyRef)
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const dirtyRef = useRef(false);
+
+  const updateProjectSortOrder = useCallback<React.Dispatch<React.SetStateAction<ProjectSortOrder>>>((value) => {
+    dirtyRef.current = true;
+    setProjectSortOrder(value);
+  }, []);
+
+  const updateClaudePermissions = useCallback<React.Dispatch<React.SetStateAction<ClaudePermissionsState>>>((value) => {
+    dirtyRef.current = true;
+    setClaudePermissions(value);
+  }, []);
+
+  const updateCursorPermissions = useCallback<React.Dispatch<React.SetStateAction<CursorPermissionsState>>>((value) => {
+    dirtyRef.current = true;
+    setCursorPermissions(value);
+  }, []);
+
+  const updateAntigravityPermissions = useCallback<React.Dispatch<React.SetStateAction<AntigravityPermissionsState>>>((value) => {
+    dirtyRef.current = true;
+    setAntigravityPermissions(value);
+  }, []);
+
+  const updateNotificationPreferences = useCallback<React.Dispatch<React.SetStateAction<NotificationPreferencesState>>>((value) => {
+    dirtyRef.current = true;
+    setNotificationPreferences(value);
+  }, []);
+
+  const updateCodexPermissionMode = useCallback<React.Dispatch<React.SetStateAction<CodexPermissionMode>>>((value) => {
+    dirtyRef.current = true;
+    setCodexPermissionMode(value);
+  }, []);
+
   useEffect(() => {
     if (!isOpen) {
+      dirtyRef.current = false;
       return;
     }
 
+    dirtyRef.current = false;
     setActiveTab(normalizeMainTab(initialTab));
     void loadSettings();
     void refreshProviderAuthStatuses();
@@ -354,14 +400,8 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     window.dispatchEvent(new Event('codeEditorSettingsChanged'));
   }, [codeEditorSettings]);
 
-  // Auto-save permissions and sort order with debounce
-  const autoSaveTimerRef = useRef<number | null>(null);
-  const isInitialLoadRef = useRef(true);
-
   useEffect(() => {
-    // Skip auto-save on initial load (settings are being loaded from localStorage)
-    if (isInitialLoadRef.current) {
-      isInitialLoadRef.current = false;
+    if (!dirtyRef.current) {
       return;
     }
 
@@ -370,7 +410,8 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     }
 
     autoSaveTimerRef.current = window.setTimeout(() => {
-      saveSettings();
+      dirtyRef.current = false;
+      void saveSettings();
     }, 500);
 
     return () => {
@@ -390,13 +431,6 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     return () => window.clearTimeout(timer);
   }, [saveStatus]);
 
-  // Reset initial load flag when settings dialog opens
-  useEffect(() => {
-    if (isOpen) {
-      isInitialLoadRef.current = true;
-    }
-  }, [isOpen]);
-
   useEffect(() => () => {
     if (closeTimerRef.current !== null) {
       window.clearTimeout(closeTimerRef.current);
@@ -415,19 +449,19 @@ export function useSettingsController({ isOpen, initialTab }: UseSettingsControl
     toggleDarkMode,
     saveStatus,
     projectSortOrder,
-    setProjectSortOrder,
+    setProjectSortOrder: updateProjectSortOrder,
     codeEditorSettings,
     updateCodeEditorSetting,
     claudePermissions,
-    setClaudePermissions,
+    setClaudePermissions: updateClaudePermissions,
     cursorPermissions,
-    setCursorPermissions,
+    setCursorPermissions: updateCursorPermissions,
     antigravityPermissions,
-    setAntigravityPermissions,
+    setAntigravityPermissions: updateAntigravityPermissions,
     notificationPreferences,
-    setNotificationPreferences,
+    setNotificationPreferences: updateNotificationPreferences,
     codexPermissionMode,
-    setCodexPermissionMode,
+    setCodexPermissionMode: updateCodexPermissionMode,
     providerAuthStatus,
     openLoginForProvider,
     openInstallForProvider,

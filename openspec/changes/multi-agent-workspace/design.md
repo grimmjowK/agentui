@@ -62,7 +62,7 @@ type ChatroomDef  = { members: ChatMember[]; rules: ChatRules };
 - 取捨: 節點數 ≤ 12 時分層佈局足夠；需要手動拖拽排版再引入 reactflow。
 
 ### D5 工作流執行：後端 runner，按層並行，WS 推送節點狀態
-`POST /api/multi-agent/:id/runs` 以交易建立定義快照與 run；同一工作流已有 running/stopping run 時回傳 409，`WorkflowRunner` 在後端記憶體中執行：
+`POST /api/multi-agent/:id/runs` 以交易建立定義快照與 run；同一工作流最多允許 5 個 running/stopping 並行實例（超出回傳 409），`WorkflowRunner` 在後端記憶體中執行：
 - 就緒節點（依賴全部 succeeded）並行啟動，每個節點一次 `runtime.start(prompt, { cwd, model, permissionMode })`，prompt = 節點 instruction + 各上游節點最終輸出摘要（截斷至固定長度）。
 - writer 為自訂收集器：累積 assistant 文字作為節點輸出；收到 `complete`/錯誤時標記 succeeded/failed。
 - **進度**：provider 不回報百分比，進度條採「階段式」：等待 0%、啟動 10%、每收到一個串流事件逐步逼近 90%（漸近式）、完成 100%。失敗節點的所有下游標記 `skipped`。
@@ -83,7 +83,7 @@ type ChatroomDef  = { members: ChatMember[]; rules: ChatRules };
 3. prompt = persona + 群規 + 硬限制說明 + 群聊紀錄。續接只送 `last_delivered_seq` 之後的紀錄；只有 session 需重建時才重播最近 50 則、合計至多 20,000 Unicode code points（取最新內容並標記截斷）。成功完成後才推進游標。session 依變更類型分情況處理，見下方「成員 session 規則」。
 4. `maxReplyChars` 是顯示／保存上限（Unicode code points，包含結尾「…」），預設 800、範圍 1–8,000；`maxAiRepliesPerTurn` 預設成員數、範圍 1–32，後端拒絕非整數與越界值。串流超過上限時立即截斷並 abort，訊息保存一次且 `finish_reason=length`，該次發言計入上限；等待 runtime 結束後才啟動下一位。每位成員從啟動起最多 120 秒（等待審批不計時），超時 abort。字數與時間限制不是精確 token／費用上限。
 5. `allowAiMentions` 為真時，僅完整成功、未截斷的回覆可擴展佇列。達 `maxAiRepliesPerTurn` 後不再呼叫模型並插入一次上限系統訊息。
-6. 串流事件 `{ type: 'multi-agent-message', multiAgentId, turnId, messageId, memberId, kind: 'delta'|'final', content, finishReason? }`，回合另推送帶 multiAgentId/turnId 的狀態事件，只發給擁有者的連線。前端按 multiAgentId/messageId 歸檔，final 為權威完整內容。重連時重新 GET 訊息列表即可還原（執行中的訊息回傳目前已累積的內容）。
+6. 串流事件 `{ type: 'multi-agent-message', multiAgentId, turnId, messageId, memberId, kind: 'delta'|'upsert', content?, message? }`，回合另推送帶 multiAgentId/turnId 的狀態事件，只發給擁有者的連線。前端按 multiAgentId/messageId 歸檔，upsert 為權威完整內容。重連時重新 GET 訊息列表即可還原（執行中的訊息回傳目前已累積的內容）。
 7. `POST /:id/messages/stop { turnId }` 只停止指定回合，重複呼叫無副作用。先標記 stopping、清空本輪待發言成員，再 abort 執行中的 runtime；終止後標記 stopped，接著處理排隊訊息。停止後的遲到事件不得追加內容或擴展佇列。服務重啟將活動回合標記 interrupted、排隊訊息保留為 queued（下次使用者送出時一併處理），不續跑；刪除聊天室先停止再級聯刪除。
 
 **成員權限**：成員使用工具，預設採各 provider 最保守的現有模式——Claude/Cursor 用 `plan`，Codex 用 `default`（`workspace-write` + `on-request` 審批），Antigravity 用 `default`。屬於軟限制，可在成員設定中調整；審批請求沿用全域收件匣。四家 provider 都可用。

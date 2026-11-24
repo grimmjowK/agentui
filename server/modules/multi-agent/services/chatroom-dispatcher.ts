@@ -62,7 +62,9 @@ export function settingNotes(session: MemberSession, member: ChatMember, def: Ch
   if (seen) {
     if (seen.name !== now.name) notes.push(`你的名稱已改為「${now.name}」`);
     if (seen.persona !== now.persona) notes.push(`你的人設已更新為：${now.persona}`);
-    if (seen.rulesText !== now.rulesText && now.rulesText) notes.push(`群規已更新：${now.rulesText}`);
+    if (seen.rulesText !== now.rulesText) {
+      notes.push(now.rulesText ? `群規已更新：${now.rulesText}` : '群規已清除');
+    }
     if (seen.maxReplyChars !== now.maxReplyChars) notes.push(`每則回覆上限改為 ${now.maxReplyChars} 字`);
     if (seen.allowAiMentions !== now.allowAiMentions) {
       notes.push(now.allowAiMentions ? '現在可以 @ 其他成員請其接話' : '現在不可以 @ 其他成員');
@@ -124,6 +126,7 @@ export function buildMemberPrompt(input: {
 
 export class ChatroomDispatcher {
   private readonly active = new Map<string, ActiveTurn>();
+  private readonly deleting = new Set<string>();
   private readonly publish: Publish;
   private readonly resolveRuntime?: RuntimeResolver;
   private readonly timeoutMs: number;
@@ -138,8 +141,23 @@ export class ChatroomDispatcher {
     return this.active.has(multiAgentId);
   }
 
+  isDeleting(multiAgentId: string): boolean {
+    return this.deleting.has(multiAgentId);
+  }
+
+  markDeleting(multiAgentId: string): void {
+    this.deleting.add(multiAgentId);
+  }
+
+  clearDeleting(multiAgentId: string): void {
+    this.deleting.delete(multiAgentId);
+  }
+
   /** 送出使用者訊息。忙碌時排隊；否則立即開始回合。 */
   send(agent: Agent, content: string): ChatMessage {
+    if (this.deleting.has(agent.id)) {
+      throw new Error('Chatroom is deleting');
+    }
     const message = multiAgentsDb.appendMessage({
       multiAgentId: agent.id, turnId: null, authorKind: 'user', memberId: null, author: null,
       content, status: 'queued', finishReason: null,
@@ -177,7 +195,7 @@ export class ChatroomDispatcher {
 
   /** 若空閒則處理下一則排隊訊息 */
   pump(multiAgentId: string): void {
-    if (this.active.has(multiAgentId)) return;
+    if (this.active.has(multiAgentId) || this.deleting.has(multiAgentId)) return;
     const agent = multiAgentsDb.getById(multiAgentId);
     const next = agent?.definition ? multiAgentsDb.nextQueuedMessage(multiAgentId) : null;
     if (!agent || !next) return;
@@ -306,11 +324,10 @@ export class ChatroomDispatcher {
       finishReason,
     });
 
-    // 更新 session：只有拿到 sessionId 才保存；完整成功才推進游標
-    if (result.sessionId) {
+    // 更新 session：只有拿到 sessionId 才保存；完整成功才推進游標；若成員在回合中已被移除則不再寫回
+    if (result.sessionId && !this.deleting.has(agent.id)) {
       const succeeded = result.status === 'succeeded' || finishReason === 'length';
-      const latest = multiAgentsDb.getMemberSessions(agent.id);
-      latest[member.id] = {
+      multiAgentsDb.upsertMemberSession(agent.id, member.id, {
         provider: member.provider,
         model: member.model,
         sessionId: result.sessionId,
@@ -319,22 +336,17 @@ export class ChatroomDispatcher {
         // 成功送達本輪提示後才記為已看過；失敗時保留舊的，下次仍會提示
         seen: succeeded ? seenOf(member, def) : (session?.seen ?? seenOf(member, def)),
         truncatedAt: finishReason === 'length' ? def.rules.maxReplyChars : succeeded ? undefined : session?.truncatedAt,
-      };
-      multiAgentsDb.setMemberSessions(agent.id, latest);
+      });
     }
 
-    const final = multiAgentsDb.getMessage(agent.id, message.id)!;
-    this.emitMessage(agent, final);
+    const final = multiAgentsDb.getMessage(agent.id, message.id);
+    if (final) this.emitMessage(agent, final);
     return final;
   }
 
   /** 成員被移除時清掉其 session */
   pruneMemberSessions(multiAgentId: string, def: ChatroomDef): void {
-    const sessions = multiAgentsDb.getMemberSessions(multiAgentId);
-    const stale = Object.keys(sessions).filter((id) => !def.members.some((m) => m.id === id));
-    if (!stale.length) return;
-    for (const id of stale) delete sessions[id];
-    multiAgentsDb.setMemberSessions(multiAgentId, sessions);
+    multiAgentsDb.pruneMemberSessions(multiAgentId, def.members.map((m) => m.id));
   }
 
   private emitMessage(agent: Agent, message: ChatMessage): void {

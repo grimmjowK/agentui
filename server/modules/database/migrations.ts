@@ -3,6 +3,7 @@ import { Database } from 'better-sqlite3';
 import {
   APP_CONFIG_TABLE_SCHEMA_SQL,
   LAST_SCANNED_AT_SQL,
+  MULTI_AGENT_TABLES_SCHEMA_SQL,
   PROJECTS_TABLE_SCHEMA_SQL,
   PUSH_SUBSCRIPTIONS_TABLE_SCHEMA_SQL,
   SESSION_MESSAGES_TABLE_SCHEMA_SQL,
@@ -458,11 +459,26 @@ export const runMigrations = (db: Database) => {
     db.exec(PROJECTS_TABLE_SCHEMA_SQL);
     rebuildProjectsTableWithPrimaryKeySchema(db);
 
-    // 多 Agent：工作流執行保存啟動時輸入
+    // 多 Agent：工作流執行保存啟動時輸入，並補建 multi_agent_sessions 索引
+    db.exec(MULTI_AGENT_TABLES_SCHEMA_SQL);
     if (tableExists(db, 'multi_agent_runs')) {
       const runColumns = (db.prepare('PRAGMA table_info(multi_agent_runs)').all() as { name: string }[]).map((c) => c.name);
       addColumnToTableIfNotExists(db, 'multi_agent_runs', runColumns, 'start_input', 'TEXT');
     }
+    db.exec(`
+      INSERT OR IGNORE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
+      SELECT session_id, multi_agent_id, user_id, 'workflow', created_at FROM workflow_sessions;
+
+      INSERT OR IGNORE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
+      SELECT json_extract(builder_session_json, '$.sessionId'), id, user_id, 'builder', updated_at
+      FROM multi_agents
+      WHERE builder_session_json IS NOT NULL AND json_extract(builder_session_json, '$.sessionId') IS NOT NULL;
+
+      INSERT OR IGNORE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
+      SELECT json_extract(member.value, '$.sessionId'), multi_agents.id, multi_agents.user_id, 'member', multi_agents.updated_at
+      FROM multi_agents, json_each(multi_agents.member_sessions_json) AS member
+      WHERE json_extract(member.value, '$.sessionId') IS NOT NULL;
+    `);
 
     migrateLegacyWorkspaceTableIntoProjects(db);
     rebuildSessionsTableWithProjectSchema(db);

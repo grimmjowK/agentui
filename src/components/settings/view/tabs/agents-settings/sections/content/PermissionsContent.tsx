@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { cn } from '../../../../../../../lib/utils';
 import SettingsCard from '../../../../SettingsCard';
 import SettingsRow from '../../../../SettingsRow';
 import SettingsSection from '../../../../SettingsSection';
-import SettingsToggle from '../../../../SettingsToggle';
 import type { AntigravityPermissionMode, CodexPermissionMode } from '../../../../../types/types';
 
 const COMMON_CLAUDE_TOOLS = [
@@ -180,6 +180,22 @@ type ClaudePermissionsProps = {
   onDisallowedToolsChange: (value: string[]) => void;
 };
 
+function ModeRadioIndicator({ checked, label }: { checked: boolean; label: string }) {
+  return (
+    <span
+      role="radio"
+      aria-checked={checked}
+      aria-label={label}
+      className={cn(
+        'inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border transition-colors',
+        checked ? 'border-foreground bg-foreground' : 'border-border bg-background',
+      )}
+    >
+      {checked && <span className="h-2 w-2 rounded-full bg-background" />}
+    </span>
+  );
+}
+
 function ClaudePermissions({
   skipPermissions,
   onSkipPermissionsChange,
@@ -195,28 +211,26 @@ function ClaudePermissions({
       <SettingsSection title={t('tabs.permissions')}>
         <SettingsCard divided>
           <SettingsRow
-            label={t('permissions.defaultMode.label', { defaultValue: '默认权限' })}
+            label={t('permissions.defaultMode.label', { defaultValue: 'Default permissions' })}
             description={t('permissions.defaultMode.claudeDescription', {
-              defaultValue: '默认情况下，Claude 可以读取工作区文件，并在执行命令或写入文件前请求您的批准。',
+              defaultValue: 'By default, Claude can read workspace files and asks for approval before running commands or writing files.',
             })}
             onClick={() => onSkipPermissionsChange(false)}
           >
-            <SettingsToggle
+            <ModeRadioIndicator
               checked={!skipPermissions}
-              onChange={(checked) => onSkipPermissionsChange(!checked)}
-              ariaLabel={t('permissions.defaultMode.label', { defaultValue: '默认权限' })}
+              label={t('permissions.defaultMode.label', { defaultValue: 'Default permissions' })}
             />
           </SettingsRow>
 
           <SettingsRow
             label={t('permissions.skipPermissions.label')}
             description={t('permissions.skipPermissions.claudeDescription')}
-            onClick={() => onSkipPermissionsChange(!skipPermissions)}
+            onClick={() => onSkipPermissionsChange(true)}
           >
-            <SettingsToggle
+            <ModeRadioIndicator
               checked={skipPermissions}
-              onChange={onSkipPermissionsChange}
-              ariaLabel={t('permissions.skipPermissions.label')}
+              label={t('permissions.skipPermissions.label')}
             />
           </SettingsRow>
         </SettingsCard>
@@ -272,28 +286,26 @@ function CursorPermissions({
       <SettingsSection title={t('tabs.permissions')}>
         <SettingsCard divided>
           <SettingsRow
-            label={t('permissions.defaultMode.label', { defaultValue: '默认权限' })}
+            label={t('permissions.defaultMode.label', { defaultValue: 'Default permissions' })}
             description={t('permissions.defaultMode.cursorDescription', {
-              defaultValue: '默认情况下，Cursor 在执行未授权的 Shell 命令前会请求确认。',
+              defaultValue: 'By default, Cursor asks for confirmation before running unapproved shell commands.',
             })}
             onClick={() => onSkipPermissionsChange(false)}
           >
-            <SettingsToggle
+            <ModeRadioIndicator
               checked={!skipPermissions}
-              onChange={(checked) => onSkipPermissionsChange(!checked)}
-              ariaLabel={t('permissions.defaultMode.label', { defaultValue: '默认权限' })}
+              label={t('permissions.defaultMode.label', { defaultValue: 'Default permissions' })}
             />
           </SettingsRow>
 
           <SettingsRow
             label={t('permissions.skipPermissions.label')}
             description={t('permissions.skipPermissions.cursorDescription')}
-            onClick={() => onSkipPermissionsChange(!skipPermissions)}
+            onClick={() => onSkipPermissionsChange(true)}
           >
-            <SettingsToggle
+            <ModeRadioIndicator
               checked={skipPermissions}
-              onChange={onSkipPermissionsChange}
-              ariaLabel={t('permissions.skipPermissions.label')}
+              label={t('permissions.skipPermissions.label')}
             />
           </SettingsRow>
         </SettingsCard>
@@ -352,10 +364,9 @@ function CodexPermissions({
               description={t(`permissions.codex.modes.${mode}.description`)}
               onClick={() => onPermissionModeChange(mode)}
             >
-              <SettingsToggle
+              <ModeRadioIndicator
                 checked={permissionMode === mode}
-                onChange={() => onPermissionModeChange(mode)}
-                ariaLabel={t(`permissions.codex.modes.${mode}.title`)}
+                label={t(`permissions.codex.modes.${mode}.title`)}
               />
             </SettingsRow>
           ))}
@@ -414,10 +425,9 @@ function AntigravityPermissions({
               description={t(`permissions.antigravity.modes.${mode}.description`)}
               onClick={() => onPermissionModeChange(mode)}
             >
-              <SettingsToggle
+              <ModeRadioIndicator
                 checked={permissionMode === mode}
-                onChange={() => onPermissionModeChange(mode)}
-                ariaLabel={t(`permissions.antigravity.modes.${mode}.title`)}
+                label={t(`permissions.antigravity.modes.${mode}.title`)}
               />
             </SettingsRow>
           ))}

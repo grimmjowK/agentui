@@ -73,7 +73,9 @@ export default function BuilderView({ agent, editing = false, onDefinitionSaved 
       if (builderSession) {
         const next = { ...builderSession, promptVersion: BUILDER_PROMPT_VERSION };
         setBuilderSession(next);
-        void api.multiAgent.update(agent.id, { builderSession: next });
+        void readData<MultiAgent>(api.multiAgent.update(agent.id, { builderSession: next }))
+          .then((saved) => upsertMultiAgentLocal(saved))
+          .catch((err) => console.warn('[multi-agent] Failed to update builderSession promptVersion:', err));
       }
     },
   }), [agent.kind, agent.definition, agent.id, models, t, inputRequest, resendPrompt, builderSession]);
@@ -100,15 +102,19 @@ export default function BuilderView({ agent, editing = false, onDefinitionSaved 
     ),
   }), [agent.kind, agent.definition, models, saveDefinition, t]);
 
-  // 新會話建立時記住 sessionId，不導向 /session/:id
-  const handleNavigateToSession = useCallback((sessionId: string) => {
+  // 新會話建立時記住 sessionId，不導向 /session/:id；直接採用實際發起該輪的 provider
+  const handleNavigateToSession = useCallback((sessionId: string, options?: { provider?: LLMProvider }) => {
     if (builderSession?.sessionId === sessionId) return;
     const selected = localStorage.getItem('selected-provider');
-    const provider: LLMProvider = builderSession?.provider ?? (isLLMProvider(selected) ? selected : 'claude');
+    const provider: LLMProvider = options?.provider
+      ?? builderSession?.provider
+      ?? (isLLMProvider(selected) ? selected : 'claude');
     // 新會話的第一則訊息一定附了說明
     const next = { provider, sessionId, promptVersion: deliveredVersionRef.current ?? BUILDER_PROMPT_VERSION };
     setBuilderSession(next);
-    void api.multiAgent.update(agent.id, { builderSession: next });
+    void readData<MultiAgent>(api.multiAgent.update(agent.id, { builderSession: next }))
+      .then((saved) => upsertMultiAgentLocal(saved))
+      .catch((err) => console.warn('[multi-agent] Failed to persist builderSession:', err));
   }, [agent.id, builderSession]);
 
   if (!project) {

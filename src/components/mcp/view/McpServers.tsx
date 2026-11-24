@@ -78,16 +78,23 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
 
   const providerName = MCP_PROVIDER_NAMES[selectedProvider];
   const description = t(`mcpServers.description.${selectedProvider}`, {
-    defaultValue: `Model Context Protocol 服务器为 ${providerName} 提供额外的工具和数据源`,
+    defaultValue: `Model Context Protocol servers provide additional tools and data sources to ${providerName}`,
   });
-  const globalButtonLabel = t('mcpServers.addGlobalButton', { defaultValue: '全局添加' });
+  const globalButtonLabel = t('mcpServers.addGlobalButton', { defaultValue: 'Add Globally' });
   const providerButtonLabel = t('mcpServers.addProviderButton', {
     provider: providerName,
-    defaultValue: `添加到 ${providerName}`,
+    defaultValue: `Add to ${providerName}`,
   });
-  const globalAddDescription = '将同一个 stdio 或 HTTP MCP 服务器同时写入 Claude、Cursor、Codex 与 Antigravity。';
-  const providerAddDescription = `仅为 ${providerName} 添加此 MCP 服务器。`;
-  const globalModalDescription = '将此 MCP 服务器同步添加到 Claude、Cursor、Codex 与 Antigravity（仅支持通用的 stdio 与 HTTP 传输协议）。';
+  const globalAddDescription = t('mcpServers.globalAddDescription', {
+    defaultValue: 'Add the same stdio or HTTP MCP server across Claude, Cursor, Codex, and Antigravity.',
+  });
+  const providerAddDescription = t('mcpServers.providerAddDescription', {
+    provider: providerName,
+    defaultValue: `Add this MCP server only to ${providerName}.`,
+  });
+  const globalModalDescription = t('mcpServers.globalModalDescription', {
+    defaultValue: 'Sync this MCP server across Claude, Cursor, Codex, and Antigravity (supports stdio and HTTP transports).',
+  });
 
   return (
     <div className="space-y-6">
@@ -104,7 +111,7 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
               ) : isLoadingProjectScopes ? (
                 <span className="inline-flex items-center gap-1.5">
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  正在同步项目级配置...
+                  {t('mcpServers.syncingProjectScopes', { defaultValue: 'Syncing project-level configurations...' })}
                 </span>
               ) : (
                 globalAddDescription
@@ -142,7 +149,7 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
           {isLoading && servers.length === 0 && (
             <div className="flex items-center justify-center gap-2 px-5 py-8 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              <span>正在加载 MCP 服务器...</span>
+              <span>{t('mcpServers.loading', { defaultValue: 'Loading MCP servers...' })}</span>
             </div>
           )}
 

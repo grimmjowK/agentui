@@ -74,3 +74,33 @@ test('請求逾時', async (t) => {
   const conn = new AcpConnection(child as never, {}, 20);
   await assert.rejects(conn.request('slow', {}), /timed out/);
 });
+
+test('子行程忽略 SIGTERM 時，kill(forceMs) 會補送 SIGKILL 並強制結束連線', async (t) => {
+  const keepAlive = setInterval(() => {}, 1000);
+  t.after(() => clearInterval(keepAlive));
+  const signals: string[] = [];
+  const { child } = fakeChild();
+  child.kill = ((sig?: string) => {
+    signals.push(sig ?? 'SIGTERM');
+    return true; // 刻意不觸發 exit，模擬卡死行程
+  }) as never;
+
+  let exited = false;
+  const conn = new AcpConnection(child as never, { onExit: () => { exited = true; } });
+  const pending = conn.request('session/prompt', {}, 0);
+  conn.kill(20);
+
+  await assert.rejects(pending, /SIGKILL|exited/);
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.equal(exited, true);
+  assert.equal(conn.isClosed, true);
+});
+
+test('單行輸出超過緩衝區上限時主動切斷連線防止 OOM', async () => {
+  const { child } = fakeChild();
+  const conn = new AcpConnection(child as never, {}, 60_000, 1024);
+  const pending = conn.request('session/prompt', {}, 0);
+  child.stdout.write('x'.repeat(2048));
+  await assert.rejects(pending, /buffer limit/i);
+  assert.equal(conn.isClosed, true);
+});

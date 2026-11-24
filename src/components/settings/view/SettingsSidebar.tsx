@@ -25,7 +25,7 @@ type NavGroup = {
 const NAV_GROUPS: NavGroup[] = [
   {
     groupKey: 'navGroups.general',
-    defaultLabel: '常规',
+    defaultLabel: 'General',
     items: [
       { id: 'appearance', labelKey: 'mainTabs.appearance', icon: Palette },
       { id: 'notifications', labelKey: 'mainTabs.notifications', icon: Bell },
@@ -33,7 +33,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     groupKey: 'navGroups.coding',
-    defaultLabel: '编码',
+    defaultLabel: 'Coding',
     items: [
       { id: 'agents', labelKey: 'mainTabs.agents', icon: Bot },
       { id: 'git', labelKey: 'mainTabs.git', icon: GitBranch },
@@ -42,7 +42,7 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     groupKey: 'navGroups.integrations',
-    defaultLabel: '集成',
+    defaultLabel: 'Integrations',
     items: [
       { id: 'plugins', labelKey: 'mainTabs.plugins', icon: Puzzle },
       { id: 'api', labelKey: 'mainTabs.apiTokens', icon: Key },
@@ -80,7 +80,7 @@ export default function SettingsSidebar({ activeTab, onChange }: SettingsSidebar
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('searchPlaceholder', { defaultValue: '搜索' })}
+              placeholder={t('searchPlaceholder', { defaultValue: 'Search' })}
               className="h-8 w-full rounded-xl bg-foreground/[0.05] pl-8 pr-3 text-[13px] text-foreground placeholder:text-muted-foreground/70 focus:bg-foreground/[0.08] focus:outline-none dark:bg-white/[0.06] dark:focus:bg-white/[0.1]"
             />
           </div>

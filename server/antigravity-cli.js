@@ -118,17 +118,26 @@ function scheduleAntigravityMetadataResync(sessionId, transcriptPath) {
   timer.unref?.();
 }
 
+function resolveReadableTranscriptPath(transcriptPath) {
+  if (!transcriptPath) return null;
+  const fullPath = path.join(path.dirname(transcriptPath), 'transcript_full.jsonl');
+  if (fs.existsSync(fullPath)) return fullPath;
+  return fs.existsSync(transcriptPath) ? transcriptPath : null;
+}
+
 /**
  * 把這一輪的即時訊息 id 對到 transcript 的歷史 id。
  * ACP 沒有 step_index，即時 tool_use 的 id 是 toolCallId、文字是隨機 id；transcript 以 step_index 編號。
- * 依「這一輪新增的步驟」順序配對：工具呼叫依序對 tool_calls，助理文字依序對有內容的 PLANNER_RESPONSE。
+ * 依「這一輪新增的步驟」順序配對：工具呼叫依序對 tool_calls，助理文字依序對有內容的 PLANNER_RESPONSE
+ * （若插話導致單一即時文字段落對應多筆連續 PLANNER_RESPONSE，將剩餘歷史文字 id 掛在同一則即時訊息上以維持對帳錨點穩定）。
  * 配對不上就跳過，歷史對帳會在會話閒置時以 transcript 重建，不影響正確性。
  */
 export function linkLiveIdsToTranscript(sessionId, transcriptPath, fromStepExclusive, liveTools, liveTexts) {
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) return;
+  const readablePath = resolveReadableTranscriptPath(transcriptPath);
+  if (!readablePath) return;
   const toolIds = [];
   const textIds = [];
-  for (const line of fs.readFileSync(transcriptPath, 'utf8').split('\n')) {
+  for (const line of fs.readFileSync(readablePath, 'utf8').split('\n')) {
     if (!line.trim()) continue;
     let entry;
     try { entry = JSON.parse(line); } catch { continue; }
@@ -140,8 +149,14 @@ export function linkLiveIdsToTranscript(sessionId, transcriptPath, fromStepExclu
     }
   }
   const link = (liveIds, historyIds) => {
+    if (!liveIds.length || !historyIds.length) return;
     liveIds.forEach((liveId, i) => {
-      if (historyIds[i]) sessionMessagesDb.updateProviderIds(sessionId, liveId, [historyIds[i]]);
+      if (!historyIds[i]) return;
+      const isLastLive = i === liveIds.length - 1;
+      const idsToBind = isLastLive && historyIds.length > liveIds.length
+        ? historyIds.slice(i)
+        : [historyIds[i]];
+      sessionMessagesDb.updateProviderIds(sessionId, liveId, idsToBind);
     });
   };
   try {
@@ -153,9 +168,10 @@ export function linkLiveIdsToTranscript(sessionId, transcriptPath, fromStepExclu
 }
 
 function lastTranscriptStep(transcriptPath) {
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) return -1;
+  const readablePath = resolveReadableTranscriptPath(transcriptPath);
+  if (!readablePath) return -1;
   let last = -1;
-  for (const line of fs.readFileSync(transcriptPath, 'utf8').split('\n')) {
+  for (const line of fs.readFileSync(readablePath, 'utf8').split('\n')) {
     if (!line.trim()) continue;
     try {
       const index = JSON.parse(line).step_index;
@@ -410,13 +426,13 @@ export async function spawnAntigravity(message, options = {}, ws) {
   await cleanupTempFiles(tempImagePaths, tempDir);
   if (run.sessionId) activeRuns.delete(run.sessionId);
 
-  // 結束後立即同步 transcript，並把即時 id 對到歷史 id
+  // 結束後先將即時訊息 id 綁上 transcript 的歷史 id，再執行同步通知前端，避免對帳競態
   try {
     transcriptPath = findAntigravityTranscriptPath(run.sessionId);
     if (transcriptPath) {
+      linkLiveIdsToTranscript(run.sessionId, transcriptPath, stepBefore, run.liveTools, run.liveTexts);
       const synchronizer = providerRegistry.resolveProvider('antigravity')?.sessionSynchronizer;
       if (synchronizer) await synchronizer.synchronizeFile(transcriptPath);
-      linkLiveIdsToTranscript(run.sessionId, transcriptPath, stepBefore, run.liveTools, run.liveTexts);
     }
   } catch (error) {
     console.warn('Antigravity session post-run sync warning:', error);

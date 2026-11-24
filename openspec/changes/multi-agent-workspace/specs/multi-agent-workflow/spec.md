@@ -51,16 +51,16 @@
 - **WHEN** 工作流執行中服務重啟
 - **THEN** 重啟後該執行的進行中節點顯示為失敗（已中斷），使用者可重新開始
 
-### Requirement: 不可變的執行快照
-每個 run SHALL 以交易保存完整定義與版本（包含節點 id、標題、指令、模型、provider、依賴）；調度與歷史詳情 SHALL 依該快照顯示。系統 SHALL 提供執行列表與指定 run 詳情。同一工作流 SHALL 最多一個 running/stopping run。
+### Requirement: 不可變的執行快照與多實例並行
+每個 run SHALL 以交易保存完整定義與版本（包含節點 id、標題、指令、模型、provider、依賴）以及選填的啟動輸入（`startInput`）；調度與歷史詳情 SHALL 依該快照顯示。系統 SHALL 提供執行列表與指定 run 詳情。同一工作流 SHALL 允許最多 5 個 running/stopping 並行實例，超出上限時回傳 409。
 
 #### Scenario: 修改或刪除舊節點
 - **WHEN** 工作流執行完成後使用者修改模型、刪除節點或重用節點 id
 - **THEN** 舊 run 仍顯示當時的節點、指令、模型、依賴與輸出，不套用目前定義
 
-#### Scenario: 重複開始
-- **WHEN** 另一分頁在工作流已有 running/stopping run 時要求開始
-- **THEN** 後端回傳 409，不建立第二個 run 或呼叫模型
+#### Scenario: 超出並行實例上限
+- **WHEN** 同一工作流已有 5 個 running/stopping run，使用者再次要求開始第 6 個
+- **THEN** 後端回傳 409，不建立新的 run 或呼叫模型
 
 ### Requirement: 節點工具權限
 工作流節點 SHALL 允許使用工具，並以節點層級的權限模式執行；權限模式選項 SHALL 取自該 provider 支援的模式，預設為 provider 預設模式。需審批的工具請求 SHALL 進入全域審批收件匣，節點顯示「等待審批」。四家 provider 都 SHALL 可用於節點。
@@ -82,7 +82,7 @@
 - **THEN** 已停止狀態不被改寫，不啟動下游，依 runtime emitsTerminal 契約只產生一次終止結果
 
 ### Requirement: 人工確認節點
-工作流 SHALL 支援 `type: "approval"` 的人工確認節點（不需 provider / model）。執行到此節點時 SHALL 暫停，節點顯示「等待確認」並自動打開詳情，顯示確認內容與上游輸出；使用者 SHALL 能填寫備註後核准或駁回。核准後節點輸出 SHALL 為上游輸出加上備註並傳給下游；駁回則節點失敗、下游略過。停止執行時等待中的確認節點 SHALL 視為駁回。
+工作流 SHALL 支援 `type: "approval"` 的人工確認節點（不需 provider / model）。執行到此節點時 SHALL 暫停，節點顯示「等待確認」並自動打開詳情，顯示確認內容與上游輸出；使用者 SHALL 能填寫備註後選擇「核准」、「退回重做」或「駁回」。核准後節點輸出 SHALL 為上游輸出加上備註並傳給下游；退回重做時將修改意見發回上游 Agent 節點沿用同一會話重新生成，並重置下游等待再次確認；駁回則節點失敗、下游略過。停止執行時等待中的確認節點 SHALL 視為駁回。
 
 #### Scenario: 核准並帶備註
 - **WHEN** propose 完成後執行到人工確認節點，使用者填寫「只 apply 18350」並核准
