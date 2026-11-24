@@ -66,7 +66,10 @@ test('行程意外退出時未完成的請求全部拒絕，並附 stderr', asyn
   await assert.rejects(conn.request('x', {}), /closed/);
 });
 
-test('請求逾時', async () => {
+test('請求逾時', async (t) => {
+  // 真實執行由子行程維持事件迴圈；測試替身需自行維持到逾時完成。
+  const keepAlive = setInterval(() => {}, 1000);
+  t.after(() => clearInterval(keepAlive));
   const { child } = fakeChild();
   const conn = new AcpConnection(child as never, {}, 20);
   await assert.rejects(conn.request('slow', {}), /timed out/);

@@ -372,7 +372,10 @@ export class WorkflowRunner {
           ].join('\n\n');
           const targetIds = new Set(targets.map((t) => t.id));
           for (const id of targetIds) active.followUps.set(id, { prompt });
-          resetNodesForRerun(active.run, collectDownstream(active.run.definition, targetIds), targetIds);
+          const downstream = collectDownstream(active.run.definition, targetIds);
+          // 解除其他分支的舊確認等待，讓排程器在上游重跑後重新建立確認。
+          for (const id of downstream) active.confirmations.get(id)?.('reset', '');
+          resetNodesForRerun(active.run, downstream, targetIds);
           this.persist(active);
           this.emitRun(active);
           resolve();
@@ -401,7 +404,12 @@ export class WorkflowRunner {
     const kind: ConfirmDecision = typeof decision === 'boolean' ? (decision ? 'approve' : 'reject') : decision;
     if (kind === 'rework') {
       const node = active.run.definition.nodes.find((n) => n.id === nodeId);
-      if (!node || !upstreamAgentNodes(active.run.definition, node).length) return false;
+      if (!node) return false;
+      const targets = upstreamAgentNodes(active.run.definition, node);
+      if (!targets.length) return false;
+      // 不可重設仍由 runNode 持有的狀態（也包含 waiting_input）。
+      const downstream = collectDownstream(active.run.definition, targets.map((target) => target.id));
+      if ([...downstream].some((id) => active.calls.has(id))) return false;
     }
     resolve(kind, note.trim());
     return true;

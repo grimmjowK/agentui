@@ -32,6 +32,8 @@ export type ChatroomDispatcherDeps = {
 };
 
 type ActiveTurn = {
+  /** 刪除時停止派發下一則排隊訊息；一般停止回合不影響佇列。 */
+  drain?: boolean;
   turnId: string;
   stopping: boolean;
   call: AgentCall | null;
@@ -163,6 +165,7 @@ export class ChatroomDispatcher {
   async stopAndWait(multiAgentId: string): Promise<void> {
     const turn = this.active.get(multiAgentId);
     if (!turn) return;
+    turn.drain = true;
     await this.stop(multiAgentId, turn.turnId);
     await turn.done;
   }
@@ -186,7 +189,7 @@ export class ChatroomDispatcher {
       .catch((error) => console.error('[multi-agent] turn failed', error))
       .finally(() => {
         this.active.delete(agent.id);
-        this.pump(agent.id);
+        if (!turn.drain) this.pump(agent.id);
       });
   }
 

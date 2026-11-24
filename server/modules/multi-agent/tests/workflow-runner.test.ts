@@ -350,3 +350,39 @@ test('建立器與聊天室成員的會話也不出現在專案會話列表', as
     assert.ok(sessionsDb.getSessionById('builder'), '按 id 仍可載入');
   });
 });
+
+
+test('分支退回重做後，所有下游確認節點重新等待確認', async () => {
+  await withDb(async () => {
+    const gate = (id: string) => ({ id, title: id, instruction: 'approve', type: 'approval' as const, dependsOn: ['a'] });
+    const { runner, agent } = setup({ nodes: [node('a'), gate('g1'), gate('g2')] }, say('ok'));
+    const started = runner.start(agent)!;
+    await waitFor(() => started.run.nodeStates.g1.state === 'waiting_confirmation' && started.run.nodeStates.g2.state === 'waiting_confirmation');
+    runner.confirm(started.run.id, 'g1', 'rework', 'fix');
+    await waitFor(() => started.run.nodeStates.a.state === 'succeeded' && started.run.nodeStates.g1.state === 'waiting_confirmation');
+    const secondGateState = started.run.nodeStates.g2.state;
+    runner.confirm(started.run.id, 'g1', true);
+    runner.confirm(started.run.id, 'g2', true);
+    await started.done;
+    assert.equal(secondGateState, 'waiting_confirmation');
+    assert.equal(started.run.status, 'succeeded');
+  });
+});
+
+
+test('受影響分支仍在執行或等待輸入時拒絕退回重做', async () => {
+  await withDb(async () => {
+    const gate = { id: 'gate', title: 'gate', instruction: 'approve', type: 'approval' as const, dependsOn: ['a'] };
+    const { runner, agent, mock } = setup({ nodes: [node('a'), gate, node('b', ['a'])] },
+      async (ctx) => say('ok', ctx.prompt.includes('do b') ? 5000 : 0)(ctx));
+    const started = runner.start(agent)!;
+    await waitFor(() => started.run.nodeStates.gate.state === 'waiting_confirmation' && Boolean(workflowSessions.get('s2')));
+    assert.equal(runner.confirm(started.run.id, 'gate', 'rework'), false);
+    await interruptFromChat(mock, 's2');
+    await waitFor(() => started.run.nodeStates.b.state === 'waiting_input');
+    assert.equal(runner.confirm(started.run.id, 'gate', 'rework'), false);
+    assert.equal(started.run.nodeStates.gate.state, 'waiting_confirmation');
+    await runner.stop(started.run.id);
+    await started.done;
+  });
+});

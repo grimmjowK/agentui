@@ -185,3 +185,20 @@ test('settingNotes：依目前定義比對，改回原值不提示，截斷提�
   assert.deepEqual(settingNotes(session, def.members[0], changed), ['每則回覆上限改為 40 字']);
   assert.match(settingNotes({ ...session, truncatedAt: 40 }, def.members[0], def).join(), /第 40 字被截斷/);
 });
+
+
+test('刪除前停止並等待，不派發排隊訊息', async () => {
+  await withDb(async () => {
+    const { dispatcher, agent, id, mock } = setup(twoMembers(), say('ok', 300));
+    dispatcher.send(agent(), '@產品經理 first');
+    dispatcher.send(agent(), '@產品經理 second');
+    await dispatcher.stopAndWait(id);
+    const busyAfterStop = dispatcher.isBusy(id);
+    const callsAfterStop = mock.calls.length;
+    multiAgentsDb.delete(1, id);
+    await dispatcher.idle(id);
+    assert.equal(busyAfterStop, false);
+    assert.equal(callsAfterStop, 1);
+    assert.deepEqual(multiAgentsDb.listMessages(id), []);
+  });
+});

@@ -47,7 +47,10 @@ test('沒有使用者身分的請求直接拒絕，不進池', async () => {
   assert.equal(approvals.list(7).length, 0);
 });
 
-test('逾時回覆 deny 並送 permission_cancelled', async () => {
+test('逾時回覆 deny 並送 permission_cancelled', async (t) => {
+  // 真實執行由子行程維持事件迴圈；測試替身需自行維持到逾時完成。
+  const keepAlive = setInterval(() => {}, 1000);
+  t.after(() => clearInterval(keepAlive));
   const previous = process.env.ANTIGRAVITY_APPROVAL_TIMEOUT_MS;
   process.env.ANTIGRAVITY_APPROVAL_TIMEOUT_MS = '20';
   try {

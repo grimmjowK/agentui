@@ -43,12 +43,13 @@ test('建立、使用者隔離、更新定義遞增版本、列表依更新時�
   });
 });
 
-test('run 保存快照、同時只允許一個 running run', async () => {
+test('run 保存快照、同時最多允許五個 running run', async () => {
   await withIsolatedDatabase(() => {
     const agent = multiAgentsDb.create(1, { kind: 'workflow', name: 'wf', workspacePath: '/tmp' });
     const withDef = multiAgentsDb.setDefinition(1, agent.id, workflow)!;
     const run = multiAgentsDb.createRun(withDef, { a: { state: 'pending', progress: 0 } });
     assert.ok(run);
+    for (let i = 1; i < 5; i++) assert.ok(multiAgentsDb.createRun(withDef, {}));
     assert.equal(multiAgentsDb.createRun(withDef, {}), null);
 
     multiAgentsDb.setDefinition(1, agent.id, { nodes: [{ ...workflow.nodes[0], id: 'b' }] });
