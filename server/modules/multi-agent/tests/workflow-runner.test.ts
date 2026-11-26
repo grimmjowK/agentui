@@ -441,3 +441,59 @@ test('下游節點處於 waiting_input 時拒絕上游追問與 continueDownstre
     await started.done;
   });
 });
+
+test('工作流節點對話頁發送截圖（images）時，圖片一併傳給 runtime.start 並記入 session_messages', async () => {
+  await withDb(async () => {
+    const { runner, agent, mock } = setup({ nodes: [node('a')] }, say('SAW_IMAGE'));
+    const started = runner.start(agent)!;
+    await started.done;
+
+    const sampleImages = [{ name: 'screen.png', data: 'data:image/png;base64,iVBORw0KGgo=' }];
+    const cId = '44444444-4444-4444-8444-444444444444';
+    const res = await workflowSessions.continueSession('s1', 1, '這張截圖合理嗎？', cId, sampleImages);
+    assert.equal(res, 'continued');
+    await waitFor(() => mock.calls.length === 2 && multiAgentsDb.getRun(agent.id, started.run.id)!.status === 'succeeded');
+
+    assert.deepEqual(mock.calls[1].options.images, sampleImages, '圖片應傳入 runtime.start options.images');
+    const userMsg = sessionMessagesDb.list('s1', { afterSeq: null, limit: null }).messages.find((m) => m.id === `user:${cId}`);
+    assert.equal((userMsg?.images as Array<{ name: string }> | undefined)?.[0]?.name, 'screen.png', '圖片中繼資料應記入 session_messages');
+  });
+});
+
+test('上游確認節點因先前重跑並停止而處於 failed 時，直接在下游已執行節點對話頁追問仍能立即執行該節點', async () => {
+  await withDb(async () => {
+    const gate = { id: 'gate_test', title: '確認測試', instruction: 'ok?', type: 'approval' as const, dependsOn: ['test_submit'] };
+    const def = { nodes: [node('test_submit'), gate, node('review1', ['gate_test'])] } as WorkflowDef;
+    const { runner, agent, mock } = setup(def, async (ctx) => {
+      if (ctx.prompt.includes('MR block')) await say('MR_FIXED')(ctx);
+      else if (ctx.prompt.includes('do review1')) await say('REVIEW_V1')(ctx);
+      else await say('TEST_OK')(ctx);
+    });
+    const started = runner.start(agent)!;
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.gate_test.state === 'waiting_confirmation');
+    runner.confirm(started.run.id, 'gate_test', true);
+    await started.done;
+
+    const r1SessionId = multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.review1.sessionId!;
+    assert.equal(r1SessionId, 's2');
+
+    // 使用者回到上游 test_submit (s1) 追問，推進到 gate_test 後按停止（導致 gate_test=failed, review1=skipped）
+    await workflowSessions.continueSession('s1', 1, '怎麼拉起前端？', '55555555-5555-4555-8555-555555555555');
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.gate_test.state === 'waiting_confirmation');
+    await runner.stop(started.run.id);
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.status === 'stopped');
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.gate_test.state, 'failed');
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.review1.state, 'skipped');
+
+    // 使用者打開下游 review1 (s2) 的對話頁發送「MR block 了，fix 下」
+    const res = await workflowSessions.continueSession(r1SessionId, 1, 'MR block 了，fix 下', '66666666-6666-4666-8666-666666666666');
+    assert.equal(res, 'continued');
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.status === 'succeeded');
+
+    const finalRun = multiAgentsDb.getRun(agent.id, started.run.id)!;
+    assert.equal(finalRun.nodeStates.review1.state, 'succeeded');
+    assert.equal(finalRun.nodeStates.review1.output, 'MR_FIXED');
+    assert.equal(mock.calls.at(-1)?.options.sessionId, 's2');
+    assert.equal(mock.calls.at(-1)?.prompt, 'MR block 了，fix 下');
+  });
+});

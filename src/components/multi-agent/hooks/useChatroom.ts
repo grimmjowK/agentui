@@ -1,20 +1,20 @@
 /**
- * 聊天室訊息：分頁載入歷史，訂閱 multi-agent-message / multi-agent-turn 事件。
- * 重連時重新取得訊息列表（執行中訊息帶已累積內容）。
+ * 聊天室訊息與多對話（thread）管理：
+ * 支援在同一聊天室設定下開啟多個獨立對話、同時並行發言，並訂閱 multi-agent-message / multi-agent-turn 事件。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWebSocket } from '../../../contexts/WebSocketContext';
 import { api } from '../../../utils/api';
-import type { ChatMessage } from '../types/types';
+import type { ChatMessage, ChatThread } from '../types/types';
 import { readData } from '../utils/fetchJson';
 
 const PAGE = 50;
 
 type MessageEvent =
-  | { type: 'multi-agent-message'; multiAgentId: string; kind: 'upsert'; message: ChatMessage }
-  | { type: 'multi-agent-message'; multiAgentId: string; kind: 'delta'; messageId: string; content: string; turnId: string }
-  | { type: 'multi-agent-turn'; multiAgentId: string; turnId: string; status: string };
+  | { type: 'multi-agent-message'; multiAgentId: string; threadId?: string; kind: 'upsert'; message: ChatMessage }
+  | { type: 'multi-agent-message'; multiAgentId: string; threadId?: string; kind: 'delta'; messageId: string; content: string; turnId: string }
+  | { type: 'multi-agent-turn'; multiAgentId: string; threadId?: string; turnId: string; status: string };
 
 function upsert(list: ChatMessage[], message: ChatMessage): ChatMessage[] {
   const existing = list.find((m) => m.id === message.id);
@@ -27,23 +27,27 @@ function upsert(list: ChatMessage[], message: ChatMessage): ChatMessage[] {
 
 export function useChatroom(multiAgentId: string) {
   const { latestMessage, isConnected } = useWebSocket();
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [selectedThreadId, setSelectedThreadId] = useState<string>('default');
+  const [activeTurns, setActiveTurns] = useState<Record<string, string | null>>({});
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadingMore = useRef(false);
   const requestSeqRef = useRef(0);
+  const selectedThreadRef = useRef(selectedThreadId);
+  selectedThreadRef.current = selectedThreadId;
 
-  const reload = useCallback(async () => {
+  const reloadMessages = useCallback(async (threadId: string) => {
     const seq = ++requestSeqRef.current;
     try {
       const data = await readData<{ messages: ChatMessage[]; activeTurnId: string | null }>(
-        api.multiAgent.messages(multiAgentId, { limit: PAGE }),
+        api.multiAgent.messages(multiAgentId, { threadId, limit: PAGE }),
       );
       if (seq !== requestSeqRef.current) return;
       setMessages(data.messages);
-      setActiveTurnId(data.activeTurnId);
+      setActiveTurns((prev) => ({ ...prev, [threadId]: data.activeTurnId }));
       setHasMore(data.messages.length === PAGE);
     } catch (err) {
       if (seq !== requestSeqRef.current) return;
@@ -53,17 +57,93 @@ export function useChatroom(multiAgentId: string) {
     }
   }, [multiAgentId]);
 
+  const reloadThreads = useCallback(async (preferThreadId?: string) => {
+    try {
+      const data = await readData<{ threads: ChatThread[]; activeTurns: Record<string, string> }>(
+        api.multiAgent.listThreads(multiAgentId),
+      );
+      setThreads(data.threads);
+      setActiveTurns(data.activeTurns ?? {});
+      const unarchived = data.threads.filter((t) => !t.isArchived);
+      const targetId = preferThreadId && data.threads.some((t) => t.id === preferThreadId && !t.isArchived)
+        ? preferThreadId
+        : unarchived[0]?.id ?? data.threads[0]?.id ?? 'default';
+      setSelectedThreadId(targetId);
+      await reloadMessages(targetId);
+    } catch (err) {
+      setError((err as Error).message);
+      setLoading(false);
+    }
+  }, [multiAgentId, reloadMessages]);
+
   useEffect(() => {
     requestSeqRef.current += 1;
     loadingMore.current = false;
+    setThreads([]);
+    setSelectedThreadId('default');
+    setActiveTurns({});
     setMessages([]);
-    setActiveTurnId(null);
     setHasMore(false);
     setLoading(true);
     setError(null);
   }, [multiAgentId]);
 
-  useEffect(() => { void reload(); }, [reload, isConnected]);
+  useEffect(() => {
+    void reloadThreads(selectedThreadRef.current);
+  }, [reloadThreads, isConnected]);
+
+  const selectThread = useCallback((threadId: string) => {
+    if (threadId === selectedThreadRef.current) return;
+    setSelectedThreadId(threadId);
+    setMessages([]);
+    setHasMore(false);
+    setLoading(true);
+    void reloadMessages(threadId);
+  }, [reloadMessages]);
+
+  const createThread = useCallback(async () => {
+    setError(null);
+    try {
+      const created = await readData<ChatThread>(api.multiAgent.createThread(multiAgentId));
+      setThreads((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
+      setSelectedThreadId(created.id);
+      setMessages([]);
+      setHasMore(false);
+      setLoading(false);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [multiAgentId]);
+
+  const deleteThread = useCallback(async (threadId: string, options: { force?: boolean } = {}) => {
+    setError(null);
+    try {
+      const res = await readData<{ id: string; archived?: boolean; deleted?: boolean }>(
+        api.multiAgent.deleteThread(multiAgentId, threadId, options),
+      );
+      if (res.archived && !res.deleted) {
+        // 若所有未歸檔對話都被歸檔，自動建立一個新對話供當前頁面使用
+        const remainingActive = threads.filter((t) => t.id !== threadId && !t.isArchived);
+        if (remainingActive.length === 0) {
+          await readData<ChatThread>(api.multiAgent.createThread(multiAgentId));
+        }
+      }
+      await reloadThreads(selectedThreadRef.current === threadId ? undefined : selectedThreadRef.current);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [multiAgentId, reloadThreads, threads]);
+
+  const restoreThread = useCallback(async (threadId: string) => {
+    setError(null);
+    try {
+      await readData(api.multiAgent.restoreThread(multiAgentId, threadId));
+      setThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, isArchived: false } : t)));
+      selectThread(threadId);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [multiAgentId, selectThread]);
 
   const loadEarlier = useCallback(async () => {
     const first = messages[0];
@@ -71,36 +151,66 @@ export function useChatroom(multiAgentId: string) {
     loadingMore.current = true;
     try {
       const data = await readData<{ messages: ChatMessage[] }>(
-        api.multiAgent.messages(multiAgentId, { beforeSeq: first.seq, limit: PAGE }),
+        api.multiAgent.messages(multiAgentId, { threadId: selectedThreadId, beforeSeq: first.seq, limit: PAGE }),
       );
       setMessages((current) => [...data.messages.filter((m) => !current.some((c) => c.id === m.id)), ...current]);
       setHasMore(data.messages.length === PAGE);
     } finally {
       loadingMore.current = false;
     }
-  }, [messages, multiAgentId]);
+  }, [messages, multiAgentId, selectedThreadId]);
 
   useEffect(() => {
     const event = latestMessage as MessageEvent | null;
     if (!event || event.multiAgentId !== multiAgentId) return;
+    const evThreadId = event.threadId ?? (event.type === 'multi-agent-message' && event.kind === 'upsert' ? event.message.threadId : undefined) ?? 'default';
+
     if (event.type === 'multi-agent-turn') {
-      setActiveTurnId(['running', 'stopping'].includes(event.status) ? event.turnId : null);
+      const nextTurnId = ['running', 'stopping'].includes(event.status) ? event.turnId : null;
+      setActiveTurns((prev) => ({ ...prev, [evThreadId]: nextTurnId }));
       return;
     }
     if (event.type !== 'multi-agent-message') return;
     if (event.kind === 'upsert') {
-      setMessages((current) => upsert(current, event.message));
-      if (event.message.turnId && event.message.status === 'streaming') setActiveTurnId(event.message.turnId);
-    } else {
+      if (event.message.turnId && event.message.status === 'streaming') {
+        setActiveTurns((prev) => ({ ...prev, [evThreadId]: event.message.turnId }));
+      }
+      if (event.message.authorKind === 'user') {
+        const snippet = event.message.content.trim().replace(/\s+/g, ' ').slice(0, 32);
+        if (snippet) {
+          setThreads((prev) => prev.map((t) => (
+            t.id === evThreadId && ['新對話', '新对话', 'New chat'].includes(t.title)
+              ? { ...t, title: snippet, updatedAt: event.message.createdAt }
+              : t.id === evThreadId
+                ? { ...t, updatedAt: event.message.createdAt }
+                : t
+          )));
+        }
+      }
+      if (evThreadId === selectedThreadRef.current) {
+        setMessages((current) => upsert(current, event.message));
+      }
+    } else if (evThreadId === selectedThreadRef.current) {
       setMessages((current) => current.map((m) => (m.id === event.messageId ? { ...m, content: event.content } : m)));
     }
   }, [latestMessage, multiAgentId]);
 
   const send = useCallback(async (content: string) => {
     setError(null);
+    const threadId = selectedThreadRef.current;
     try {
-      const message = await readData<ChatMessage>(api.multiAgent.sendMessage(multiAgentId, content));
-      setMessages((current) => upsert(current, message));
+      const message = await readData<ChatMessage>(api.multiAgent.sendMessage(multiAgentId, content, threadId));
+      const snippet = content.trim().replace(/\s+/g, ' ').slice(0, 32);
+      if (snippet) {
+        setThreads((prev) => prev.map((t) => (
+          t.id === threadId && ['新對話', '新对话', 'New chat'].includes(t.title)
+            ? { ...t, title: snippet, updatedAt: message.createdAt }
+            : t
+        )));
+      }
+      if (threadId === selectedThreadRef.current) {
+        setMessages((current) => upsert(current, message));
+      }
     } catch (err) {
       setError((err as Error).message);
       throw err;
@@ -116,6 +226,8 @@ export function useChatroom(multiAgentId: string) {
     }
   }, [multiAgentId]);
 
+  const activeTurnId = activeTurns[selectedThreadId] ?? null;
+
   const stop = useCallback(async () => {
     if (!activeTurnId) return;
     try {
@@ -125,5 +237,23 @@ export function useChatroom(multiAgentId: string) {
     }
   }, [activeTurnId, multiAgentId]);
 
-  return { messages, activeTurnId, hasMore, loading, error, clearError: () => setError(null), send, cancelQueued, stop, loadEarlier };
+  return {
+    threads,
+    selectedThreadId,
+    selectThread,
+    createThread,
+    deleteThread,
+    restoreThread,
+    activeTurns,
+    messages,
+    activeTurnId,
+    hasMore,
+    loading,
+    error,
+    clearError: () => setError(null),
+    send,
+    cancelQueued,
+    stop,
+    loadEarlier,
+  };
 }

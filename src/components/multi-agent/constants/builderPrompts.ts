@@ -35,7 +35,7 @@ const CHATROOM_EXAMPLE = `{
     { "id": "pm", "name": "產品經理", "persona": "……", "provider": "claude", "model": "sonnet" },
     { "id": "eng", "name": "工程師", "persona": "……", "provider": "codex", "model": "gpt-5" }
   ],
-  "rules": { "text": "……", "maxReplyChars": 800, "allowAiMentions": false, "maxAiRepliesPerTurn": 2, "unmentionedBehavior": "all" }
+  "rules": { "text": "……", "allowAiMentions": false, "maxAiRepliesPerTurn": 2, "unmentionedBehavior": "all" }
 }`;
 
 export function buildBuilderPrompt(kind: MultiAgentKind, hints: ModelHint[], current: unknown): string {
@@ -57,7 +57,7 @@ export function buildBuilderPrompt(kind: MultiAgentKind, hints: ModelHint[], cur
     : [
       `這是一個群聊聊天室：由 1–${MAX_CHAT_MEMBERS} 位成員組成，每位成員是一個 AI 角色。`,
       '成員名稱不可重複、不可含空白或 @，也不可叫「所有人」；persona 寫清楚角色的立場、專長與說話風格。',
-      'rules.text 是群規；maxReplyChars 為 1–8000 的整數；maxAiRepliesPerTurn 為 1–32 的整數；unmentionedBehavior 為 all 或 none。',
+      'rules.text 是群規；maxAiRepliesPerTurn 為 1–32 的整數；unmentionedBehavior 為 all 或 none。',
       '群規要能防止成員之間空泛客套、重複發言，以節省 token。',
       `格式範例：\n${CHATROOM_EXAMPLE}`,
     ];

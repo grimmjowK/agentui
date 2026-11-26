@@ -137,15 +137,46 @@ export const api = {
       ),
     stopRun: (id, runId) =>
       authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' }),
-    messages: (id, { beforeSeq, limit } = {}) => {
+    deleteRun: (id, runId, { force = false } = {}) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}${force ? '?force=true' : ''}`,
+        { method: 'DELETE' },
+      ),
+    restoreRun: (id, runId) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/restore`,
+        { method: 'POST' },
+      ),
+    listThreads: (id) =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/threads`),
+    createThread: (id, title = '') =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/threads`, {
+        method: 'POST',
+        body: JSON.stringify(title ? { title } : {}),
+      }),
+    deleteThread: (id, threadId, { force = false } = {}) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/threads/${encodeURIComponent(threadId)}${force ? '?force=true' : ''}`,
+        { method: 'DELETE' },
+      ),
+    restoreThread: (id, threadId) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/threads/${encodeURIComponent(threadId)}/restore`,
+        { method: 'POST' },
+      ),
+    messages: (id, { threadId, beforeSeq, limit } = {}) => {
       const params = new URLSearchParams();
+      if (threadId !== undefined) params.set('threadId', String(threadId));
       if (beforeSeq !== undefined) params.set('beforeSeq', String(beforeSeq));
       if (limit !== undefined) params.set('limit', String(limit));
       const qs = params.toString();
       return authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/messages${qs ? `?${qs}` : ''}`);
     },
-    sendMessage: (id, content) =>
-      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ content }) }),
+    sendMessage: (id, content, threadId = 'default') =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content, threadId }),
+      }),
     cancelQueued: (id, messageId) =>
       authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' }),
     stopTurn: (id, turnId) =>

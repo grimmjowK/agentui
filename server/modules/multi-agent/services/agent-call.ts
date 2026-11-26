@@ -85,7 +85,7 @@ export class AgentCall {
    * 執行一輪。prompt 省略時用建構時的提示；之後的輪次（中斷後續接）以同一 sessionId 續接，
    * 輸出以最新一輪的最終回覆為準。clientId 用於前端對應樂觀顯示的使用者訊息。
    */
-  async run(prompt = this.options.prompt, clientId: string = randomUUID()): Promise<AgentCallResult> {
+  async run(prompt = this.options.prompt, clientId: string = randomUUID(), images?: unknown): Promise<AgentCallResult> {
     const { provider, permissionMode } = this.options;
     // 前一輪被中斷時殘留的串流段落，併入已完成的輸出
     if (this.segment) { this.completed.push(this.segment); this.segment = ''; }
@@ -95,7 +95,7 @@ export class AgentCall {
     this.exitFailed = false;
     const resume = this.rounds > 0 ? true : Boolean(this.options.sessionId);
     this.rounds += 1;
-    const writer = this.options.persist ? this.createLoggingWriter(prompt, clientId) : this.writer;
+    const writer = this.options.persist ? this.createLoggingWriter(prompt, clientId, images) : this.writer;
     this.activeWriter = writer;
     const info = PROVIDER_INFO[provider];
     const mode = info.mapPermissionMode ? info.mapPermissionMode(permissionMode) : permissionMode;
@@ -120,6 +120,7 @@ export class AgentCall {
         permissionMode: mode,
         // Cursor 只認 skipPermissions
         skipPermissions: mode === 'bypassPermissions',
+        ...(Array.isArray(images) && images.length > 0 ? { images } : {}),
       }, writer);
     } catch (error) {
       this.error ??= error instanceof Error ? error.message : String(error);
@@ -136,7 +137,7 @@ export class AgentCall {
   }
 
   /** LoggingWriter(inner = 扇出)：執行器自己處理事件，同時推給使用者所有連線 */
-  private createLoggingWriter(prompt: string, clientId: string): LoggingWriter {
+  private createLoggingWriter(prompt: string, clientId: string, images?: unknown): LoggingWriter {
     const { userId, provider } = this.options;
     const fanout: ProviderRuntimeWriter = {
       userId,
@@ -148,7 +149,7 @@ export class AgentCall {
       setSessionId: (id) => this.captureSessionId(id),
     };
     const writer = new LoggingWriter(fanout, { initialSessionId: this.sessionId, userId, provider });
-    writer.recordUserMessage({ clientId, content: prompt, provider, sessionId: this.sessionId });
+    writer.recordUserMessage({ clientId, content: prompt, images, provider, sessionId: this.sessionId });
     return writer;
   }
 

@@ -64,6 +64,39 @@ function collectDownstream(def: WorkflowDef, roots: Iterable<string>): Set<strin
   return set;
 }
 
+/** 收集 targetId 的所有傳遞上游（祖先）節點 ID（不含 targetId 本身） */
+function collectAncestors(def: WorkflowDef, targetId: string): Set<string> {
+  const set = new Set<string>();
+  const walk = (id: string) => {
+    const node = def.nodes.find((n) => n.id === id);
+    if (!node) return;
+    for (const depId of node.dependsOn) {
+      if (!set.has(depId)) {
+        set.add(depId);
+        walk(depId);
+      }
+    }
+  };
+  walk(targetId);
+  return set;
+}
+
+/** 確保目標節點的所有上游祖先皆標記為 succeeded，使排程器 ready() 能立即執行目標節點 */
+function ensureAncestorsSucceeded(run: WorkflowRun, targetId: string, active?: ActiveRun): void {
+  for (const ancId of collectAncestors(run.definition, targetId)) {
+    active?.confirmations.get(ancId)?.('reset', '');
+    const prev = run.nodeStates[ancId];
+    if (prev && prev.state !== 'succeeded') {
+      run.nodeStates[ancId] = {
+        ...prev,
+        state: 'succeeded',
+        progress: 100,
+      };
+      delete run.nodeStates[ancId].error;
+    }
+  }
+}
+
 /** 找出人工確認節點對應的上游 Agent 節點（若隔著其他確認節點則繼續往上找） */
 function upstreamAgentNodes(def: WorkflowDef, node: WorkflowNode): WorkflowNode[] {
   const result: WorkflowNode[] = [];
@@ -90,10 +123,15 @@ function resetNodesForRerun(run: WorkflowRun, toReset: Set<string>, keepOutputId
         state: 'pending',
         progress: 0,
         ...(prev?.sessionId ? { sessionId: prev.sessionId } : {}),
-        ...(keepOutputIds?.has(id) && prev?.output ? { output: prev.output } : {}),
+        ...(prev?.output && (keepOutputIds?.has(id) || prev?.sessionId) ? { output: prev.output } : {}),
       };
     } else if (prev.state === 'skipped') {
-      run.nodeStates[id] = { state: 'pending', progress: 0 };
+      run.nodeStates[id] = {
+        state: 'pending',
+        progress: 0,
+        ...(prev?.sessionId ? { sessionId: prev.sessionId } : {}),
+        ...(prev?.output && prev?.sessionId ? { output: prev.output } : {}),
+      };
     }
   }
 }
@@ -112,7 +150,7 @@ function syncLatestAssistantOutput(state: NodeRunStatus): void {
 }
 
 /** waiting_input 的出口：送出新指示續接、以目前輸出完成、標記失敗 */
-type InputDecision = { kind: 'resume'; text: string; clientId: string } | { kind: 'complete' } | { kind: 'fail' };
+type InputDecision = { kind: 'resume'; text: string; clientId: string; images?: unknown } | { kind: 'complete' } | { kind: 'fail' };
 
 class ActiveRun {
   readonly calls = new Map<string, AgentCall>();
@@ -120,8 +158,8 @@ class ActiveRun {
   readonly confirmations = new Map<string, (decision: InternalConfirmDecision, note: string) => void>();
   /** 使用者中斷後等待指示的節點（waiting_input） */
   readonly inputs = new Map<string, (decision: InputDecision) => void>();
-  /** 退回重做或對話頁追問時，指定某節點下一輪要續接的提示詞 */
-  readonly followUps = new Map<string, { prompt: string; clientId?: string }>();
+  /** 退回重做或對話頁追問時，指定某節點下一輪要續接的提示詞與附件圖片 */
+  readonly followUps = new Map<string, { prompt: string; clientId?: string; images?: unknown }>();
   stopping = false;
   done: Promise<void> = Promise.resolve();
   private wakeResolve: (() => void) | null = null;
@@ -146,8 +184,8 @@ export class WorkflowRunner {
   constructor(deps: WorkflowRunnerDeps = {}) {
     this.publish = deps.publish ?? sendToUser;
     this.resolveRuntime = deps.resolveRuntime;
-    workflowSessions.onContinue((sessionId, userId, text, clientId) =>
-      this.continueFromNodeSession(sessionId, userId, text, clientId));
+    workflowSessions.onContinue((sessionId, userId, text, clientId, images) =>
+      this.continueFromNodeSession(sessionId, userId, text, clientId, images));
   }
 
   /** 開始執行。已有執行中 run 時回傳 null。回傳的 promise 只代表已建立，執行在背景進行。 */
@@ -191,6 +229,13 @@ export class WorkflowRunner {
 
   activeCount(multiAgentId: string): number {
     return [...this.active.values()].filter((a) => a.agent.id === multiAgentId).length;
+  }
+
+  async stopAndWaitRun(runId: string): Promise<void> {
+    const active = this.active.get(runId);
+    if (!active) return;
+    await this.stop(runId);
+    await active.done;
   }
 
   async stopByAgent(multiAgentId: string): Promise<void> {
@@ -292,9 +337,9 @@ export class WorkflowRunner {
       userId: agent.userId,
       state: () => (waiting ? 'waiting_input' : 'running'),
       markUserInterrupted: () => { userInterrupted = true; },
-      resume: (text, clientId) => {
+      resume: (text, clientId, images) => {
         if (!waiting) return false;
-        waiting({ kind: 'resume', text, clientId });
+        waiting({ kind: 'resume', text, clientId, images });
         return true;
       },
     };
@@ -302,7 +347,7 @@ export class WorkflowRunner {
     active.calls.set(node.id, call);
 
     try {
-      let result = await call.run(prompt, followUp?.clientId);
+      let result = await call.run(prompt, followUp?.clientId, followUp?.images);
       // 聊天頁中斷：不判定失敗，等使用者的下一步（design D4）
       while (!active.stopping && result.status === 'aborted' && userInterrupted) {
         userInterrupted = false;
@@ -324,7 +369,7 @@ export class WorkflowRunner {
         }
         state.state = 'running';
         this.emitNode(active, node.id);
-        result = await call.run(decision.text, decision.clientId);
+        result = await call.run(decision.text, decision.clientId, decision.images);
       }
       state.output = result.text;
       if (active.stopping || result.status === 'aborted') {
@@ -429,26 +474,30 @@ export class WorkflowRunner {
     userId: string | number | null,
     text: string,
     clientId: string,
+    images?: unknown,
   ): WorkflowContinueResult {
     const entry = multiAgentsDb.getWorkflowSession(sessionId);
     if (!entry || userId === null || userId === undefined || String(entry.userId) !== String(userId)) {
       return 'not_workflow';
     }
     const prompt = text.trim();
-    if (!prompt) return 'not_workflow';
+    const hasImages = Array.isArray(images) && images.length > 0;
+    if (!prompt && !hasImages) return 'not_workflow';
 
     const active = this.active.get(entry.runId);
     if (active) {
       if (active.stopping) return 'busy';
       const downstream = collectDownstream(active.run.definition, [entry.nodeId]);
+      const ancestors = collectAncestors(active.run.definition, entry.nodeId);
       // 不可重設仍由 runNode 持有的狀態（也包含 waiting_input）
-      for (const id of downstream) {
+      for (const id of [...downstream, ...ancestors]) {
         if (active.calls.has(id)) return 'busy';
       }
       for (const id of downstream) {
         active.confirmations.get(id)?.('reset', '');
       }
-      active.followUps.set(entry.nodeId, { prompt, clientId });
+      ensureAncestorsSucceeded(active.run, entry.nodeId, active);
+      active.followUps.set(entry.nodeId, { prompt, clientId, images });
       resetNodesForRerun(active.run, downstream, new Set([entry.nodeId]));
       active.run.nodeStates[entry.nodeId].sessionId = sessionId;
       this.persist(active);
@@ -463,13 +512,14 @@ export class WorkflowRunner {
     if (!run || !agent || !run.definition.nodes.some((n) => n.id === entry.nodeId)) return 'not_workflow';
 
     const downstream = collectDownstream(run.definition, [entry.nodeId]);
+    ensureAncestorsSucceeded(run, entry.nodeId);
     resetNodesForRerun(run, downstream, new Set([entry.nodeId]));
     run.nodeStates[entry.nodeId].sessionId = sessionId;
     run.status = 'running';
     run.finishedAt = null;
 
     const reopened = new ActiveRun(run, agent);
-    reopened.followUps.set(entry.nodeId, { prompt, clientId });
+    reopened.followUps.set(entry.nodeId, { prompt, clientId, images });
     this.active.set(run.id, reopened);
     this.persist(reopened);
     this.emitRun(reopened);
@@ -488,9 +538,11 @@ export class WorkflowRunner {
       if (!state) return false;
       const downstream = collectDownstream(active.run.definition, [nodeId]);
       downstream.delete(nodeId);
-      for (const id of downstream) {
+      const ancestors = collectAncestors(active.run.definition, nodeId);
+      for (const id of [...downstream, ...ancestors]) {
         if (active.calls.has(id)) return false;
       }
+      ensureAncestorsSucceeded(active.run, nodeId, active);
       syncLatestAssistantOutput(state);
       state.state = 'succeeded';
       state.progress = 100;
@@ -509,6 +561,7 @@ export class WorkflowRunner {
     if (!run || !agent) return false;
     const state = run.nodeStates[nodeId];
     if (!state) return false;
+    ensureAncestorsSucceeded(run, nodeId);
     syncLatestAssistantOutput(state);
     state.state = 'succeeded';
     state.progress = 100;

@@ -187,7 +187,7 @@ export function handleChatConnection(
         // 工作流節點會話不走一般啟動：等待指示時交給執行器續接，執行中則請改用插話（design D4/D5）
         const live = liveWorkflowSession(requestedSessionId, writer.userId);
         if (live) {
-          if (!live.resume(data.command ?? '', clientId)) {
+          if (!live.resume(data.command ?? '', clientId, data.options?.images)) {
             sendToClient(writer, createNormalizedMessage({ kind: 'task_notification', provider: id,
               sessionId: requestedSessionId, status: 'warning', summary: 'Workflow node is running; send as a steer message instead.' }));
           }
@@ -197,7 +197,13 @@ export function handleChatConnection(
         if (requestedSessionId) {
           const cwd = typeof data.options?.cwd === 'string' ? data.options.cwd : null;
           const command = await expandSessionMentions(data.command ?? '', cwd);
-          const continued = await workflowSessions.continueSession(requestedSessionId, writer.userId, command, clientId);
+          const continued = await workflowSessions.continueSession(
+            requestedSessionId,
+            writer.userId,
+            command,
+            clientId,
+            data.options?.images,
+          );
           if (continued === 'continued') return;
           if (continued === 'busy') {
             sendToClient(writer, createNormalizedMessage({ kind: 'task_notification', provider: id,

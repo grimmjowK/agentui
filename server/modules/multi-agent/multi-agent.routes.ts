@@ -260,17 +260,82 @@ router.post('/:id/runs/:runId/stop', asyncHandler(async (req: Request, res: Resp
   res.json(createApiSuccessResponse({ stopped }));
 }));
 
+router.delete('/:id/runs/:runId', asyncHandler(async (req: Request, res: Response) => {
+  const agent = requireAgent(req);
+  const runId = String(req.params.runId);
+  const run = multiAgentsDb.getRun(agent.id, runId);
+  if (!run) throw new AppError('Run not found', { statusCode: 404, code: 'NOT_FOUND' });
+  await workflowRunner.stopAndWaitRun(runId);
+  const force = req.query.force === 'true' || req.query.force === '1';
+  if (force || run.isArchived) {
+    multiAgentsDb.deleteRun(agent.id, runId);
+    res.json(createApiSuccessResponse({ id: runId, archived: false, deleted: true }));
+    return;
+  }
+  multiAgentsDb.archiveRun(agent.id, runId, true);
+  res.json(createApiSuccessResponse({ id: runId, archived: true, deleted: false }));
+}));
+
+router.post('/:id/runs/:runId/restore', asyncHandler(async (req: Request, res: Response) => {
+  const agent = requireAgent(req);
+  const runId = String(req.params.runId);
+  const ok = multiAgentsDb.archiveRun(agent.id, runId, false);
+  if (!ok) throw new AppError('Run not found', { statusCode: 404, code: 'NOT_FOUND' });
+  res.json(createApiSuccessResponse({ id: runId, restored: true }));
+}));
+
 // ----------------- 聊天室 -----------------
+
+router.get('/:id/threads', asyncHandler(async (req: Request, res: Response) => {
+  const agent = requireAgent(req);
+  const threads = multiAgentsDb.listThreads(agent.id);
+  const activeTurns = Object.fromEntries(
+    multiAgentsDb.getActiveTurns(agent.id).map((t) => [t.thread_id ?? 'default', t.id]),
+  );
+  res.json(createApiSuccessResponse({ threads, activeTurns }));
+}));
+
+router.post('/:id/threads', asyncHandler(async (req: Request, res: Response) => {
+  const agent = requireAgent(req);
+  if (agent.kind !== 'chatroom') throw badRequest('Not a chatroom');
+  const title = typeof req.body?.title === 'string' && req.body.title.trim() ? req.body.title.trim().slice(0, 60) : '新對話';
+  res.status(201).json(createApiSuccessResponse(multiAgentsDb.createThread(agent.id, title)));
+}));
+
+router.delete('/:id/threads/:threadId', asyncHandler(async (req: Request, res: Response) => {
+  const agent = requireAgent(req);
+  const threadId = String(req.params.threadId);
+  await chatroomDispatcher.stopAndWaitThread(agent.id, threadId);
+  const force = req.query.force === 'true' || req.query.force === '1';
+  const existing = multiAgentsDb.listThreads(agent.id).find((t) => t.id === threadId);
+  if (force || existing?.isArchived) {
+    multiAgentsDb.deleteThread(agent.id, threadId);
+    res.json(createApiSuccessResponse({ id: threadId, archived: false, deleted: true }));
+    return;
+  }
+  multiAgentsDb.archiveThread(agent.id, threadId, true);
+  res.json(createApiSuccessResponse({ id: threadId, archived: true, deleted: false }));
+}));
+
+router.post('/:id/threads/:threadId/restore', asyncHandler(async (req: Request, res: Response) => {
+  const agent = requireAgent(req);
+  const threadId = String(req.params.threadId);
+  const ok = multiAgentsDb.archiveThread(agent.id, threadId, false);
+  if (!ok) throw new AppError('Thread not found', { statusCode: 404, code: 'NOT_FOUND' });
+  res.json(createApiSuccessResponse({ id: threadId, restored: true }));
+}));
 
 router.get('/:id/messages', asyncHandler(async (req: Request, res: Response) => {
   const agent = requireAgent(req);
+  const threadId = typeof req.query.threadId === 'string' && req.query.threadId.trim() ? req.query.threadId.trim() : 'default';
   const beforeSeq = Number(req.query.beforeSeq);
   const limit = Number(req.query.limit);
   const messages = multiAgentsDb.listMessages(agent.id, {
+    threadId,
     beforeSeq: Number.isFinite(beforeSeq) ? beforeSeq : undefined,
     limit: Number.isInteger(limit) && limit > 0 && limit <= 200 ? limit : 50,
   });
-  const activeTurn = multiAgentsDb.getActiveTurn(agent.id);
+  const activeTurn = multiAgentsDb.getActiveTurn(agent.id, threadId);
   res.json(createApiSuccessResponse({ messages, activeTurnId: activeTurn?.id ?? null }));
 }));
 
@@ -283,7 +348,8 @@ router.post('/:id/messages', asyncHandler(async (req: Request, res: Response) =>
   const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
   if (!content) throw badRequest('content is required');
   if (content.length > 20_000) throw badRequest('content is too long');
-  res.status(201).json(createApiSuccessResponse(chatroomDispatcher.send(agent, content)));
+  const threadId = typeof req.body?.threadId === 'string' && req.body.threadId.trim() ? req.body.threadId.trim() : 'default';
+  res.status(201).json(createApiSuccessResponse(chatroomDispatcher.send(agent, content, threadId)));
 }));
 
 router.delete('/:id/messages/:messageId', asyncHandler(async (req: Request, res: Response) => {

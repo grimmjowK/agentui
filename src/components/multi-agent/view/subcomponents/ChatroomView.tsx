@@ -2,13 +2,12 @@
  * 聊天室頁面：群聊訊息 + @ 候選輸入框 + 右側成員與群聊設定（multi-agent-chatroom spec）。
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowUp, Clock, PanelRightClose, Square, Users, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowUp, ChevronDown, Clock, History, PanelRightClose, Plus, RotateCcw, Square, Trash2, Users, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import {
   EVERYONE_NAME,
   MAX_AI_REPLIES_RANGE,
-  MAX_REPLY_CHARS_RANGE,
   MEMBER_DEFAULT_PERMISSION_MODE,
 } from '../../../../../shared/multiAgent';
 import { Markdown } from '../../../chat/view/subcomponents/Markdown';
@@ -18,7 +17,7 @@ import { api } from '../../../../utils/api';
 import { useChatroom } from '../../hooks/useChatroom';
 import { upsertMultiAgentLocal } from '../../hooks/useMultiAgents';
 import { modelLabel, useProviderModels, type ModelsByProvider } from '../../hooks/useProviderModels';
-import type { ChatMember, ChatMessage, ChatroomDef, ChatRules, MultiAgent } from '../../types/types';
+import type { ChatMember, ChatMessage, ChatroomDef, ChatRules, ChatThread, MultiAgent } from '../../types/types';
 import { readData } from '../../utils/fetchJson';
 import { initialOf, memberColorClass } from '../../utils/memberColor';
 
@@ -44,9 +43,95 @@ export default function ChatroomView({ agent, isMobile, onAgentChange }: Chatroo
     onAgentChange(saved);
   }, [agent.id, onAgentChange]);
 
+  const visibleThreads = useMemo(() => chat.threads.filter((th) => !th.isArchived), [chat.threads]);
+  const currentThread = chat.threads.find((th) => th.id === chat.selectedThreadId) ?? visibleThreads[0] ?? null;
+
+  // 頂部標籤列：顯示所有正在發言中的未歸檔對話 + 當前選中的對話
+  const pillThreads = useMemo(() => {
+    const activeList = visibleThreads.filter((th) => Boolean(chat.activeTurns[th.id]));
+    if (currentThread && !activeList.some((th) => th.id === currentThread.id)) {
+      activeList.unshift(currentThread);
+    }
+    return activeList;
+  }, [visibleThreads, chat.activeTurns, currentThread]);
+
   return (
     <div className="relative flex h-full min-h-0">
       <div className="flex min-w-0 flex-1 flex-col">
+        {/* 頂部工具列：多對話切換、對話記錄與「+ 新對話」 */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+            {pillThreads.length <= 1 && visibleThreads.length <= 1 ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className={cn(
+                  'h-2 w-2 flex-shrink-0 rounded-full',
+                  chat.activeTurnId ? 'animate-pulse bg-primary' : 'bg-emerald-500',
+                )} />
+                <span className="truncate font-medium text-foreground/85">
+                  {currentThread?.title || t('chatroom.newChat', { defaultValue: '新对话' })}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                {(pillThreads.length > 1 ? pillThreads : visibleThreads.slice(0, 4)).map((item) => {
+                  const selectedPill = item.id === chat.selectedThreadId;
+                  const itemBusy = Boolean(chat.activeTurns[item.id]);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => chat.selectThread(item.id)}
+                      title={item.title}
+                      className={cn(
+                        'flex max-w-[180px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
+                        selectedPill
+                          ? 'border-primary/50 bg-primary/10 text-foreground'
+                          : 'border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground',
+                      )}
+                    >
+                      <span className={cn(
+                        'h-2 w-2 flex-shrink-0 rounded-full',
+                        itemBusy ? 'animate-pulse bg-primary' : 'bg-emerald-500',
+                      )} />
+                      <span className="truncate">{item.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-shrink-0 items-center gap-2">
+            <ThreadHistory
+              threads={chat.threads}
+              currentId={chat.selectedThreadId}
+              activeTurns={chat.activeTurns}
+              onSelect={chat.selectThread}
+              onArchive={(threadId) => void chat.deleteThread(threadId, { force: false })}
+              onRestore={(threadId) => void chat.restoreThread(threadId)}
+              onDeletePermanent={(threadId) => void chat.deleteThread(threadId, { force: true })}
+            />
+            <button
+              type="button"
+              onClick={() => void chat.createThread()}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t('chatroom.newChat', { defaultValue: '新对话' })}
+            </button>
+            {!sidebarOpen && (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="flex h-7 items-center gap-1 rounded-lg border border-border/70 px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                title={t('chatroom.expand')}
+              >
+                <Users className="h-3.5 w-3.5" />{def.members.length}
+              </button>
+            )}
+          </div>
+        </div>
+
         <MessageList
           messages={chat.messages}
           members={def.members}
@@ -68,16 +153,6 @@ export default function ChatroomView({ agent, isMobile, onAgentChange }: Chatroo
           busy={Boolean(chat.activeTurnId)}
           onSend={chat.send}
           onStop={chat.stop}
-          trailing={!sidebarOpen && (
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(true)}
-              className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-              title={t('chatroom.expand')}
-            >
-              <Users className="h-3.5 w-3.5" />{def.members.length}
-            </button>
-          )}
         />
       </div>
 
@@ -88,6 +163,150 @@ export default function ChatroomView({ agent, isMobile, onAgentChange }: Chatroo
           onSave={saveDefinition}
           onClose={() => setSidebarOpen(false)}
         />
+      )}
+    </div>
+  );
+}
+
+function ThreadHistory({
+  threads,
+  currentId,
+  activeTurns,
+  onSelect,
+  onArchive,
+  onRestore,
+  onDeletePermanent,
+}: {
+  threads: ChatThread[];
+  currentId: string;
+  activeTurns: Record<string, string | null>;
+  onSelect: (threadId: string) => void;
+  onArchive: (threadId: string) => void;
+  onRestore: (threadId: string) => void;
+  onDeletePermanent: (threadId: string) => void;
+}) {
+  const { t, i18n } = useTranslation('multiAgent');
+  const [open, setOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+
+  const activeList = threads.filter((th) => !th.isArchived);
+  const archivedList = threads.filter((th) => th.isArchived);
+  const displayed = showArchived ? archivedList : activeList;
+
+  const format = (iso: string) =>
+    new Date(iso).toLocaleString(i18n.language, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <History className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">{t('chatroom.history', { defaultValue: '对话记录' })}</span>
+        <ChevronDown className="h-3 w-3" />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl border border-border/60 bg-popover p-1.5 shadow-lg"
+          onMouseLeave={() => setOpen(false)}
+        >
+          <div className="mb-1 flex items-center gap-1 rounded-lg bg-muted/50 p-0.5 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setShowArchived(false)}
+              className={cn(
+                'flex-1 rounded-md py-1 font-medium transition-colors',
+                !showArchived ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {t('historyMenu.active', { defaultValue: '活跃' })} ({activeList.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowArchived(true)}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-1 rounded-md py-1 font-medium transition-colors',
+                showArchived ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Archive className="h-3 w-3" />
+              {t('historyMenu.archived', { defaultValue: '已归档' })} ({archivedList.length})
+            </button>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto">
+            {displayed.length === 0 && (
+              <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                {showArchived
+                  ? t('historyMenu.emptyArchived', { defaultValue: '暂无归档记录' })
+                  : t('chatroom.empty')}
+              </div>
+            )}
+            {displayed.map((item) => {
+              const busy = Boolean(activeTurns[item.id]);
+              return (
+                <div
+                  key={item.id}
+                  className={cn(
+                    'group flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-xs hover:bg-accent',
+                    currentId === item.id && 'bg-accent/60 font-medium',
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => { onSelect(item.id); setOpen(false); }}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span className={cn(
+                      'h-1.5 w-1.5 flex-shrink-0 rounded-full',
+                      busy ? 'animate-pulse bg-primary' : 'bg-emerald-500',
+                    )} />
+                    <span className="min-w-0 flex-1 truncate text-foreground">{item.title}</span>
+                    <span className="flex-shrink-0 text-muted-foreground">{format(item.updatedAt)}</span>
+                  </button>
+                  {showArchived ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRestore(item.id);
+                      }}
+                      title={t('historyMenu.restore', { defaultValue: '还原' })}
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onArchive(item.id);
+                      }}
+                      title={t('historyMenu.archive', { defaultValue: '归档' })}
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                    >
+                      <Archive className="h-3 w-3" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDeletePermanent(item.id);
+                    }}
+                    title={t('historyMenu.deletePermanent', { defaultValue: '永久删除' })}
+                    className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -510,7 +729,7 @@ function RulesForm({ rules, onSave }: { rules: ChatRules; onSave: (rules: ChatRu
   const [status, setStatus] = useState<string | null>(null);
   useEffect(() => setDraft(rules), [rules]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(rules);
-  const intField = (key: 'maxReplyChars' | 'maxAiRepliesPerTurn', range: readonly [number, number]) => (
+  const intField = (key: 'maxAiRepliesPerTurn', range: readonly [number, number]) => (
     <input
       type="number"
       min={range[0]}
@@ -534,10 +753,6 @@ function RulesForm({ rules, onSave }: { rules: ChatRules; onSave: (rules: ChatRu
           className="w-full resize-y rounded-lg border border-border/70 bg-background px-2.5 py-2 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none"
         />
       </div>
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="text-foreground">{t('chatroom.maxReplyChars')}</span>
-        {intField('maxReplyChars', MAX_REPLY_CHARS_RANGE)}
-      </label>
       <label className="flex items-center justify-between gap-3 text-sm">
         <span className="text-foreground">{t('chatroom.maxAiRepliesPerTurn')}</span>
         {intField('maxAiRepliesPerTurn', MAX_AI_REPLIES_RANGE)}

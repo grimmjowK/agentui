@@ -34,11 +34,15 @@ export type ChatroomDispatcherDeps = {
 type ActiveTurn = {
   /** 刪除時停止派發下一則排隊訊息；一般停止回合不影響佇列。 */
   drain?: boolean;
+  multiAgentId: string;
+  threadId: string;
   turnId: string;
   stopping: boolean;
   call: AgentCall | null;
   done: Promise<void>;
 };
+
+const threadKey = (multiAgentId: string, threadId = 'default') => `${multiAgentId}:${threadId}`;
 
 const codePoints = (text: string) => [...text].length;
 
@@ -49,7 +53,7 @@ function seenOf(member: ChatMember, def: ChatroomDef): SeenSettings {
     name: member.name,
     persona: member.persona,
     rulesText: def.rules.text,
-    maxReplyChars: def.rules.maxReplyChars,
+    maxReplyChars: def.rules.maxReplyChars ?? 0,
     allowAiMentions: def.rules.allowAiMentions,
   };
 }
@@ -65,12 +69,10 @@ export function settingNotes(session: MemberSession, member: ChatMember, def: Ch
     if (seen.rulesText !== now.rulesText) {
       notes.push(now.rulesText ? `群規已更新：${now.rulesText}` : '群規已清除');
     }
-    if (seen.maxReplyChars !== now.maxReplyChars) notes.push(`每則回覆上限改為 ${now.maxReplyChars} 字`);
     if (seen.allowAiMentions !== now.allowAiMentions) {
       notes.push(now.allowAiMentions ? '現在可以 @ 其他成員請其接話' : '現在不可以 @ 其他成員');
     }
   }
-  if (session.truncatedAt) notes.push(`你上次的回覆在第 ${session.truncatedAt} 字被截斷`);
   return notes;
 }
 
@@ -100,7 +102,6 @@ export function buildMemberPrompt(input: {
   const { member, def, history, historyTruncated, isNewSession, notes } = input;
   const others = def.members.filter((m) => m.id !== member.id).map((m) => m.name);
   const rules = [
-    `每則回覆不超過 ${def.rules.maxReplyChars} 字，超出會被截斷。`,
     def.rules.allowAiMentions && others.length
       ? `如需其他成員接話，可以用 @名稱 提及（${others.join('、')}）；沒有必要時不要提及。`
       : '不要 @ 其他成員，也不要替其他成員發言。',
@@ -137,8 +138,11 @@ export class ChatroomDispatcher {
     this.timeoutMs = deps.timeoutMs ?? MEMBER_TIMEOUT_MS;
   }
 
-  isBusy(multiAgentId: string): boolean {
-    return this.active.has(multiAgentId);
+  isBusy(multiAgentId: string, threadId?: string): boolean {
+    if (threadId !== undefined) {
+      return this.active.has(threadKey(multiAgentId, threadId));
+    }
+    return [...this.active.values()].some((t) => t.multiAgentId === multiAgentId);
   }
 
   isDeleting(multiAgentId: string): boolean {
@@ -154,24 +158,24 @@ export class ChatroomDispatcher {
   }
 
   /** 送出使用者訊息。忙碌時排隊；否則立即開始回合。 */
-  send(agent: Agent, content: string): ChatMessage {
+  send(agent: Agent, content: string, threadId = 'default'): ChatMessage {
     if (this.deleting.has(agent.id)) {
       throw new Error('Chatroom is deleting');
     }
     const message = multiAgentsDb.appendMessage({
-      multiAgentId: agent.id, turnId: null, authorKind: 'user', memberId: null, author: null,
+      multiAgentId: agent.id, threadId, turnId: null, authorKind: 'user', memberId: null, author: null,
       content, status: 'queued', finishReason: null,
     });
     multiAgentsDb.touch(agent.id);
     this.emitMessage(agent, message);
-    this.pump(agent.id);
+    this.pump(agent.id, threadId);
     return message;
   }
 
   /** 停止指定回合；回合已結束或不符時回傳 false（無副作用）。 */
   async stop(multiAgentId: string, turnId: string): Promise<boolean> {
-    const turn = this.active.get(multiAgentId);
-    if (!turn || turn.turnId !== turnId) return false;
+    const turn = [...this.active.values()].find((t) => t.multiAgentId === multiAgentId && t.turnId === turnId);
+    if (!turn) return false;
     if (!turn.stopping) {
       turn.stopping = true;
       multiAgentsDb.updateTurn(turnId, 'stopping');
@@ -180,34 +184,54 @@ export class ChatroomDispatcher {
     return true;
   }
 
-  async stopAndWait(multiAgentId: string): Promise<void> {
-    const turn = this.active.get(multiAgentId);
+  async stopAndWaitThread(multiAgentId: string, threadId: string): Promise<void> {
+    const turn = this.active.get(threadKey(multiAgentId, threadId));
     if (!turn) return;
     turn.drain = true;
     await this.stop(multiAgentId, turn.turnId);
     await turn.done;
   }
 
+  async stopAndWait(multiAgentId: string): Promise<void> {
+    const turns = [...this.active.values()].filter((t) => t.multiAgentId === multiAgentId);
+    if (!turns.length) return;
+    for (const turn of turns) turn.drain = true;
+    await Promise.all(turns.map((turn) => this.stop(multiAgentId, turn.turnId)));
+    await Promise.all(turns.map((turn) => turn.done));
+  }
+
   /** 等待目前回合與所有排隊訊息處理完（測試用） */
   async idle(multiAgentId: string): Promise<void> {
-    while (this.active.has(multiAgentId)) await this.active.get(multiAgentId)!.done;
+    while (this.isBusy(multiAgentId)) {
+      await Promise.all(
+        [...this.active.values()].filter((t) => t.multiAgentId === multiAgentId).map((t) => t.done),
+      );
+    }
   }
 
   /** 若空閒則處理下一則排隊訊息 */
-  pump(multiAgentId: string): void {
-    if (this.active.has(multiAgentId) || this.deleting.has(multiAgentId)) return;
+  pump(multiAgentId: string, threadId = 'default'): void {
+    const key = threadKey(multiAgentId, threadId);
+    if (this.active.has(key) || this.deleting.has(multiAgentId)) return;
     const agent = multiAgentsDb.getById(multiAgentId);
-    const next = agent?.definition ? multiAgentsDb.nextQueuedMessage(multiAgentId) : null;
+    const next = agent?.definition ? multiAgentsDb.nextQueuedMessage(multiAgentId, threadId) : null;
     if (!agent || !next) return;
     const def = agent.definition as ChatroomDef;
-    const turnRow = multiAgentsDb.createTurn(agent.id, next.id, def);
-    const turn: ActiveTurn = { turnId: turnRow.id, stopping: false, call: null, done: Promise.resolve() };
-    this.active.set(agent.id, turn);
+    const turnRow = multiAgentsDb.createTurn(agent.id, next.id, def, threadId);
+    const turn: ActiveTurn = {
+      multiAgentId: agent.id,
+      threadId,
+      turnId: turnRow.id,
+      stopping: false,
+      call: null,
+      done: Promise.resolve(),
+    };
+    this.active.set(key, turn);
     turn.done = this.runTurn(agent, def, next, turn)
       .catch((error) => console.error('[multi-agent] turn failed', error))
       .finally(() => {
-        this.active.delete(agent.id);
-        if (!turn.drain) this.pump(agent.id);
+        this.active.delete(key);
+        if (!turn.drain) this.pump(agent.id, threadId);
       });
   }
 
@@ -219,7 +243,7 @@ export class ChatroomDispatcher {
       return;
     }
     this.emitMessage(agent, promoted);
-    this.emitTurn(agent, turn.turnId, 'running');
+    this.emitTurn(agent, turn.turnId, 'running', turn.threadId);
 
     const queue = resolveMentions(promoted.content, def.members, def.rules.unmentionedBehavior);
     let replies = 0;
@@ -239,7 +263,7 @@ export class ChatroomDispatcher {
     }
     if (!turn.stopping && (limitHit || (queue.length && replies >= def.rules.maxAiRepliesPerTurn))) {
       const notice = multiAgentsDb.appendMessage({
-        multiAgentId: agent.id, turnId: turn.turnId, authorKind: 'system', memberId: null, author: null,
+        multiAgentId: agent.id, threadId: turn.threadId, turnId: turn.turnId, authorKind: 'system', memberId: null, author: null,
         content: '已達本輪發言上限', status: 'done', finishReason: null,
       });
       this.emitMessage(agent, notice);
@@ -247,23 +271,23 @@ export class ChatroomDispatcher {
     const status = turn.stopping ? 'stopped' : 'completed';
     multiAgentsDb.updateTurn(turn.turnId, status, true);
     multiAgentsDb.touch(agent.id);
-    this.emitTurn(agent, turn.turnId, status);
+    this.emitTurn(agent, turn.turnId, status, turn.threadId);
   }
 
   private async memberSpeak(agent: Agent, def: ChatroomDef, member: ChatMember, turn: ActiveTurn): Promise<ChatMessage | null> {
-    const sessions = multiAgentsDb.getMemberSessions(agent.id);
+    const sessions = multiAgentsDb.getMemberSessions(agent.id, turn.threadId);
     const saved = sessions[member.id];
     const rebuild = needsNewSession(saved, member);
     const session = rebuild ? undefined : saved;
 
     const notes = session ? settingNotes(session, member, def) : [];
     const historyAll = session
-      ? multiAgentsDb.listMessagesAfter(agent.id, session.lastDeliveredSeq)
-      : multiAgentsDb.listMessagesAfter(agent.id, 0);
+      ? multiAgentsDb.listMessagesAfter(agent.id, session.lastDeliveredSeq, turn.threadId)
+      : multiAgentsDb.listMessagesAfter(agent.id, 0, turn.threadId);
     const replay = takeRecentWithin(historyAll, (m) => codePoints(m.content), REPLAY_MAX_MESSAGES, REPLAY_MAX_CHARS);
 
     const message = multiAgentsDb.appendMessage({
-      multiAgentId: agent.id, turnId: turn.turnId, authorKind: 'member', memberId: member.id,
+      multiAgentId: agent.id, threadId: turn.threadId, turnId: turn.turnId, authorKind: 'member', memberId: member.id,
       author: { name: member.name, provider: member.provider, model: member.model, color: member.color },
       content: '', status: 'streaming', finishReason: null,
     });
@@ -271,7 +295,7 @@ export class ChatroomDispatcher {
 
     const run = async (sessionId: string | null, isNew: boolean, history: ChatMessage[], truncated: boolean) => {
       let content = '';
-      let finishReason = null as string | null;
+      const finishReason = null as string | null;
       let lastEmit = 0;
       const call = new AgentCall({
         userId: agent.userId,
@@ -283,30 +307,24 @@ export class ChatroomDispatcher {
         prompt: buildMemberPrompt({ member, def, history, historyTruncated: truncated, isNewSession: isNew, notes }),
         timeoutMs: this.timeoutMs,
         onOutput: (text) => {
-          if (finishReason) return;
-          const clipped = truncateCodePoints(text, def.rules.maxReplyChars);
-          content = clipped ?? text;
-          if (clipped !== null) {
-            finishReason = 'length';
-            void call.abort();
-          }
+          content = text;
           const t = Date.now();
-          if (clipped !== null || t - lastEmit > 150) {
+          if (t - lastEmit > 150) {
             lastEmit = t;
-            this.emitDelta(agent, turn.turnId, message.id, member.id, content);
+            this.emitDelta(agent, turn.turnId, message.id, member.id, content, turn.threadId);
           }
         },
       }, this.resolveRuntime);
       turn.call = call;
       const result = await call.run();
       turn.call = null;
-      return { result, content: finishReason ? content : (truncateCodePoints(result.text, def.rules.maxReplyChars) ?? result.text), finishReason };
+      return { result, content: result.text || content, finishReason };
     };
 
     let { result, content, finishReason }: { result: Awaited<ReturnType<AgentCall['run']>>; content: string; finishReason: string | null } = await run(session?.sessionId ?? null, !session, replay.items, replay.truncated);
     // 續接失敗：清除 session 重建後重試一次
     if (session && result.status === 'failed' && !turn.stopping) {
-      const full = takeRecentWithin(multiAgentsDb.listMessagesAfter(agent.id, 0), (m) => codePoints(m.content), REPLAY_MAX_MESSAGES, REPLAY_MAX_CHARS);
+      const full = takeRecentWithin(multiAgentsDb.listMessagesAfter(agent.id, 0, turn.threadId), (m) => codePoints(m.content), REPLAY_MAX_MESSAGES, REPLAY_MAX_CHARS);
       ({ result, content, finishReason } = await run(null, true, full.items, full.truncated));
     }
 
@@ -326,7 +344,7 @@ export class ChatroomDispatcher {
 
     // 更新 session：只有拿到 sessionId 才保存；完整成功才推進游標；若成員在回合中已被移除則不再寫回
     if (result.sessionId && !this.deleting.has(agent.id)) {
-      const succeeded = result.status === 'succeeded' || finishReason === 'length';
+      const succeeded = result.status === 'succeeded';
       multiAgentsDb.upsertMemberSession(agent.id, member.id, {
         provider: member.provider,
         model: member.model,
@@ -335,8 +353,7 @@ export class ChatroomDispatcher {
         lastDeliveredSeq: succeeded ? message.seq : (session?.lastDeliveredSeq ?? 0),
         // 成功送達本輪提示後才記為已看過；失敗時保留舊的，下次仍會提示
         seen: succeeded ? seenOf(member, def) : (session?.seen ?? seenOf(member, def)),
-        truncatedAt: finishReason === 'length' ? def.rules.maxReplyChars : succeeded ? undefined : session?.truncatedAt,
-      });
+      }, turn.threadId);
     }
 
     const final = multiAgentsDb.getMessage(agent.id, message.id);
@@ -350,15 +367,15 @@ export class ChatroomDispatcher {
   }
 
   private emitMessage(agent: Agent, message: ChatMessage): void {
-    this.publish(agent.userId, { type: 'multi-agent-message', multiAgentId: agent.id, kind: 'upsert', message });
+    this.publish(agent.userId, { type: 'multi-agent-message', multiAgentId: agent.id, threadId: message.threadId ?? 'default', kind: 'upsert', message });
   }
 
-  private emitDelta(agent: Agent, turnId: string, messageId: string, memberId: string, content: string): void {
-    this.publish(agent.userId, { type: 'multi-agent-message', multiAgentId: agent.id, kind: 'delta', turnId, messageId, memberId, content });
+  private emitDelta(agent: Agent, turnId: string, messageId: string, memberId: string, content: string, threadId = 'default'): void {
+    this.publish(agent.userId, { type: 'multi-agent-message', multiAgentId: agent.id, threadId, kind: 'delta', turnId, messageId, memberId, content });
   }
 
-  private emitTurn(agent: Agent, turnId: string, status: string): void {
-    this.publish(agent.userId, { type: 'multi-agent-turn', multiAgentId: agent.id, turnId, status });
+  private emitTurn(agent: Agent, turnId: string, status: string, threadId = 'default'): void {
+    this.publish(agent.userId, { type: 'multi-agent-turn', multiAgentId: agent.id, threadId, turnId, status });
   }
 }
 

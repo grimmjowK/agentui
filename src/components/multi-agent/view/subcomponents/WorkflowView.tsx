@@ -3,7 +3,7 @@
  * 支援同一工作流同時啟動多個執行實例（Run），頂部可切換不同實例並獨立確認／停止。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, CircleDashed, History, Loader2, MessageSquare, PauseCircle, Plus, RotateCcw, UserCheck, Play, ShieldQuestion, SkipForward, Square, X } from 'lucide-react';
+import { AlertTriangle, Archive, Check, ChevronDown, CircleDashed, History, Loader2, MessageSquare, PauseCircle, Plus, RotateCcw, Trash2, UserCheck, Play, ShieldQuestion, SkipForward, Square, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -62,6 +62,8 @@ export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps
     hasAnyRunning,
     start,
     stop,
+    deleteRun,
+    restoreRun,
     confirm,
     continueNode,
     finishNode,
@@ -180,6 +182,9 @@ export default function WorkflowView({ agent, onAgentChange }: WorkflowViewProps
               runs={runs}
               currentId={selectedRunId}
               onSelect={(pickedId) => { selectRun(pickedId); setSelectedId(null); }}
+              onArchive={(runId) => void deleteRun(runId, { force: false })}
+              onRestore={(runId) => void restoreRun(runId)}
+              onDeletePermanent={(runId) => void deleteRun(runId, { force: true })}
             />
             {isRunning && (
               <button
@@ -655,13 +660,21 @@ function StartConfirm({ def, hasParallel, workspacePath, modelText, onCancel, on
   );
 }
 
-function RunHistory({ runs, currentId, onSelect }: {
+function RunHistory({ runs, currentId, onSelect, onArchive, onRestore, onDeletePermanent }: {
   runs: WorkflowRun[];
   currentId: string | null;
   onSelect: (runId: string) => void;
+  onArchive: (runId: string) => void;
+  onRestore: (runId: string) => void;
+  onDeletePermanent: (runId: string) => void;
 }) {
   const { t, i18n } = useTranslation('multiAgent');
   const [open, setOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+
+  const activeList = runs.filter((r) => !r.isArchived);
+  const archivedList = runs.filter((r) => r.isArchived);
+  const displayed = showArchived ? archivedList : activeList;
 
   const format = (iso: string) => new Date(iso).toLocaleString(i18n.language, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -677,40 +690,111 @@ function RunHistory({ runs, currentId, onSelect }: {
         <ChevronDown className="h-3 w-3" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-y-auto rounded-xl border border-border/60 bg-popover p-1 shadow-lg" onMouseLeave={() => setOpen(false)}>
-          {runs.length === 0 && (
-            <div className="px-2 py-2 text-center text-xs text-muted-foreground">
-              {t('workflow.idle')}
-            </div>
-          )}
-          {runs.map((item) => {
-            const waitingHuman = isRunWaitingHuman(item);
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => { onSelect(item.id); setOpen(false); }}
-                className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent', currentId === item.id && 'bg-accent/60 font-medium')}
-              >
-                <span className={cn(
-                  'h-1.5 w-1.5 flex-shrink-0 rounded-full',
-                  waitingHuman
-                    ? 'animate-pulse bg-amber-500'
-                    : item.status === 'succeeded'
-                      ? 'bg-emerald-500'
-                      : item.status === 'running' || item.status === 'stopping'
-                        ? 'animate-pulse bg-primary'
-                        : 'bg-destructive',
-                )} />
-                <span className="min-w-0 flex-1 truncate text-foreground">
-                  {item.startInput ? `${item.startInput} · ${format(item.startedAt)}` : format(item.startedAt)}
-                </span>
-                <span className="flex-shrink-0 text-muted-foreground">
-                  {t(`workflow.${item.status === 'stopping' ? 'running' : item.status}`)}
-                </span>
-              </button>
-            );
-          })}
+        <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl border border-border/60 bg-popover p-1.5 shadow-lg" onMouseLeave={() => setOpen(false)}>
+          <div className="mb-1 flex items-center gap-1 rounded-lg bg-muted/50 p-0.5 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setShowArchived(false)}
+              className={cn(
+                'flex-1 rounded-md py-1 font-medium transition-colors',
+                !showArchived ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {t('historyMenu.active', { defaultValue: '活跃' })} ({activeList.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowArchived(true)}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-1 rounded-md py-1 font-medium transition-colors',
+                showArchived ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Archive className="h-3 w-3" />
+              {t('historyMenu.archived', { defaultValue: '已归档' })} ({archivedList.length})
+            </button>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto">
+            {displayed.length === 0 && (
+              <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                {showArchived
+                  ? t('historyMenu.emptyArchived', { defaultValue: '暂无归档记录' })
+                  : t('workflow.idle')}
+              </div>
+            )}
+            {displayed.map((item) => {
+              const waitingHuman = isRunWaitingHuman(item);
+              return (
+                <div
+                  key={item.id}
+                  className={cn(
+                    'group flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-xs hover:bg-accent',
+                    currentId === item.id && 'bg-accent/60 font-medium',
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => { onSelect(item.id); setOpen(false); }}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span className={cn(
+                      'h-1.5 w-1.5 flex-shrink-0 rounded-full',
+                      waitingHuman
+                        ? 'animate-pulse bg-amber-500'
+                        : item.status === 'succeeded'
+                          ? 'bg-emerald-500'
+                          : item.status === 'running' || item.status === 'stopping'
+                            ? 'animate-pulse bg-primary'
+                            : 'bg-destructive',
+                    )} />
+                    <span className="min-w-0 flex-1 truncate text-foreground">
+                      {item.startInput ? `${item.startInput} · ${format(item.startedAt)}` : format(item.startedAt)}
+                    </span>
+                    <span className="flex-shrink-0 text-muted-foreground">
+                      {t(`workflow.${item.status === 'stopping' ? 'running' : item.status}`)}
+                    </span>
+                  </button>
+                  {showArchived ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRestore(item.id);
+                      }}
+                      title={t('historyMenu.restore', { defaultValue: '还原' })}
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onArchive(item.id);
+                      }}
+                      title={t('historyMenu.archive', { defaultValue: '归档' })}
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                    >
+                      <Archive className="h-3 w-3" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDeletePermanent(item.id);
+                    }}
+                    title={t('historyMenu.deletePermanent', { defaultValue: '永久删除' })}
+                    className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

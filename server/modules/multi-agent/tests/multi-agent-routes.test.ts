@@ -185,3 +185,60 @@ test('getArchivedProjectsWithSessions 排除多 Agent 專屬工作目錄與內�
     assert.deepEqual(claudeIds, ['visible-chat'], '封存專案視圖不應暴露建立器與工作流節點會話');
   });
 });
+
+test('工作流執行記錄與聊天室對話記錄支援「先歸檔、可還原、及永久刪除」', async () => {
+  await withTestApp(async (baseUrl, tmpDir) => {
+    const wf = multiAgentsDb.setDefinition(
+      1,
+      multiAgentsDb.create(1, { kind: 'workflow', name: 'wf', workspacePath: tmpDir }).id,
+      { nodes: [{ id: 'n1', title: 'N1', instruction: 'go', provider: 'claude' as const, model: 'sonnet', dependsOn: [] }] },
+    )!;
+    const run = multiAgentsDb.createRun(wf, { n1: { state: 'succeeded', progress: 100 } })!;
+    multiAgentsDb.addWorkflowSession({ sessionId: 'run-sid', multiAgentId: wf.id, runId: run.id, nodeId: 'n1', userId: 1 });
+
+    // 1. 預設 DELETE 先歸檔
+    const archRunRes = await fetch(`${baseUrl}/api/multi-agent/${wf.id}/runs/${run.id}`, { method: 'DELETE' });
+    assert.equal(archRunRes.status, 200);
+    assert.equal(multiAgentsDb.getRun(wf.id, run.id)?.isArchived, true, '應先標記為已歸檔');
+    assert.ok(multiAgentsDb.getWorkflowSession('run-sid'), '歸檔時保留節點會話紀錄以便還原');
+
+    // 2. POST /restore 還原
+    const restoreRunRes = await fetch(`${baseUrl}/api/multi-agent/${wf.id}/runs/${run.id}/restore`, { method: 'POST' });
+    assert.equal(restoreRunRes.status, 200);
+    assert.equal(multiAgentsDb.getRun(wf.id, run.id)?.isArchived, false, '還原後應恢復為活躍');
+
+    // 3. DELETE ?force=true 永久刪除
+    const delRunRes = await fetch(`${baseUrl}/api/multi-agent/${wf.id}/runs/${run.id}?force=true`, { method: 'DELETE' });
+    assert.equal(delRunRes.status, 200);
+    assert.equal(multiAgentsDb.getRun(wf.id, run.id), null);
+    assert.equal(multiAgentsDb.getWorkflowSession('run-sid'), null);
+
+    // 聊天室對話同樣支援先歸檔、可還原、永久刪除
+    const chat = multiAgentsDb.create(1, { kind: 'chatroom', name: 'cr', workspacePath: tmpDir });
+    const thread = multiAgentsDb.createThread(chat.id, '技術評審');
+    multiAgentsDb.appendMessage({
+      multiAgentId: chat.id,
+      threadId: thread.id,
+      turnId: null,
+      authorKind: 'user',
+      memberId: null,
+      author: null,
+      content: 'hi',
+      status: 'done',
+      finishReason: null,
+    });
+
+    const archThreadRes = await fetch(`${baseUrl}/api/multi-agent/${chat.id}/threads/${thread.id}`, { method: 'DELETE' });
+    assert.equal(archThreadRes.status, 200);
+    assert.equal(multiAgentsDb.listThreads(chat.id).find((t) => t.id === thread.id)?.isArchived, true);
+    assert.equal(multiAgentsDb.listMessages(chat.id, { threadId: thread.id }).length, 1, '歸檔時訊息保留');
+
+    const restoreThreadRes = await fetch(`${baseUrl}/api/multi-agent/${chat.id}/threads/${thread.id}/restore`, { method: 'POST' });
+    assert.equal(restoreThreadRes.status, 200);
+    assert.equal(multiAgentsDb.listThreads(chat.id).find((t) => t.id === thread.id)?.isArchived, false);
+
+    const delThreadRes = await fetch(`${baseUrl}/api/multi-agent/${chat.id}/threads/${thread.id}?force=true`, { method: 'DELETE' });
+    assert.equal(delThreadRes.status, 200);
+    assert.deepEqual(multiAgentsDb.listMessages(chat.id, { threadId: thread.id }), []);
+  });
+});

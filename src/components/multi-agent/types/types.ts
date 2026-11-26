@@ -3,6 +3,7 @@ export type {
   ChatMessage,
   ChatroomDef,
   ChatRules,
+  ChatThread,
   MultiAgent,
   MultiAgentDefinition,
   MultiAgentKind,

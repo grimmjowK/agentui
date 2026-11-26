@@ -459,11 +459,24 @@ export const runMigrations = (db: Database) => {
     db.exec(PROJECTS_TABLE_SCHEMA_SQL);
     rebuildProjectsTableWithPrimaryKeySchema(db);
 
-    // 多 Agent：工作流執行保存啟動時輸入，並補建 multi_agent_sessions 索引
+    // 多 Agent：工作流執行保存啟動時輸入、聊天室多對話 thread_id、補建 multi_agent_sessions 索引
     db.exec(MULTI_AGENT_TABLES_SCHEMA_SQL);
     if (tableExists(db, 'multi_agent_runs')) {
       const runColumns = (db.prepare('PRAGMA table_info(multi_agent_runs)').all() as { name: string }[]).map((c) => c.name);
       addColumnToTableIfNotExists(db, 'multi_agent_runs', runColumns, 'start_input', 'TEXT');
+      addColumnToTableIfNotExists(db, 'multi_agent_runs', runColumns, 'is_archived', 'INTEGER NOT NULL DEFAULT 0');
+    }
+    if (tableExists(db, 'multi_agent_threads')) {
+      const threadColumns = (db.prepare('PRAGMA table_info(multi_agent_threads)').all() as { name: string }[]).map((c) => c.name);
+      addColumnToTableIfNotExists(db, 'multi_agent_threads', threadColumns, 'is_archived', 'INTEGER NOT NULL DEFAULT 0');
+    }
+    if (tableExists(db, 'multi_agent_turns')) {
+      const turnColumns = (db.prepare('PRAGMA table_info(multi_agent_turns)').all() as { name: string }[]).map((c) => c.name);
+      addColumnToTableIfNotExists(db, 'multi_agent_turns', turnColumns, 'thread_id', "TEXT NOT NULL DEFAULT 'default'");
+    }
+    if (tableExists(db, 'multi_agent_messages')) {
+      const msgColumns = (db.prepare('PRAGMA table_info(multi_agent_messages)').all() as { name: string }[]).map((c) => c.name);
+      addColumnToTableIfNotExists(db, 'multi_agent_messages', msgColumns, 'thread_id', "TEXT NOT NULL DEFAULT 'default'");
     }
     db.exec(`
       INSERT OR IGNORE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)

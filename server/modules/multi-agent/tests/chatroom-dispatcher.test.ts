@@ -69,19 +69,17 @@ test('忙碌時排隊，依序處理；取消排隊訊息不觸發回覆', async
   });
 });
 
-test('超出字數截斷含「…」並中止，下一輪提示被截斷且沿用 session', async () => {
+test('成員回覆不按字數硬截斷，完整保留輸出並沿用 session', async () => {
   await withDb(async () => {
-    const { dispatcher, agent, id, mock } = setup(twoMembers({ maxReplyChars: 5 }), say('一二三四五六七八', 500));
+    const { dispatcher, agent, id, mock } = setup(twoMembers({ maxReplyChars: 5 }), say('一二三四五六七八'));
     dispatcher.send(agent(), '@產品經理 長一點');
     await dispatcher.idle(id);
     const [reply] = replies(id);
-    assert.equal(reply.content, '一二三四…');
-    assert.equal([...reply.content].length, 5);
-    assert.equal(reply.finishReason, 'length');
+    assert.equal(reply.content, '一二三四五六七八');
+    assert.equal(reply.finishReason, null);
     dispatcher.send(agent(), '@產品經理 再來');
     await dispatcher.idle(id);
     assert.equal(mock.calls[1].options.sessionId, 's1');
-    assert.match(mock.calls[1].prompt, /被截斷/);
   });
 });
 
@@ -176,14 +174,13 @@ test('needsNewSession 依 provider 與 resumeAcrossModels', () => {
   assert.equal(needsNewSession({ ...s, provider: 'codex', model: 'a' }, member('a', 'a', { provider: 'codex', model: 'b' })), true);
 });
 
-test('settingNotes：依目前定義比對，改回原值不提示，截斷提示一次', () => {
+test('settingNotes：依目前定義比對，改回原值不提示', () => {
   const def: ChatroomDef = { members: [member('pm', '產品經理')], rules: defaultChatRules(1) };
   const seen = { name: '產品經理', persona: '產品經理 persona', rulesText: '', maxReplyChars: 800, allowAiMentions: false };
   const session = { provider: 'claude' as const, model: 'sonnet', sessionId: 'x', lastDeliveredSeq: 0, seen };
   assert.deepEqual(settingNotes(session, def.members[0], def), []);
-  const changed: ChatroomDef = { ...def, rules: { ...def.rules, maxReplyChars: 40 } };
-  assert.deepEqual(settingNotes(session, def.members[0], changed), ['每則回覆上限改為 40 字']);
-  assert.match(settingNotes({ ...session, truncatedAt: 40 }, def.members[0], def).join(), /第 40 字被截斷/);
+  const changed: ChatroomDef = { ...def, rules: { ...def.rules, allowAiMentions: true } };
+  assert.deepEqual(settingNotes(session, def.members[0], changed), ['現在可以 @ 其他成員請其接話']);
 });
 
 
@@ -235,5 +232,31 @@ test('標記刪除中時拒絕新訊息，且回合中移除成員後發言結�
     assert.equal(dispatcher.isDeleting(id), true);
     assert.throws(() => dispatcher.send(agent(), '@產品經理 再發一則'), /deleting/i);
     dispatcher.clearDeleting(id);
+  });
+});
+
+test('同一聊天室配置下可開啟多個獨立對話，並行執行且訊息與成員 session 互不干擾', async () => {
+  await withDb(async () => {
+    const { dispatcher, agent, id, mock } = setup(
+      twoMembers(),
+      async (ctx) => say(ctx.prompt.includes('話題 A') ? 'A-REPLY' : 'B-REPLY', 40)(ctx),
+    );
+    const threadB = multiAgentsDb.createThread(id);
+    dispatcher.send(agent(), '@產品經理 話題 A', 'default');
+    dispatcher.send(agent(), '@產品經理 話題 B', threadB.id);
+    await dispatcher.idle(id);
+
+    assert.equal(mock.maxConcurrent, 2, '兩個對話可並行執行');
+    const msgsA = multiAgentsDb.listMessages(id, { threadId: 'default' });
+    const msgsB = multiAgentsDb.listMessages(id, { threadId: threadB.id });
+    assert.deepEqual(msgsA.map((m) => m.content), ['@產品經理 話題 A', 'A-REPLY']);
+    assert.deepEqual(msgsB.map((m) => m.content), ['@產品經理 話題 B', 'B-REPLY']);
+    assert.notEqual(
+      multiAgentsDb.getMemberSessions(id, 'default').pm?.sessionId,
+      multiAgentsDb.getMemberSessions(id, threadB.id).pm?.sessionId,
+      '不同對話各自持有獨立的成員 sessionId',
+    );
+    const threads = multiAgentsDb.listThreads(id);
+    assert.equal(threads.length, 2);
   });
 });

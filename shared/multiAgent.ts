@@ -37,7 +37,8 @@ export type ChatMember = {
 };
 export type ChatRules = {
   text: string;
-  maxReplyChars: number;
+  /** 舊版相容欄位（已移除硬截斷） */
+  maxReplyChars?: number;
   allowAiMentions: boolean;
   maxAiRepliesPerTurn: number;
   unmentionedBehavior: 'all' | 'none';
@@ -83,14 +84,25 @@ export type WorkflowRun = {
   nodeStates: Record<string, NodeRunStatus>;
   /** 啟動時輸入，附在沒有依賴的節點提示前 */
   startInput: string | null;
+  isArchived?: boolean;
   startedAt: string;
   finishedAt: string | null;
+};
+
+export type ChatThread = {
+  id: string;
+  multiAgentId: string;
+  title: string;
+  isArchived?: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ChatMessageStatus = 'queued' | 'streaming' | 'done' | 'error';
 export type ChatMessage = {
   id: string;
   multiAgentId: string;
+  threadId?: string;
   turnId: string | null;
   seq: number;
   authorKind: 'user' | 'member' | 'system';
@@ -244,7 +256,7 @@ export function validateDefinition(kind: MultiAgentKind, def: unknown): string[]
     return errors;
   }
   if (typeof rules.text !== 'string') errors.push('群規文字必須是字串');
-  if (!isIntIn(rules.maxReplyChars, MAX_REPLY_CHARS_RANGE)) {
+  if (rules.maxReplyChars !== undefined && !isIntIn(rules.maxReplyChars, MAX_REPLY_CHARS_RANGE)) {
     errors.push(`每則回覆最大字數須為 ${MAX_REPLY_CHARS_RANGE[0]}–${MAX_REPLY_CHARS_RANGE[1]} 的整數`);
   }
   if (!isIntIn(rules.maxAiRepliesPerTurn, MAX_AI_REPLIES_RANGE)) {

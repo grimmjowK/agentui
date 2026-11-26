@@ -92,8 +92,9 @@ export function useWorkflowRun(multiAgentId: string) {
     setRuns((current) => applyWorkflowRunEvent(current, event) ?? current);
   }, [latestMessage, multiAgentId, reload]);
 
-  const run = (selectedRunId ? runs.find((r) => r.id === selectedRunId) : null) ?? runs[0] ?? null;
-  const activeRuns = runs.filter((r) => r.status === 'running' || r.status === 'stopping');
+  const visibleRuns = runs.filter((r) => !r.isArchived);
+  const run = (selectedRunId ? runs.find((r) => r.id === selectedRunId) : null) ?? visibleRuns[0] ?? null;
+  const activeRuns = visibleRuns.filter((r) => r.status === 'running' || r.status === 'stopping');
 
   const start = useCallback(async (input = '') => {
     setError(null);
@@ -145,6 +146,38 @@ export function useWorkflowRun(multiAgentId: string) {
     }
   }, [multiAgentId, run]);
 
+  const deleteRun = useCallback(async (runId: string, options: { force?: boolean } = {}) => {
+    setError(null);
+    try {
+      const res = await readData<{ id: string; archived?: boolean; deleted?: boolean }>(
+        api.multiAgent.deleteRun(multiAgentId, runId, options),
+      );
+      setRuns((prev) => {
+        const next = res.deleted
+          ? prev.filter((r) => r.id !== runId)
+          : prev.map((r) => (r.id === runId ? { ...r, isArchived: true } : r));
+        if (selectedRunId === runId) {
+          const fallback = next.find((r) => !r.isArchived);
+          setSelectedRunId(fallback?.id ?? null);
+        }
+        return next;
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [multiAgentId, selectedRunId]);
+
+  const restoreRun = useCallback(async (runId: string) => {
+    setError(null);
+    try {
+      await readData(api.multiAgent.restoreRun(multiAgentId, runId));
+      setRuns((prev) => prev.map((r) => (r.id === runId ? { ...r, isArchived: false } : r)));
+      setSelectedRunId(runId);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [multiAgentId]);
+
   const isRunning = run?.status === 'running' || run?.status === 'stopping';
   const hasAnyRunning = activeRuns.length > 0;
   return {
@@ -157,6 +190,8 @@ export function useWorkflowRun(multiAgentId: string) {
     hasAnyRunning,
     start,
     stop,
+    deleteRun,
+    restoreRun,
     confirm,
     continueNode,
     finishNode,

@@ -13,7 +13,7 @@ export type LiveWorkflowSession = {
   /** 使用者在聊天頁中斷：這一輪結束後節點進入 waiting_input 而不是失敗 */
   markUserInterrupted(): void;
   /** waiting_input 時送出新指示，以同一 sessionId 續接；非等待狀態回傳 false */
-  resume(text: string, clientId: string): boolean;
+  resume(text: string, clientId: string, images?: unknown): boolean;
 };
 
 export type WorkflowContinueResult = 'not_workflow' | 'continued' | 'busy';
@@ -23,6 +23,7 @@ type ContinueHandler = (
   userId: string | number | null,
   text: string,
   clientId: string,
+  images?: unknown,
 ) => Promise<WorkflowContinueResult> | WorkflowContinueResult;
 
 const live = new Map<string, LiveWorkflowSession>();
@@ -47,8 +48,9 @@ export const workflowSessions = {
     userId: string | number | null,
     text: string,
     clientId: string,
+    images?: unknown,
   ): Promise<WorkflowContinueResult> {
     if (!sessionId || !continueHandler) return 'not_workflow';
-    return continueHandler(sessionId, userId, text, clientId);
+    return continueHandler(sessionId, userId, text, clientId, images);
   },
 };

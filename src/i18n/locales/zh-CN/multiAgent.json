@@ -112,6 +112,8 @@
     }
   },
   "chatroom": {
+    "newChat": "新对话",
+    "history": "对话记录",
     "placeholder": "发消息，可 @ 角色或 @所有人",
     "everyone": "所有人",
     "send": "发送",
@@ -160,5 +162,13 @@
   "session": {
     "badge": "工作流节点",
     "back": "返回流程图"
+  },
+  "historyMenu": {
+    "active": "活跃",
+    "archived": "已归档",
+    "archive": "归档",
+    "restore": "还原",
+    "deletePermanent": "永久删除",
+    "emptyArchived": "暂无归档记录"
   }
 }

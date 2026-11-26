@@ -172,14 +172,28 @@ CREATE TABLE IF NOT EXISTS multi_agent_runs (
     definition_snapshot_json TEXT NOT NULL,
     node_states_json TEXT NOT NULL DEFAULT '{}',
     start_input TEXT,
+    is_archived INTEGER NOT NULL DEFAULT 0,
     started_at TEXT NOT NULL,
     finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_multi_agent_runs_agent ON multi_agent_runs(multi_agent_id, started_at);
 
+CREATE TABLE IF NOT EXISTS multi_agent_threads (
+    id TEXT NOT NULL,
+    multi_agent_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    member_sessions_json TEXT NOT NULL DEFAULT '{}',
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (multi_agent_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_threads_agent ON multi_agent_threads(multi_agent_id, updated_at);
+
 CREATE TABLE IF NOT EXISTS multi_agent_turns (
     id TEXT PRIMARY KEY,
     multi_agent_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT 'default',
     trigger_message_id TEXT NOT NULL,
     status TEXT NOT NULL,
     definition_snapshot_json TEXT NOT NULL,
@@ -191,6 +205,7 @@ CREATE INDEX IF NOT EXISTS idx_multi_agent_turns_agent ON multi_agent_turns(mult
 CREATE TABLE IF NOT EXISTS multi_agent_messages (
     id TEXT PRIMARY KEY,
     multi_agent_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT 'default',
     turn_id TEXT,
     seq INTEGER NOT NULL,
     author_kind TEXT NOT NULL CHECK (author_kind IN ('user', 'member', 'system')),

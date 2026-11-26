@@ -112,6 +112,8 @@
     }
   },
   "chatroom": {
+    "newChat": "New chat",
+    "history": "Chat history",
     "placeholder": "Message the group, @ a role or @everyone",
     "everyone": "Everyone",
     "send": "Send",
@@ -160,5 +162,13 @@
   "session": {
     "badge": "Workflow node",
     "back": "Back to workflow"
+  },
+  "historyMenu": {
+    "active": "Active",
+    "archived": "Archived",
+    "archive": "Archive",
+    "restore": "Restore",
+    "deletePermanent": "Delete permanently",
+    "emptyArchived": "No archived items"
   }
 }

@@ -9,6 +9,7 @@ import { getConnection } from '@/modules/database/connection.js';
 import type {
   ChatMessage,
   ChatMessageStatus,
+  ChatThread,
   MultiAgent,
   MultiAgentDefinition,
   MultiAgentKind,
@@ -54,6 +55,7 @@ type RunRow = {
   definition_snapshot_json: string;
   node_states_json: string;
   start_input: string | null;
+  is_archived?: number;
   started_at: string;
   finished_at: string | null;
 };
@@ -61,6 +63,7 @@ type RunRow = {
 type MessageRow = {
   id: string;
   multi_agent_id: string;
+  thread_id?: string;
   turn_id: string | null;
   seq: number;
   author_kind: ChatMessage['authorKind'];
@@ -72,9 +75,20 @@ type MessageRow = {
   created_at: string;
 };
 
+type ThreadRow = {
+  id: string;
+  multi_agent_id: string;
+  title: string;
+  member_sessions_json: string;
+  is_archived?: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TurnRow = {
   id: string;
   multi_agent_id: string;
+  thread_id?: string;
   trigger_message_id: string;
   status: string;
   definition_snapshot_json: string;
@@ -108,6 +122,7 @@ const toRun = (row: RunRow): WorkflowRun => ({
   definition: parse<WorkflowDef>(row.definition_snapshot_json, { nodes: [] }),
   nodeStates: parse<Record<string, NodeRunStatus>>(row.node_states_json, {}),
   startInput: row.start_input ?? null,
+  isArchived: Boolean(row.is_archived),
   startedAt: row.started_at,
   finishedAt: row.finished_at,
 });
@@ -115,6 +130,7 @@ const toRun = (row: RunRow): WorkflowRun => ({
 const toMessage = (row: MessageRow): ChatMessage => ({
   id: row.id,
   multiAgentId: row.multi_agent_id,
+  threadId: row.thread_id ?? 'default',
   turnId: row.turn_id,
   seq: row.seq,
   authorKind: row.author_kind,
@@ -124,6 +140,15 @@ const toMessage = (row: MessageRow): ChatMessage => ({
   status: row.status,
   finishReason: row.finish_reason,
   createdAt: row.created_at,
+});
+
+const toThread = (row: ThreadRow): ChatThread => ({
+  id: row.id,
+  multiAgentId: row.multi_agent_id,
+  title: row.title,
+  isArchived: Boolean(row.is_archived),
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
 });
 
 export const multiAgentsDb = {
@@ -193,20 +218,33 @@ export const multiAgentsDb = {
     })();
   },
 
-  getMemberSessions(id: string): Record<string, MemberSession> {
+  getMemberSessions(id: string, threadId = 'default'): Record<string, MemberSession> {
+    if (threadId !== 'default') {
+      const tRow = getConnection()
+        .prepare('SELECT member_sessions_json FROM multi_agent_threads WHERE multi_agent_id = ? AND id = ?')
+        .get(id, threadId) as { member_sessions_json: string } | undefined;
+      return parse(tRow?.member_sessions_json ?? null, {});
+    }
     const row = getConnection().prepare('SELECT member_sessions_json FROM multi_agents WHERE id = ?')
       .get(id) as { member_sessions_json: string } | undefined;
     return parse(row?.member_sessions_json ?? null, {});
   },
 
-  setMemberSessions(id: string, sessions: Record<string, MemberSession>): void {
+  setMemberSessions(id: string, sessions: Record<string, MemberSession>, threadId = 'default'): void {
     const db = getConnection();
     db.transaction(() => {
       const row = db.prepare('SELECT user_id FROM multi_agents WHERE id = ?').get(id) as { user_id: number } | undefined;
-      db.prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
-        .run(JSON.stringify(sessions), id);
+      if (threadId === 'default') {
+        db.prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
+          .run(JSON.stringify(sessions), id);
+      } else {
+        db.prepare('UPDATE multi_agent_threads SET member_sessions_json = ?, updated_at = ? WHERE multi_agent_id = ? AND id = ?')
+          .run(JSON.stringify(sessions), now(), id, threadId);
+      }
       if (row) {
-        db.prepare("DELETE FROM multi_agent_sessions WHERE multi_agent_id = ? AND role = 'member'").run(id);
+        if (threadId === 'default') {
+          db.prepare("DELETE FROM multi_agent_sessions WHERE multi_agent_id = ? AND role = 'member'").run(id);
+        }
         const ts = now();
         const ins = db.prepare(`INSERT OR REPLACE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
           VALUES (?, ?, ?, 'member', ?)`);
@@ -218,7 +256,7 @@ export const multiAgentsDb = {
   },
 
   /** 原子更新單一成員 session（僅當該成員仍存在於目前定義時寫入） */
-  upsertMemberSession(id: string, memberId: string, session: MemberSession): void {
+  upsertMemberSession(id: string, memberId: string, session: MemberSession, threadId = 'default'): void {
     const db = getConnection();
     db.transaction(() => {
       const row = db.prepare('SELECT user_id, definition_json, member_sessions_json FROM multi_agents WHERE id = ?')
@@ -226,15 +264,27 @@ export const multiAgentsDb = {
       if (!row) return;
       const def = parse<{ members?: Array<{ id: string }> } | null>(row.definition_json, null);
       if (def?.members && !def.members.some((m) => m.id === memberId)) return;
-      const sessions = parse<Record<string, MemberSession>>(row.member_sessions_json, {});
+      const tRow = threadId !== 'default'
+        ? db.prepare('SELECT member_sessions_json FROM multi_agent_threads WHERE multi_agent_id = ? AND id = ?')
+          .get(id, threadId) as { member_sessions_json: string } | undefined
+        : undefined;
+      const sessions = parse<Record<string, MemberSession>>(
+        threadId === 'default' ? row.member_sessions_json : (tRow?.member_sessions_json ?? null),
+        {},
+      );
       const prev = sessions[memberId];
       if (prev?.sessionId && prev.sessionId !== session.sessionId) {
         db.prepare("DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ? AND role = 'member'")
           .run(prev.sessionId, id);
       }
       sessions[memberId] = session;
-      db.prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
-        .run(JSON.stringify(sessions), id);
+      if (threadId === 'default') {
+        db.prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
+          .run(JSON.stringify(sessions), id);
+      } else {
+        db.prepare('UPDATE multi_agent_threads SET member_sessions_json = ?, updated_at = ? WHERE multi_agent_id = ? AND id = ?')
+          .run(JSON.stringify(sessions), now(), id, threadId);
+      }
       if (session.sessionId) {
         db.prepare(`INSERT OR REPLACE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
           VALUES (?, ?, ?, 'member', ?)`).run(session.sessionId, id, row.user_id, now());
@@ -242,15 +292,12 @@ export const multiAgentsDb = {
     })();
   },
 
-  /** 原子清除已不在定義中的成員 session */
+  /** 原子清除已不在定義中的成員 session（涵蓋預設對話與所有子對話） */
   pruneMemberSessions(id: string, validMemberIds: Iterable<string>): void {
     const valid = new Set(validMemberIds);
     const db = getConnection();
-    db.transaction(() => {
-      const row = db.prepare('SELECT member_sessions_json FROM multi_agents WHERE id = ?')
-        .get(id) as { member_sessions_json: string } | undefined;
-      if (!row) return;
-      const sessions = parse<Record<string, MemberSession>>(row.member_sessions_json, {});
+    const pruneJson = (raw: string): { changed: boolean; next: Record<string, MemberSession> } => {
+      const sessions = parse<Record<string, MemberSession>>(raw, {});
       let changed = false;
       for (const [key, val] of Object.entries(sessions)) {
         if (!valid.has(key)) {
@@ -262,9 +309,25 @@ export const multiAgentsDb = {
           changed = true;
         }
       }
-      if (changed) {
+      return { changed, next: sessions };
+    };
+    db.transaction(() => {
+      const row = db.prepare('SELECT member_sessions_json FROM multi_agents WHERE id = ?')
+        .get(id) as { member_sessions_json: string } | undefined;
+      if (!row) return;
+      const main = pruneJson(row.member_sessions_json);
+      if (main.changed) {
         db.prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
-          .run(JSON.stringify(sessions), id);
+          .run(JSON.stringify(main.next), id);
+      }
+      const threads = db.prepare('SELECT id, member_sessions_json FROM multi_agent_threads WHERE multi_agent_id = ?')
+        .all(id) as Array<{ id: string; member_sessions_json: string }>;
+      for (const t of threads) {
+        const res = pruneJson(t.member_sessions_json);
+        if (res.changed) {
+          db.prepare('UPDATE multi_agent_threads SET member_sessions_json = ? WHERE multi_agent_id = ? AND id = ?')
+            .run(JSON.stringify(res.next), id, t.id);
+        }
       }
     })();
   },
@@ -280,6 +343,7 @@ export const multiAgentsDb = {
       const changed = db.prepare('DELETE FROM multi_agents WHERE id = ? AND user_id = ?').run(id, userId).changes;
       if (!changed) return false;
       db.prepare('DELETE FROM multi_agent_runs WHERE multi_agent_id = ?').run(id);
+      db.prepare('DELETE FROM multi_agent_threads WHERE multi_agent_id = ?').run(id);
       db.prepare('DELETE FROM multi_agent_turns WHERE multi_agent_id = ?').run(id);
       db.prepare('DELETE FROM multi_agent_messages WHERE multi_agent_id = ?').run(id);
       db.prepare('DELETE FROM workflow_sessions WHERE multi_agent_id = ?').run(id);
@@ -363,20 +427,128 @@ export const multiAgentsDb = {
     ).get(multiAgentId);
   },
 
+  archiveRun(multiAgentId: string, runId: string, archived: boolean): boolean {
+    return getConnection()
+      .prepare('UPDATE multi_agent_runs SET is_archived = ? WHERE id = ? AND multi_agent_id = ?')
+      .run(archived ? 1 : 0, runId, multiAgentId).changes > 0;
+  },
+
+  deleteRun(multiAgentId: string, runId: string): boolean {
+    const db = getConnection();
+    return db.transaction(() => {
+      const changed = db.prepare('DELETE FROM multi_agent_runs WHERE id = ? AND multi_agent_id = ?').run(runId, multiAgentId).changes;
+      if (!changed) return false;
+      const sessions = db.prepare('SELECT session_id FROM workflow_sessions WHERE multi_agent_id = ? AND run_id = ?')
+        .all(multiAgentId, runId) as Array<{ session_id: string }>;
+      for (const s of sessions) {
+        db.prepare('DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ?').run(s.session_id, multiAgentId);
+      }
+      db.prepare('DELETE FROM workflow_sessions WHERE multi_agent_id = ? AND run_id = ?').run(multiAgentId, runId);
+      return true;
+    })();
+  },
+
   // ----------------- 聊天室 -----------------
 
-  appendMessage(input: Omit<ChatMessage, 'id' | 'seq' | 'createdAt'> & { id?: string }): ChatMessage {
+  /** 列出聊天室下的所有對話（若尚無記錄但有舊訊息，自動補建 default 對話） */
+  listThreads(multiAgentId: string, limit = 30): ChatThread[] {
     const db = getConnection();
+    return db.transaction(() => {
+      const hasDefaultMsg = db.prepare(
+        "SELECT content, created_at FROM multi_agent_messages WHERE multi_agent_id = ? AND thread_id = 'default' ORDER BY seq ASC LIMIT 1",
+      ).get(multiAgentId) as { content: string; created_at: string } | undefined;
+      if (hasDefaultMsg) {
+        const lastMsg = db.prepare(
+          "SELECT created_at FROM multi_agent_messages WHERE multi_agent_id = ? AND thread_id = 'default' ORDER BY seq DESC LIMIT 1",
+        ).get(multiAgentId) as { created_at: string } | undefined;
+        db.prepare(`INSERT OR IGNORE INTO multi_agent_threads (id, multi_agent_id, title, member_sessions_json, created_at, updated_at)
+                    VALUES ('default', ?, ?, '{}', ?, ?)`).run(
+          multiAgentId,
+          hasDefaultMsg.content.trim().slice(0, 32) || '預設對話',
+          hasDefaultMsg.created_at,
+          lastMsg?.created_at ?? hasDefaultMsg.created_at,
+        );
+      }
+      const rows = db.prepare(
+        'SELECT * FROM multi_agent_threads WHERE multi_agent_id = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?',
+      ).all(multiAgentId, limit) as ThreadRow[];
+      if (rows.length === 0) {
+        const ts = now();
+        db.prepare(`INSERT OR IGNORE INTO multi_agent_threads (id, multi_agent_id, title, member_sessions_json, created_at, updated_at)
+                    VALUES ('default', ?, '新對話', '{}', ?, ?)`).run(multiAgentId, ts, ts);
+        return (db.prepare('SELECT * FROM multi_agent_threads WHERE multi_agent_id = ?').all(multiAgentId) as ThreadRow[]).map(toThread);
+      }
+      return rows.map(toThread);
+    })();
+  },
+
+  createThread(multiAgentId: string, title = '新對話'): ChatThread {
+    const db = getConnection();
+    const id = crypto.randomUUID();
+    const ts = now();
+    db.prepare(`INSERT INTO multi_agent_threads (id, multi_agent_id, title, member_sessions_json, created_at, updated_at)
+                VALUES (?, ?, ?, '{}', ?, ?)`).run(id, multiAgentId, title.trim().slice(0, 60) || '新對話', ts, ts);
+    return toThread(
+      db.prepare('SELECT * FROM multi_agent_threads WHERE multi_agent_id = ? AND id = ?').get(multiAgentId, id) as ThreadRow,
+    );
+  },
+
+  archiveThread(multiAgentId: string, threadId: string, archived: boolean): boolean {
+    return getConnection()
+      .prepare('UPDATE multi_agent_threads SET is_archived = ? WHERE multi_agent_id = ? AND id = ?')
+      .run(archived ? 1 : 0, multiAgentId, threadId).changes > 0;
+  },
+
+  deleteThread(multiAgentId: string, threadId: string): boolean {
+    const db = getConnection();
+    return db.transaction(() => {
+      const sessions = this.getMemberSessions(multiAgentId, threadId);
+      for (const s of Object.values(sessions)) {
+        if (s?.sessionId) {
+          db.prepare("DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ? AND role = 'member'")
+            .run(s.sessionId, multiAgentId);
+        }
+      }
+      if (threadId === 'default') {
+        db.prepare("UPDATE multi_agents SET member_sessions_json = '{}' WHERE id = ?").run(multiAgentId);
+      }
+      const msgChanged = db.prepare('DELETE FROM multi_agent_messages WHERE multi_agent_id = ? AND thread_id = ?')
+        .run(multiAgentId, threadId).changes;
+      db.prepare('DELETE FROM multi_agent_turns WHERE multi_agent_id = ? AND thread_id = ?')
+        .run(multiAgentId, threadId);
+      const threadChanged = db.prepare('DELETE FROM multi_agent_threads WHERE multi_agent_id = ? AND id = ?')
+        .run(multiAgentId, threadId).changes;
+      return threadChanged > 0 || msgChanged > 0;
+    })();
+  },
+
+  appendMessage(input: Omit<ChatMessage, 'id' | 'seq' | 'createdAt'> & { id?: string; threadId?: string }): ChatMessage {
+    const db = getConnection();
+    const threadId = input.threadId || 'default';
     return db.transaction(() => {
       const { next } = db.prepare(
         'SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM multi_agent_messages WHERE multi_agent_id = ?',
       ).get(input.multiAgentId) as { next: number };
       const id = input.id ?? crypto.randomUUID();
+      const ts = now();
       db.prepare(`INSERT INTO multi_agent_messages
-                  (id, multi_agent_id, turn_id, seq, author_kind, member_id, author_snapshot_json, content, status, finish_reason, created_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, input.multiAgentId, input.turnId, next, input.authorKind, input.memberId,
-          input.author ? JSON.stringify(input.author) : null, input.content, input.status, input.finishReason, now());
+                  (id, multi_agent_id, thread_id, turn_id, seq, author_kind, member_id, author_snapshot_json, content, status, finish_reason, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, input.multiAgentId, threadId, input.turnId, next, input.authorKind, input.memberId,
+          input.author ? JSON.stringify(input.author) : null, input.content, input.status, input.finishReason, ts);
+      // 同步確保 multi_agent_threads 存在，且在首則使用者訊息時自動更新對話標題
+      if (input.authorKind === 'user') {
+        const snippet = input.content.trim().replace(/\s+/g, ' ').slice(0, 32) || '新對話';
+        db.prepare(`INSERT OR IGNORE INTO multi_agent_threads (id, multi_agent_id, title, member_sessions_json, created_at, updated_at)
+                    VALUES (?, ?, ?, '{}', ?, ?)`).run(threadId, input.multiAgentId, snippet, ts, ts);
+        db.prepare(`UPDATE multi_agent_threads
+                    SET title = CASE WHEN title IN ('新對話', '新对话', 'New chat') THEN ? ELSE title END,
+                        updated_at = ?
+                    WHERE multi_agent_id = ? AND id = ?`).run(snippet, ts, input.multiAgentId, threadId);
+      } else {
+        db.prepare('UPDATE multi_agent_threads SET updated_at = ? WHERE multi_agent_id = ? AND id = ?')
+          .run(ts, input.multiAgentId, threadId);
+      }
       return toMessage(db.prepare('SELECT * FROM multi_agent_messages WHERE id = ?').get(id) as MessageRow);
     })();
   },
@@ -407,21 +579,22 @@ export const multiAgentsDb = {
   },
 
   /** 分頁：beforeSeq 之前（不含）最新的 limit 則，依 seq 升冪回傳 */
-  listMessages(multiAgentId: string, options: { beforeSeq?: number; limit?: number } = {}): ChatMessage[] {
+  listMessages(multiAgentId: string, options: { threadId?: string; beforeSeq?: number; limit?: number } = {}): ChatMessage[] {
     const limit = options.limit ?? 50;
+    const threadId = options.threadId || 'default';
     const rows = getConnection().prepare(
-      `SELECT * FROM multi_agent_messages WHERE multi_agent_id = ? AND seq < ?
+      `SELECT * FROM multi_agent_messages WHERE multi_agent_id = ? AND thread_id = ? AND seq < ?
        ORDER BY seq DESC LIMIT ?`,
-    ).all(multiAgentId, options.beforeSeq ?? Number.MAX_SAFE_INTEGER, limit) as MessageRow[];
+    ).all(multiAgentId, threadId, options.beforeSeq ?? Number.MAX_SAFE_INTEGER, limit) as MessageRow[];
     return rows.reverse().map(toMessage);
   },
 
   /** seq 之後的訊息（不含 queued 與執行中訊息），供成員續接時增量送出 */
-  listMessagesAfter(multiAgentId: string, afterSeq: number): ChatMessage[] {
+  listMessagesAfter(multiAgentId: string, afterSeq: number, threadId = 'default'): ChatMessage[] {
     const rows = getConnection().prepare(
-      `SELECT * FROM multi_agent_messages WHERE multi_agent_id = ? AND seq > ? AND status IN ('done', 'error')
+      `SELECT * FROM multi_agent_messages WHERE multi_agent_id = ? AND thread_id = ? AND seq > ? AND status IN ('done', 'error')
        ORDER BY seq ASC`,
-    ).all(multiAgentId, afterSeq) as MessageRow[];
+    ).all(multiAgentId, threadId, afterSeq) as MessageRow[];
     return rows.map(toMessage);
   },
 
@@ -442,19 +615,19 @@ export const multiAgentsDb = {
     })();
   },
 
-  nextQueuedMessage(multiAgentId: string): ChatMessage | null {
+  nextQueuedMessage(multiAgentId: string, threadId = 'default'): ChatMessage | null {
     const row = getConnection().prepare(
-      "SELECT * FROM multi_agent_messages WHERE multi_agent_id = ? AND status = 'queued' ORDER BY seq ASC LIMIT 1",
-    ).get(multiAgentId) as MessageRow | undefined;
+      "SELECT * FROM multi_agent_messages WHERE multi_agent_id = ? AND thread_id = ? AND status = 'queued' ORDER BY seq ASC LIMIT 1",
+    ).get(multiAgentId, threadId) as MessageRow | undefined;
     return row ? toMessage(row) : null;
   },
 
-  createTurn(multiAgentId: string, triggerMessageId: string, snapshot: MultiAgentDefinition): TurnRow {
+  createTurn(multiAgentId: string, triggerMessageId: string, snapshot: MultiAgentDefinition, threadId = 'default'): TurnRow {
     const id = crypto.randomUUID();
     const db = getConnection();
-    db.prepare(`INSERT INTO multi_agent_turns (id, multi_agent_id, trigger_message_id, status, definition_snapshot_json, started_at)
-                VALUES (?, ?, ?, 'running', ?, ?)`)
-      .run(id, multiAgentId, triggerMessageId, JSON.stringify(snapshot), now());
+    db.prepare(`INSERT INTO multi_agent_turns (id, multi_agent_id, thread_id, trigger_message_id, status, definition_snapshot_json, started_at)
+                VALUES (?, ?, ?, ?, 'running', ?, ?)`)
+      .run(id, multiAgentId, threadId, triggerMessageId, JSON.stringify(snapshot), now());
     return db.prepare('SELECT * FROM multi_agent_turns WHERE id = ?').get(id) as TurnRow;
   },
 
@@ -463,10 +636,16 @@ export const multiAgentsDb = {
       .run(...(finished ? [status, now(), id] : [status, id]));
   },
 
-  getActiveTurn(multiAgentId: string): TurnRow | null {
+  getActiveTurn(multiAgentId: string, threadId = 'default'): TurnRow | null {
     return (getConnection().prepare(
-      "SELECT * FROM multi_agent_turns WHERE multi_agent_id = ? AND status IN ('running', 'stopping') LIMIT 1",
-    ).get(multiAgentId) as TurnRow | undefined) ?? null;
+      "SELECT * FROM multi_agent_turns WHERE multi_agent_id = ? AND thread_id = ? AND status IN ('running', 'stopping') LIMIT 1",
+    ).get(multiAgentId, threadId) as TurnRow | undefined) ?? null;
+  },
+
+  getActiveTurns(multiAgentId: string): TurnRow[] {
+    return getConnection().prepare(
+      "SELECT * FROM multi_agent_turns WHERE multi_agent_id = ? AND status IN ('running', 'stopping')",
+    ).all(multiAgentId) as TurnRow[];
   },
 
   /** 服務啟動時把中斷的執行標記為 interrupted / failed */
