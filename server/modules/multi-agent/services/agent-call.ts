@@ -85,8 +85,15 @@ export class AgentCall {
    * 執行一輪。prompt 省略時用建構時的提示；之後的輪次（中斷後續接）以同一 sessionId 續接，
    * 輸出以最新一輪的最終回覆為準。clientId 用於前端對應樂觀顯示的使用者訊息。
    */
-  async run(prompt = this.options.prompt, clientId: string = randomUUID(), images?: unknown): Promise<AgentCallResult> {
-    const { provider, permissionMode } = this.options;
+  async run(
+    prompt = this.options.prompt,
+    clientId: string = randomUUID(),
+    images?: unknown,
+    overrides?: { permissionMode?: PermissionMode; model?: string },
+  ): Promise<AgentCallResult> {
+    const { provider } = this.options;
+    const permissionMode = overrides?.permissionMode ?? this.options.permissionMode;
+    const model = overrides?.model ?? this.options.model;
     // 前一輪被中斷時殘留的串流段落，併入已完成的輸出
     if (this.segment) { this.completed.push(this.segment); this.segment = ''; }
     this.aborted = false;
@@ -116,7 +123,7 @@ export class AgentCall {
         projectPath: this.options.cwd,
         sessionId: this.sessionId,
         resume,
-        model: this.options.model,
+        model,
         permissionMode: mode,
         // Cursor 只認 skipPermissions
         skipPermissions: mode === 'bypassPermissions',

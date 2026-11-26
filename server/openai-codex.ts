@@ -309,8 +309,11 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
     ];
     const turn = await rpc.request('turn/start', {
       threadId, input: turnInput.length > 0 ? turnInput : [{ type: 'text', text: finalCommand, text_elements: [] }],
-      // 推理强度对本轮及之后的轮次生效；未指定则沿用线程 / config.toml 的设置
+      // 推理强度与沙箱／审批策略对本轮及之后的轮次生效（覆盖续接线程原先持久化的沙箱模式）
       ...(options.effort && CODEX_EFFORT_LEVELS.has(options.effort) ? { effort: options.effort } : {}),
+      ...(options.permissionMode === 'bypassPermissions'
+        ? { sandboxPolicy: { type: 'dangerFullAccess' as const }, approvalPolicy: 'never' as const }
+        : {}),
     });
     state.turnId = turn.turn.id;
     clearTimeout(startupTimer);

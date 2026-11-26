@@ -4,10 +4,10 @@
  */
 import { multiAgentsDb, sessionMessagesDb } from '@/modules/database/index.js';
 import { sendToUser } from '@/modules/websocket/index.js';
-import { workflowSessions, type LiveWorkflowSession, type WorkflowContinueResult } from '@/shared/workflow-session-registry.js';
+import { workflowSessions, type LiveWorkflowSession, type WorkflowContinueResult, type WorkflowResumeMeta } from '@/shared/workflow-session-registry.js';
 
 import { isApprovalNode, type MultiAgent, type NodeRunStatus, type WorkflowDef, type WorkflowNode, type WorkflowRun } from '../../../../shared/multiAgent.js';
-import { getDefaultPermissionMode } from '../../../../shared/providers.js';
+import { getDefaultPermissionMode, type PermissionMode } from '../../../../shared/providers.js';
 
 import { AgentCall, truncateCodePoints, type RuntimeResolver } from './agent-call.js';
 
@@ -149,8 +149,17 @@ function syncLatestAssistantOutput(state: NodeRunStatus): void {
   }
 }
 
+function unpackResumeMeta(raw: unknown): WorkflowResumeMeta {
+  if (Array.isArray(raw)) return { images: raw };
+  if (raw && typeof raw === 'object') return raw as WorkflowResumeMeta;
+  return {};
+}
+
 /** waiting_input 的出口：送出新指示續接、以目前輸出完成、標記失敗 */
-type InputDecision = { kind: 'resume'; text: string; clientId: string; images?: unknown } | { kind: 'complete' } | { kind: 'fail' };
+type InputDecision =
+  | { kind: 'resume'; text: string; clientId: string; images?: unknown; permissionMode?: PermissionMode; model?: string }
+  | { kind: 'complete' }
+  | { kind: 'fail' };
 
 class ActiveRun {
   readonly calls = new Map<string, AgentCall>();
@@ -158,8 +167,8 @@ class ActiveRun {
   readonly confirmations = new Map<string, (decision: InternalConfirmDecision, note: string) => void>();
   /** 使用者中斷後等待指示的節點（waiting_input） */
   readonly inputs = new Map<string, (decision: InputDecision) => void>();
-  /** 退回重做或對話頁追問時，指定某節點下一輪要續接的提示詞與附件圖片 */
-  readonly followUps = new Map<string, { prompt: string; clientId?: string; images?: unknown }>();
+  /** 退回重做或對話頁追問時，指定某節點下一輪要續接的提示詞、圖片與覆寫權限／模型 */
+  readonly followUps = new Map<string, { prompt: string; clientId?: string; images?: unknown; permissionMode?: PermissionMode; model?: string }>();
   stopping = false;
   done: Promise<void> = Promise.resolve();
   private wakeResolve: (() => void) | null = null;
@@ -337,9 +346,17 @@ export class WorkflowRunner {
       userId: agent.userId,
       state: () => (waiting ? 'waiting_input' : 'running'),
       markUserInterrupted: () => { userInterrupted = true; },
-      resume: (text, clientId, images) => {
+      resume: (text, clientId, imagesOrMeta) => {
         if (!waiting) return false;
-        waiting({ kind: 'resume', text, clientId, images });
+        const meta = unpackResumeMeta(imagesOrMeta);
+        waiting({
+          kind: 'resume',
+          text,
+          clientId,
+          images: meta.images,
+          permissionMode: meta.permissionMode as PermissionMode | undefined,
+          model: meta.model,
+        });
         return true;
       },
     };
@@ -347,7 +364,10 @@ export class WorkflowRunner {
     active.calls.set(node.id, call);
 
     try {
-      let result = await call.run(prompt, followUp?.clientId, followUp?.images);
+      let result = await call.run(prompt, followUp?.clientId, followUp?.images, {
+        permissionMode: followUp?.permissionMode,
+        model: followUp?.model,
+      });
       // 聊天頁中斷：不判定失敗，等使用者的下一步（design D4）
       while (!active.stopping && result.status === 'aborted' && userInterrupted) {
         userInterrupted = false;
@@ -369,7 +389,10 @@ export class WorkflowRunner {
         }
         state.state = 'running';
         this.emitNode(active, node.id);
-        result = await call.run(decision.text, decision.clientId, decision.images);
+        result = await call.run(decision.text, decision.clientId, decision.images, {
+          permissionMode: decision.permissionMode,
+          model: decision.model,
+        });
       }
       state.output = result.text;
       if (active.stopping || result.status === 'aborted') {
@@ -474,15 +497,23 @@ export class WorkflowRunner {
     userId: string | number | null,
     text: string,
     clientId: string,
-    images?: unknown,
+    imagesOrMeta?: unknown,
   ): WorkflowContinueResult {
     const entry = multiAgentsDb.getWorkflowSession(sessionId);
     if (!entry || userId === null || userId === undefined || String(entry.userId) !== String(userId)) {
       return 'not_workflow';
     }
+    const meta = unpackResumeMeta(imagesOrMeta);
     const prompt = text.trim();
-    const hasImages = Array.isArray(images) && images.length > 0;
+    const hasImages = Array.isArray(meta.images) && meta.images.length > 0;
     if (!prompt && !hasImages) return 'not_workflow';
+    const followUp = {
+      prompt,
+      clientId,
+      images: meta.images,
+      permissionMode: meta.permissionMode as PermissionMode | undefined,
+      model: meta.model,
+    };
 
     const active = this.active.get(entry.runId);
     if (active) {
@@ -497,7 +528,7 @@ export class WorkflowRunner {
         active.confirmations.get(id)?.('reset', '');
       }
       ensureAncestorsSucceeded(active.run, entry.nodeId, active);
-      active.followUps.set(entry.nodeId, { prompt, clientId, images });
+      active.followUps.set(entry.nodeId, followUp);
       resetNodesForRerun(active.run, downstream, new Set([entry.nodeId]));
       active.run.nodeStates[entry.nodeId].sessionId = sessionId;
       this.persist(active);
@@ -519,7 +550,7 @@ export class WorkflowRunner {
     run.finishedAt = null;
 
     const reopened = new ActiveRun(run, agent);
-    reopened.followUps.set(entry.nodeId, { prompt, clientId, images });
+    reopened.followUps.set(entry.nodeId, followUp);
     this.active.set(run.id, reopened);
     this.persist(reopened);
     this.emitRun(reopened);
