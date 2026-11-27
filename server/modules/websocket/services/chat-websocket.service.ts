@@ -209,7 +209,7 @@ export function handleChatConnection(
             clientId,
             resumeMeta,
           );
-          if (continued === 'continued') return;
+          if (continued === 'continued' || continued === 'empty') return;
           if (continued === 'busy') {
             sendToClient(writer, createNormalizedMessage({ kind: 'task_notification', provider: id,
               sessionId: requestedSessionId, status: 'warning', summary: 'Workflow is currently busy running another step.' }));

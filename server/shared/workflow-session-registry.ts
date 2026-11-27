@@ -22,7 +22,7 @@ export type LiveWorkflowSession = {
   resume(text: string, clientId: string, imagesOrMeta?: unknown): boolean;
 };
 
-export type WorkflowContinueResult = 'not_workflow' | 'continued' | 'busy';
+export type WorkflowContinueResult = 'not_workflow' | 'continued' | 'busy' | 'empty';
 
 type ContinueHandler = (
   sessionId: string,

@@ -169,6 +169,7 @@
     "archive": "归档",
     "restore": "还原",
     "deletePermanent": "永久删除",
-    "emptyArchived": "暂无归档记录"
+    "emptyArchived": "暂无归档记录",
+    "archivedReadonlyHint": "此对话已归档，还原后可继续发言。"
   }
 }

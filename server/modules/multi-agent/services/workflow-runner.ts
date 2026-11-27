@@ -7,7 +7,7 @@ import { sendToUser } from '@/modules/websocket/index.js';
 import { workflowSessions, type LiveWorkflowSession, type WorkflowContinueResult, type WorkflowResumeMeta } from '@/shared/workflow-session-registry.js';
 
 import { isApprovalNode, type MultiAgent, type NodeRunStatus, type WorkflowDef, type WorkflowNode, type WorkflowRun } from '../../../../shared/multiAgent.js';
-import { getDefaultPermissionMode, type PermissionMode } from '../../../../shared/providers.js';
+import { getDefaultPermissionMode, PROVIDER_INFO, type LLMProvider, type PermissionMode } from '../../../../shared/providers.js';
 
 import { AgentCall, truncateCodePoints, type RuntimeResolver } from './agent-call.js';
 
@@ -64,39 +64,6 @@ function collectDownstream(def: WorkflowDef, roots: Iterable<string>): Set<strin
   return set;
 }
 
-/** 收集 targetId 的所有傳遞上游（祖先）節點 ID（不含 targetId 本身） */
-function collectAncestors(def: WorkflowDef, targetId: string): Set<string> {
-  const set = new Set<string>();
-  const walk = (id: string) => {
-    const node = def.nodes.find((n) => n.id === id);
-    if (!node) return;
-    for (const depId of node.dependsOn) {
-      if (!set.has(depId)) {
-        set.add(depId);
-        walk(depId);
-      }
-    }
-  };
-  walk(targetId);
-  return set;
-}
-
-/** 確保目標節點的所有上游祖先皆標記為 succeeded，使排程器 ready() 能立即執行目標節點 */
-function ensureAncestorsSucceeded(run: WorkflowRun, targetId: string, active?: ActiveRun): void {
-  for (const ancId of collectAncestors(run.definition, targetId)) {
-    active?.confirmations.get(ancId)?.('reset', '');
-    const prev = run.nodeStates[ancId];
-    if (prev && prev.state !== 'succeeded') {
-      run.nodeStates[ancId] = {
-        ...prev,
-        state: 'succeeded',
-        progress: 100,
-      };
-      delete run.nodeStates[ancId].error;
-    }
-  }
-}
-
 /** 找出人工確認節點對應的上游 Agent 節點（若隔著其他確認節點則繼續往上找） */
 function upstreamAgentNodes(def: WorkflowDef, node: WorkflowNode): WorkflowNode[] {
   const result: WorkflowNode[] = [];
@@ -115,8 +82,13 @@ function upstreamAgentNodes(def: WorkflowDef, node: WorkflowNode): WorkflowNode[
   return result;
 }
 
-/** 重置指定節點集合為 pending（保留 sessionId 以便續接對話），並將其餘 skipped 節點恢復為 pending */
-function resetNodesForRerun(run: WorkflowRun, toReset: Set<string>, keepOutputIds?: Set<string>): void {
+/** 重置指定節點集合為 pending（保留 sessionId 以便續接對話）；僅在 resetAllSkipped=true 時一併恢復其餘 skipped 節點 */
+function resetNodesForRerun(
+  run: WorkflowRun,
+  toReset: Set<string>,
+  keepOutputIds?: Set<string>,
+  resetAllSkipped = false,
+): void {
   for (const [id, prev] of Object.entries(run.nodeStates)) {
     if (toReset.has(id)) {
       run.nodeStates[id] = {
@@ -125,7 +97,7 @@ function resetNodesForRerun(run: WorkflowRun, toReset: Set<string>, keepOutputId
         ...(prev?.sessionId ? { sessionId: prev.sessionId } : {}),
         ...(prev?.output && (keepOutputIds?.has(id) || prev?.sessionId) ? { output: prev.output } : {}),
       };
-    } else if (prev.state === 'skipped') {
+    } else if (resetAllSkipped && prev.state === 'skipped') {
       run.nodeStates[id] = {
         state: 'pending',
         progress: 0,
@@ -134,6 +106,23 @@ function resetNodesForRerun(run: WorkflowRun, toReset: Set<string>, keepOutputId
       };
     }
   }
+}
+
+/** 校驗對話頁續接傳入的權限模式與模型：過濾不屬於該節點 provider 的權限模式，且不支援跨模型續接時忽略模型變更 */
+function sanitizeResumeOverrides(
+  provider: LLMProvider,
+  baseModel: string,
+  meta: WorkflowResumeMeta,
+): { permissionMode?: PermissionMode; model?: string } {
+  const info = PROVIDER_INFO[provider];
+  const permissionMode = meta.permissionMode && info.permissionModes.includes(meta.permissionMode as PermissionMode)
+    ? (meta.permissionMode as PermissionMode)
+    : undefined;
+  const trimmedModel = typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : undefined;
+  const model = trimmedModel && (trimmedModel === baseModel || info.capabilities.resumeAcrossModels)
+    ? trimmedModel
+    : undefined;
+  return { permissionMode, model };
 }
 
 /** 從節點會話訊息紀錄同步最後一則非空 assistant 文字到 state.output */
@@ -169,6 +158,10 @@ class ActiveRun {
   readonly inputs = new Map<string, (decision: InputDecision) => void>();
   /** 退回重做或對話頁追問時，指定某節點下一輪要續接的提示詞、圖片與覆寫權限／模型 */
   readonly followUps = new Map<string, { prompt: string; clientId?: string; images?: unknown; permissionMode?: PermissionMode; model?: string }>();
+  /** 對話頁直接追問的目標節點（無需檢查上游是否為 succeeded 即可立即啟動，不竄改上游真實狀態） */
+  readonly forcedReadyIds = new Set<string>();
+  /** 僅對本次明確納入執行範圍的節點集合（如對話頁追問的子圖）判定最終 run.status，避免歷史失敗祖先覆蓋追問結果 */
+  scopedNodeIds: Set<string> | null = null;
   stopping = false;
   done: Promise<void> = Promise.resolve();
   private wakeResolve: (() => void) | null = null;
@@ -260,11 +253,12 @@ export class WorkflowRunner {
 
     const ready = () => def.nodes.filter((n) => !running.has(n.id)
       && run.nodeStates[n.id].state === 'pending'
-      && n.dependsOn.every((d) => run.nodeStates[d].state === 'succeeded'));
+      && (active.forcedReadyIds.has(n.id) || n.dependsOn.every((d) => run.nodeStates[d].state === 'succeeded')));
 
     while (!active.stopping) {
       for (const node of ready()) {
         if (running.size >= MAX_PARALLEL_NODES) break;
+        active.forcedReadyIds.delete(node.id);
         const task = this.runNode(active, node).finally(() => running.delete(node.id));
         running.set(node.id, task);
       }
@@ -277,9 +271,11 @@ export class WorkflowRunner {
     for (const state of Object.values(run.nodeStates)) {
       if (state.state === 'pending') state.state = 'skipped';
     }
-    const states = Object.values(run.nodeStates);
+    const evaluatedStates = active.scopedNodeIds
+      ? [...active.scopedNodeIds].map((id) => run.nodeStates[id]).filter(Boolean)
+      : Object.values(run.nodeStates);
     run.status = active.stopping ? 'stopped'
-      : states.every((s) => s.state === 'succeeded') ? 'succeeded' : 'failed';
+      : evaluatedStates.every((s) => s.state === 'succeeded') ? 'succeeded' : 'failed';
     run.finishedAt = new Date().toISOString();
     this.persist(active, true);
     this.emitRun(active);
@@ -349,13 +345,14 @@ export class WorkflowRunner {
       resume: (text, clientId, imagesOrMeta) => {
         if (!waiting) return false;
         const meta = unpackResumeMeta(imagesOrMeta);
+        const sanitized = sanitizeResumeOverrides(node.provider!, node.model!, meta);
         waiting({
           kind: 'resume',
           text,
           clientId,
           images: meta.images,
-          permissionMode: meta.permissionMode as PermissionMode | undefined,
-          model: meta.model,
+          permissionMode: sanitized.permissionMode,
+          model: sanitized.model,
         });
         return true;
       },
@@ -448,7 +445,7 @@ export class WorkflowRunner {
           const downstream = collectDownstream(active.run.definition, targetIds);
           // 解除其他分支的舊確認等待，讓排程器在上游重跑後重新建立確認。
           for (const id of downstream) active.confirmations.get(id)?.('reset', '');
-          resetNodesForRerun(active.run, downstream, targetIds);
+          resetNodesForRerun(active.run, downstream, targetIds, true);
           this.persist(active);
           this.emitRun(active);
           resolve();
@@ -506,30 +503,35 @@ export class WorkflowRunner {
     const meta = unpackResumeMeta(imagesOrMeta);
     const prompt = text.trim();
     const hasImages = Array.isArray(meta.images) && meta.images.length > 0;
-    if (!prompt && !hasImages) return 'not_workflow';
-    const followUp = {
-      prompt,
-      clientId,
-      images: meta.images,
-      permissionMode: meta.permissionMode as PermissionMode | undefined,
-      model: meta.model,
-    };
+    if (!prompt && !hasImages) return 'empty';
 
     const active = this.active.get(entry.runId);
     if (active) {
       if (active.stopping) return 'busy';
+      const targetNode = active.run.definition.nodes.find((n) => n.id === entry.nodeId);
+      if (!targetNode || isApprovalNode(targetNode)) return 'not_workflow';
+      const sanitized = sanitizeResumeOverrides(targetNode.provider!, targetNode.model!, meta);
+      const followUp = {
+        prompt,
+        clientId,
+        images: meta.images,
+        permissionMode: sanitized.permissionMode,
+        model: sanitized.model,
+      };
       const downstream = collectDownstream(active.run.definition, [entry.nodeId]);
-      const ancestors = collectAncestors(active.run.definition, entry.nodeId);
       // 不可重設仍由 runNode 持有的狀態（也包含 waiting_input）
-      for (const id of [...downstream, ...ancestors]) {
+      for (const id of downstream) {
         if (active.calls.has(id)) return 'busy';
       }
       for (const id of downstream) {
         active.confirmations.get(id)?.('reset', '');
       }
-      ensureAncestorsSucceeded(active.run, entry.nodeId, active);
+      active.forcedReadyIds.add(entry.nodeId);
+      if (active.scopedNodeIds) {
+        for (const id of downstream) active.scopedNodeIds.add(id);
+      }
       active.followUps.set(entry.nodeId, followUp);
-      resetNodesForRerun(active.run, downstream, new Set([entry.nodeId]));
+      resetNodesForRerun(active.run, downstream, new Set([entry.nodeId]), false);
       active.run.nodeStates[entry.nodeId].sessionId = sessionId;
       this.persist(active);
       this.emitRun(active);
@@ -540,16 +542,26 @@ export class WorkflowRunner {
     if (this.activeCount(entry.multiAgentId) >= MAX_CONCURRENT_RUNS) return 'busy';
     const run = multiAgentsDb.getRun(entry.multiAgentId, entry.runId);
     const agent = multiAgentsDb.getById(entry.multiAgentId);
-    if (!run || !agent || !run.definition.nodes.some((n) => n.id === entry.nodeId)) return 'not_workflow';
+    const targetNode = run?.definition.nodes.find((n) => n.id === entry.nodeId);
+    if (!run || !agent || !targetNode || isApprovalNode(targetNode)) return 'not_workflow';
 
+    const sanitized = sanitizeResumeOverrides(targetNode.provider!, targetNode.model!, meta);
+    const followUp = {
+      prompt,
+      clientId,
+      images: meta.images,
+      permissionMode: sanitized.permissionMode,
+      model: sanitized.model,
+    };
     const downstream = collectDownstream(run.definition, [entry.nodeId]);
-    ensureAncestorsSucceeded(run, entry.nodeId);
-    resetNodesForRerun(run, downstream, new Set([entry.nodeId]));
+    resetNodesForRerun(run, downstream, new Set([entry.nodeId]), false);
     run.nodeStates[entry.nodeId].sessionId = sessionId;
     run.status = 'running';
     run.finishedAt = null;
 
     const reopened = new ActiveRun(run, agent);
+    reopened.forcedReadyIds.add(entry.nodeId);
+    reopened.scopedNodeIds = new Set(downstream);
     reopened.followUps.set(entry.nodeId, followUp);
     this.active.set(run.id, reopened);
     this.persist(reopened);
@@ -569,17 +581,25 @@ export class WorkflowRunner {
       if (!state) return false;
       const downstream = collectDownstream(active.run.definition, [nodeId]);
       downstream.delete(nodeId);
-      const ancestors = collectAncestors(active.run.definition, nodeId);
-      for (const id of [...downstream, ...ancestors]) {
+      for (const id of downstream) {
         if (active.calls.has(id)) return false;
       }
-      ensureAncestorsSucceeded(active.run, nodeId, active);
       syncLatestAssistantOutput(state);
       state.state = 'succeeded';
       state.progress = 100;
       delete state.error;
       for (const id of downstream) active.confirmations.get(id)?.('reset', '');
-      resetNodesForRerun(active.run, downstream);
+      resetNodesForRerun(active.run, downstream, undefined, false);
+      const directChildren = active.run.definition.nodes.filter((n) => n.dependsOn.includes(nodeId));
+      for (const child of directChildren) {
+        if (child.dependsOn.every((d) => d === nodeId || active.run.nodeStates[d]?.state === 'succeeded')) {
+          active.forcedReadyIds.add(child.id);
+        }
+      }
+      if (active.scopedNodeIds) {
+        active.scopedNodeIds.add(nodeId);
+        for (const id of downstream) active.scopedNodeIds.add(id);
+      }
       this.persist(active);
       this.emitRun(active);
       active.wake();
@@ -592,14 +612,13 @@ export class WorkflowRunner {
     if (!run || !agent) return false;
     const state = run.nodeStates[nodeId];
     if (!state) return false;
-    ensureAncestorsSucceeded(run, nodeId);
     syncLatestAssistantOutput(state);
     state.state = 'succeeded';
     state.progress = 100;
     delete state.error;
     const downstream = collectDownstream(run.definition, [nodeId]);
     downstream.delete(nodeId);
-    resetNodesForRerun(run, downstream);
+    resetNodesForRerun(run, downstream, undefined, false);
     if (!downstream.size) {
       multiAgentsDb.updateRun(run.id, { nodeStates: run.nodeStates });
       return true;
@@ -607,6 +626,7 @@ export class WorkflowRunner {
     run.status = 'running';
     run.finishedAt = null;
     const reopened = new ActiveRun(run, agent);
+    reopened.scopedNodeIds = new Set([nodeId, ...downstream]);
     this.active.set(run.id, reopened);
     this.persist(reopened);
     this.emitRun(reopened);

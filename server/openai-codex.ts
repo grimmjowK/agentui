@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 
 import { CodexAppServer, codexApprovals, codexOwnership } from './modules/codex-runtime/index.js';
-import type { ThreadItem, ThreadStartParams, TurnCompletedNotification } from './modules/codex-runtime/index.js';
+import type { ThreadItem, ThreadStartParams, TurnCompletedNotification, TurnStartParams } from './modules/codex-runtime/index.js';
 import { sessionsDb } from './modules/database/index.js';
 import { mapPlanUpdate, mapThreadItem, notifySessionsChanged } from './modules/providers/index.js';
 import { terminateShellSessionsBySessionId } from './modules/websocket/index.js';
@@ -63,6 +63,30 @@ export function mapPermissionModeToCodexOptions(mode: unknown): Pick<ThreadStart
   if (mode === 'bypassPermissions') return { sandbox: 'danger-full-access', approvalPolicy: 'never' };
   if (mode === 'acceptEdits') return { sandbox: 'workspace-write', approvalPolicy: 'never' };
   return { sandbox: 'workspace-write', approvalPolicy: 'on-request' };
+}
+
+/** 產生 turn/start 覆寫用的持久化沙箱與審批策略，確保續接執行緒時雙向切換（升權與降權）皆立即生效 */
+export function mapPermissionModeToTurnPolicy(
+  mode: unknown,
+  cwd: string,
+): {
+  sandboxPolicy: NonNullable<TurnStartParams['sandboxPolicy']>;
+  approvalPolicy: NonNullable<TurnStartParams['approvalPolicy']>;
+} {
+  if (mode === 'bypassPermissions') {
+    return { sandboxPolicy: { type: 'dangerFullAccess' }, approvalPolicy: 'never' };
+  }
+  const workspacePolicy: NonNullable<TurnStartParams['sandboxPolicy']> = {
+    type: 'workspaceWrite',
+    writableRoots: [cwd],
+    networkAccess: false,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: false,
+  };
+  if (mode === 'acceptEdits') {
+    return { sandboxPolicy: workspacePolicy, approvalPolicy: 'never' };
+  }
+  return { sandboxPolicy: workspacePolicy, approvalPolicy: 'on-request' };
 }
 
 type TitleJob = {
@@ -309,11 +333,9 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
     ];
     const turn = await rpc.request('turn/start', {
       threadId, input: turnInput.length > 0 ? turnInput : [{ type: 'text', text: finalCommand, text_elements: [] }],
-      // 推理强度与沙箱／审批策略对本轮及之后的轮次生效（覆盖续接线程原先持久化的沙箱模式）
+      // 推理强度与沙箱／审批策略对本轮及之后的轮次生效（覆盖续接线程原先持久化的沙箱模式，支援双向升降权）
       ...(options.effort && CODEX_EFFORT_LEVELS.has(options.effort) ? { effort: options.effort } : {}),
-      ...(options.permissionMode === 'bypassPermissions'
-        ? { sandboxPolicy: { type: 'dangerFullAccess' as const }, approvalPolicy: 'never' as const }
-        : {}),
+      ...mapPermissionModeToTurnPolicy(options.permissionMode, cwd),
     });
     state.turnId = turn.turn.id;
     clearTimeout(startupTimer);

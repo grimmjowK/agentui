@@ -497,3 +497,58 @@ test('上游確認節點因先前重跑並停止而處於 failed 時，直接在
     assert.equal(mock.calls.at(-1)?.prompt, 'MR block 了，fix 下');
   });
 });
+
+test('多分支 DAG 中下游節點追問時：不竄改真正失敗的祖先狀態、不誤觸發無關兄弟分支；空訊息回傳 empty；不支援跨模型續接的 provider 忽略模型覆寫或清洗非法權限', async () => {
+  await withDb(async () => {
+    // 結構：a -> c, b -> c, b -> d
+    const codexNode = (id: string, dependsOn: string[] = []) => ({
+      id,
+      title: id.toUpperCase(),
+      instruction: `do ${id}`,
+      provider: 'codex' as const,
+      model: 'gpt-5',
+      dependsOn,
+    });
+    let failB = false;
+    const def: WorkflowDef = { nodes: [codexNode('a'), codexNode('b'), codexNode('c', ['a', 'b']), codexNode('d', ['b'])] };
+    const { runner, agent, mock } = setup(def, async (ctx) => {
+      if ((ctx.prompt.includes('do b') || ctx.prompt === 'rerun b and fail') && failB) {
+        ctx.writer.send({ kind: 'error', content: 'b-failed', sessionId: ctx.sessionId });
+        return;
+      }
+      await say(`OUT:${ctx.prompt.slice(0, 20)}`)(ctx);
+    });
+
+    // 第一輪全部成功，讓 c 取得 sessionId (s3)
+    const started = runner.start(agent)!;
+    await started.done;
+    const cSessionId = multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.c.sessionId!;
+
+    // 模擬 b 重新執行失敗導致 d 與 c 成為 skipped
+    failB = true;
+    const bSessionId = multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.b.sessionId!;
+    await workflowSessions.continueSession(bSessionId, 1, 'rerun b and fail', 'c-b-fail');
+    await waitFor(() => multiAgentsDb.getRun(agent.id, started.run.id)!.status === 'failed');
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.b.state, 'failed');
+    assert.equal(multiAgentsDb.getRun(agent.id, started.run.id)!.nodeStates.d.state, 'skipped');
+
+    // 1. 對節點會話送出空白且無圖片：應回傳 'empty'（不可回傳 'not_workflow' 導致穿透一般聊天）
+    assert.equal(await workflowSessions.continueSession(cSessionId, 1, '   ', 'c-empty'), 'empty');
+
+    // 2. 在 c 對話頁追問，並故意帶上非法權限 'auto'（codex 不支援）與跨模型 'o3-pro'（codex resumeAcrossModels=false）
+    const callsBefore = mock.calls.length;
+    const cont = await workflowSessions.continueSession(cSessionId, 1, 'fix c directly', 'c-fix', {
+      permissionMode: 'auto',
+      model: 'o3-pro',
+    });
+    assert.equal(cont, 'continued');
+    await waitFor(() => mock.calls.length === callsBefore + 1 && !runner.isActive(agent.id));
+
+    const afterRun = multiAgentsDb.getRun(agent.id, started.run.id)!;
+    assert.equal(afterRun.nodeStates.c.state, 'succeeded', '被追問的 c 應成功執行完畢');
+    assert.equal(afterRun.nodeStates.b.state, 'failed', '失敗的祖先 b 狀態不得被偽造為 succeeded');
+    assert.equal(afterRun.nodeStates.d.state, 'skipped', '依賴失敗節點 b 的無關分支 d 不得被誤啟動');
+    assert.equal(mock.calls.at(-1)?.options.model, 'gpt-5', '不支援跨模型續接時維持節點原模型避免報錯');
+    assert.equal(mock.calls.at(-1)?.options.permissionMode, 'default', '非法權限模式應回退至節點合法預設模式');
+  });
+});

@@ -291,3 +291,24 @@ test('超過三十筆歸檔對話後仍可列出所有活躍與歸檔對話', as
     assert.equal(threads.filter((t) => t.isArchived).length, 30);
   });
 });
+
+test('setMemberSessions 更新 default 不誤刪子對話的 multi_agent_sessions 記錄；deletingThread 期間拒絕該對話新訊息；單則長訊息享有完整預算', async () => {
+  await withDb(async () => {
+    const { dispatcher, agent, id, mock } = setup(twoMembers(), say('ok'));
+    const sub = multiAgentsDb.createThread(id, 'sub');
+    multiAgentsDb.upsertMemberSession(id, 'pm', { provider: 'claude', model: 'sonnet', sessionId: 'sub-pm-sid', lastDeliveredSeq: 1 }, sub.id);
+    multiAgentsDb.setMemberSessions(id, { pm: { provider: 'claude', model: 'sonnet', sessionId: 'def-pm-sid', lastDeliveredSeq: 1 } }, 'default');
+    assert.equal(multiAgentsDb.getMultiAgentSessionOwner('sub-pm-sid')?.userId, 1, 'default 更新不得誤刪子對話的 session 排除索引');
+
+    dispatcher.markDeletingThread(id, sub.id);
+    assert.equal(dispatcher.isDeletingThread(id, sub.id), true);
+    assert.throws(() => dispatcher.send(agent(), 'blocked', sub.id), /deleting/i);
+    dispatcher.clearDeletingThread(id, sub.id);
+
+    // 單則 15,000 字使用者要求且無其他歷史訊息時，不應被腰斬在 10,000 字
+    const longQuestion = '@產品經理 ' + 'Q'.repeat(15_000) + '-TAIL';
+    dispatcher.send(agent(), longQuestion, sub.id);
+    await dispatcher.idle(id);
+    assert.ok(mock.calls.at(-1)?.prompt.includes('-TAIL'), '無其他歷史擠占時應保留完整 15,000 字提問');
+  });
+});

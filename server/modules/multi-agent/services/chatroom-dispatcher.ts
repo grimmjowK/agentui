@@ -128,18 +128,27 @@ export function buildMemberPrompt(input: {
 /** 只截短傳給模型的副本；保留本輪最新使用者要求與最近成員輸出。 */
 function replayHistory(history: ChatMessage[]) {
   const request = [...history].reverse().find((message) => message.authorKind === 'user');
-  const requestContent = request
-    ? truncateCodePoints(request.content, REPLAY_MAX_CHARS / 2) ?? request.content
-    : '';
-  let clipped = request ? requestContent !== request.content : false;
+  let clipped = false;
   const candidates = history.filter((message) => message !== request).map((message) => {
     const content = truncateCodePoints(message.content, 6000);
     if (content === null) return message;
     clipped = true;
     return { ...message, content };
   });
-  const recent = takeRecentWithin(candidates, (message) => codePoints(message.content),
-    REPLAY_MAX_MESSAGES - (request ? 1 : 0), REPLAY_MAX_CHARS - codePoints(requestContent));
+  // 為最新使用者要求至少保留一半預算；若歷史訊息較少，剩餘預算全數留給最新使用者要求
+  const rawReqLen = request ? codePoints(request.content) : 0;
+  const reservedForRequest = Math.min(rawReqLen, Math.floor(REPLAY_MAX_CHARS / 2));
+  const recent = takeRecentWithin(
+    candidates,
+    (message) => codePoints(message.content),
+    REPLAY_MAX_MESSAGES - (request ? 1 : 0),
+    REPLAY_MAX_CHARS - reservedForRequest,
+  );
+  const usedByRecent = recent.items.reduce((sum, m) => sum + codePoints(m.content), 0);
+  const requestBudget = Math.max(reservedForRequest, REPLAY_MAX_CHARS - usedByRecent);
+  const clippedRequest = request ? truncateCodePoints(request.content, requestBudget) : null;
+  if (clippedRequest !== null) clipped = true;
+  const requestContent = request ? (clippedRequest ?? request.content) : '';
   const items = request ? [...recent.items, { ...request, content: requestContent }] : recent.items;
   return { items: items.sort((a, b) => a.seq - b.seq), truncated: clipped || recent.truncated };
 }
@@ -147,6 +156,7 @@ function replayHistory(history: ChatMessage[]) {
 export class ChatroomDispatcher {
   private readonly active = new Map<string, ActiveTurn>();
   private readonly deleting = new Set<string>();
+  private readonly deletingThreads = new Set<string>();
   private readonly publish: Publish;
   private readonly resolveRuntime?: RuntimeResolver;
   private readonly timeoutMs: number;
@@ -176,10 +186,22 @@ export class ChatroomDispatcher {
     this.deleting.delete(multiAgentId);
   }
 
+  isDeletingThread(multiAgentId: string, threadId = 'default'): boolean {
+    return this.deleting.has(multiAgentId) || this.deletingThreads.has(threadKey(multiAgentId, threadId));
+  }
+
+  markDeletingThread(multiAgentId: string, threadId = 'default'): void {
+    this.deletingThreads.add(threadKey(multiAgentId, threadId));
+  }
+
+  clearDeletingThread(multiAgentId: string, threadId = 'default'): void {
+    this.deletingThreads.delete(threadKey(multiAgentId, threadId));
+  }
+
   /** 送出使用者訊息。忙碌時排隊；否則立即開始回合。 */
   send(agent: Agent, content: string, threadId = 'default'): ChatMessage {
-    if (this.deleting.has(agent.id)) {
-      throw new Error('Chatroom is deleting');
+    if (this.isDeletingThread(agent.id, threadId)) {
+      throw new Error('Chatroom or thread is deleting');
     }
     const message = multiAgentsDb.appendMessage({
       multiAgentId: agent.id, threadId, turnId: null, authorKind: 'user', memberId: null, author: null,
@@ -231,7 +253,7 @@ export class ChatroomDispatcher {
   /** 若空閒則處理下一則排隊訊息 */
   pump(multiAgentId: string, threadId = 'default'): void {
     const key = threadKey(multiAgentId, threadId);
-    if (this.active.has(key) || this.deleting.has(multiAgentId)) return;
+    if (this.active.has(key) || this.isDeletingThread(multiAgentId, threadId)) return;
     const agent = multiAgentsDb.getById(multiAgentId);
     const next = agent?.definition ? multiAgentsDb.nextQueuedMessage(multiAgentId, threadId) : null;
     if (!agent || !next) return;
@@ -361,8 +383,8 @@ export class ChatroomDispatcher {
       finishReason,
     });
 
-    // 更新 session：只有拿到 sessionId 才保存；完整成功才推進游標；若成員在回合中已被移除則不再寫回
-    if (result.sessionId && !this.deleting.has(agent.id)) {
+    // 更新 session：只有拿到 sessionId 才保存；完整成功才推進游標；若成員在回合中已被移除或對話正在刪除則不再寫回
+    if (result.sessionId && !this.isDeletingThread(agent.id, turn.threadId)) {
       const succeeded = result.status === 'succeeded';
       multiAgentsDb.upsertMemberSession(agent.id, member.id, {
         provider: member.provider,

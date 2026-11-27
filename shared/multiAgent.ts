@@ -132,7 +132,6 @@ export const MEMBER_DEFAULT_PERMISSION_MODE: Record<LLMProvider, PermissionMode>
 export function defaultChatRules(memberCount: number): ChatRules {
   return {
     text: '',
-    maxReplyChars: 800,
     allowAiMentions: false,
     maxAiRepliesPerTurn: Math.max(1, Math.min(MAX_AI_REPLIES_RANGE[1], memberCount)),
     unmentionedBehavior: 'all',
@@ -256,7 +255,7 @@ export function validateDefinition(kind: MultiAgentKind, def: unknown): string[]
     return errors;
   }
   if (typeof rules.text !== 'string') errors.push('群規文字必須是字串');
-  if (rules.maxReplyChars !== undefined && !isIntIn(rules.maxReplyChars, MAX_REPLY_CHARS_RANGE)) {
+  if (rules.maxReplyChars !== undefined && rules.maxReplyChars !== null && !isIntIn(rules.maxReplyChars, MAX_REPLY_CHARS_RANGE)) {
     errors.push(`每則回覆最大字數須為 ${MAX_REPLY_CHARS_RANGE[0]}–${MAX_REPLY_CHARS_RANGE[1]} 的整數`);
   }
   if (!isIntIn(rules.maxAiRepliesPerTurn, MAX_AI_REPLIES_RANGE)) {

@@ -9,7 +9,7 @@ import path from 'node:path';
 import express, { type Request, type Response } from 'express';
 
 import { multiAgentsDb, projectsDb, sessionsDb } from '@/modules/database/index.js';
-import { providerModelsService } from '@/modules/providers/index.js';
+import { providerModelsService, sessionsService } from '@/modules/providers/index.js';
 import { isMultiAgentWorkspace, MULTI_AGENT_WORKSPACE_ROOT } from '@/shared/multi-agent-workspace.js';
 import { AppError, asyncHandler, createApiSuccessResponse, validateWorkspacePath } from '@/shared/utils.js';
 
@@ -158,13 +158,25 @@ router.patch('/:id', asyncHandler(async (req: Request, res: Response) => {
   res.json(createApiSuccessResponse(multiAgentsDb.get(agent.userId, agent.id)));
 }));
 
+/** 永久刪除多 Agent / Run / Thread 時，一併清除內部 provider 會話紀錄與轉錄檔，避免從排除名單移除後漏回專案側邊欄 */
+async function purgeInternalSessions(sessionIds: Iterable<string>): Promise<void> {
+  for (const sid of new Set(sessionIds)) {
+    if (!sid) continue;
+    await sessionsService.deleteOrArchiveSessionById(sid, { force: true, deletedFromDisk: true }).catch(() => {
+      sessionsDb.deleteSessionById(sid);
+    });
+  }
+}
+
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   const agent = requireAgent(req);
   chatroomDispatcher.markDeleting(agent.id);
   try {
     await workflowRunner.stopByAgent(agent.id);
     await chatroomDispatcher.stopAndWait(agent.id);
+    const ownedSessionIds = multiAgentsDb.listSessionIdsByAgent(agent.id);
     multiAgentsDb.delete(agent.userId, agent.id);
+    await purgeInternalSessions(ownedSessionIds);
     if (isMultiAgentWorkspace(agent.workspacePath)) {
       sessionsDb.deleteSessionsByProjectPath(agent.workspacePath);
       projectsDb.deleteProjectPath(agent.workspacePath);
@@ -268,7 +280,8 @@ router.delete('/:id/runs/:runId', asyncHandler(async (req: Request, res: Respons
   await workflowRunner.stopAndWaitRun(runId);
   const force = req.query.force === 'true' || req.query.force === '1';
   if (force || run.isArchived) {
-    multiAgentsDb.deleteRun(agent.id, runId);
+    const { sessionIds } = multiAgentsDb.deleteRun(agent.id, runId);
+    await purgeInternalSessions(sessionIds);
     res.json(createApiSuccessResponse({ id: runId, archived: false, deleted: true }));
     return;
   }
@@ -305,16 +318,22 @@ router.post('/:id/threads', asyncHandler(async (req: Request, res: Response) => 
 router.delete('/:id/threads/:threadId', asyncHandler(async (req: Request, res: Response) => {
   const agent = requireAgent(req);
   const threadId = String(req.params.threadId);
-  await chatroomDispatcher.stopAndWaitThread(agent.id, threadId);
-  const force = req.query.force === 'true' || req.query.force === '1';
-  const existing = multiAgentsDb.listThreads(agent.id).find((t) => t.id === threadId);
-  if (force || existing?.isArchived) {
-    multiAgentsDb.deleteThread(agent.id, threadId);
-    res.json(createApiSuccessResponse({ id: threadId, archived: false, deleted: true }));
-    return;
+  chatroomDispatcher.markDeletingThread(agent.id, threadId);
+  try {
+    await chatroomDispatcher.stopAndWaitThread(agent.id, threadId);
+    const force = req.query.force === 'true' || req.query.force === '1';
+    const existing = multiAgentsDb.listThreads(agent.id).find((t) => t.id === threadId);
+    if (force || existing?.isArchived) {
+      const { sessionIds } = multiAgentsDb.deleteThread(agent.id, threadId);
+      await purgeInternalSessions(sessionIds);
+      res.json(createApiSuccessResponse({ id: threadId, archived: false, deleted: true }));
+      return;
+    }
+    multiAgentsDb.archiveThread(agent.id, threadId, true);
+    res.json(createApiSuccessResponse({ id: threadId, archived: true, deleted: false }));
+  } finally {
+    chatroomDispatcher.clearDeletingThread(agent.id, threadId);
   }
-  multiAgentsDb.archiveThread(agent.id, threadId, true);
-  res.json(createApiSuccessResponse({ id: threadId, archived: true, deleted: false }));
 }));
 
 router.post('/:id/threads/:threadId/restore', asyncHandler(async (req: Request, res: Response) => {
@@ -342,13 +361,17 @@ router.get('/:id/messages', asyncHandler(async (req: Request, res: Response) => 
 router.post('/:id/messages', asyncHandler(async (req: Request, res: Response) => {
   const agent = requireAgent(req);
   if (agent.kind !== 'chatroom' || !agent.definition) throw badRequest('Not a chatroom with a definition');
-  if (chatroomDispatcher.isDeleting(agent.id)) {
-    throw new AppError('Chatroom is being deleted', { statusCode: 409, code: 'DELETING' });
+  const threadId = typeof req.body?.threadId === 'string' && req.body.threadId.trim() ? req.body.threadId.trim() : 'default';
+  if (chatroomDispatcher.isDeletingThread(agent.id, threadId)) {
+    throw new AppError('Chatroom or thread is being deleted', { statusCode: 409, code: 'DELETING' });
+  }
+  const thread = multiAgentsDb.getThread(agent.id, threadId);
+  if (thread?.isArchived) {
+    throw new AppError('Thread is archived; restore it before sending messages', { statusCode: 409, code: 'THREAD_ARCHIVED' });
   }
   const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
   if (!content) throw badRequest('content is required');
   if (content.length > 20_000) throw badRequest('content is too long');
-  const threadId = typeof req.body?.threadId === 'string' && req.body.threadId.trim() ? req.body.threadId.trim() : 'default';
   res.status(201).json(createApiSuccessResponse(chatroomDispatcher.send(agent, content, threadId)));
 }));
 

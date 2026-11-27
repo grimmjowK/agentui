@@ -148,12 +148,28 @@ export default function ChatroomView({ agent, isMobile, onAgentChange }: Chatroo
             <button type="button" onClick={chat.clearError} aria-label="close"><X className="h-3.5 w-3.5" /></button>
           </div>
         )}
-        <Composer
-          members={def.members}
-          busy={Boolean(chat.activeTurnId)}
-          onSend={chat.send}
-          onStop={chat.stop}
-        />
+        {currentThread?.isArchived ? (
+          <div className="border-t border-border/60 bg-muted/20 px-4 py-3">
+            <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 rounded-xl border border-border/70 bg-background px-4 py-2.5 text-xs text-muted-foreground">
+              <span>{t('historyMenu.archivedReadonlyHint', { defaultValue: 'This chat is archived. Restore it to continue the conversation.' })}</span>
+              <button
+                type="button"
+                onClick={() => void chat.restoreThread(currentThread.id)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {t('historyMenu.restore', { defaultValue: 'Restore' })}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <Composer
+            members={def.members}
+            busy={Boolean(chat.activeTurnId)}
+            onSend={chat.send}
+            onStop={chat.stop}
+          />
+        )}
       </div>
 
       {sidebarOpen && (

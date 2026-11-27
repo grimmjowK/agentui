@@ -39,7 +39,9 @@ test('validateDefinition: 工作流', () => {
 test('validateDefinition: 聊天室', () => {
   const member = (id: string, name: string) => ({ id, name, persona: '', provider: 'claude' as const, model: 'sonnet' });
   const ok = { members: [member('a', '產品經理'), member('b', '審稿人')], rules: defaultChatRules(2) };
+  assert.equal(ok.rules.maxReplyChars, undefined, '新建預設群規不再寫入已移除的 maxReplyChars');
   assert.deepEqual(validateDefinition('chatroom', ok), []);
+  assert.deepEqual(validateDefinition('chatroom', { ...ok, rules: { ...ok.rules, maxReplyChars: null as unknown as undefined } }), []);
   assert.match(validateDefinition('chatroom', { ...ok, members: [member('a', '所有人')] }).join(), /保留字/);
   assert.match(validateDefinition('chatroom', { ...ok, members: [member('a', 'x'), member('b', 'X')] }).join(), /名稱重複/);
   assert.match(validateDefinition('chatroom', { ...ok, rules: { ...ok.rules, maxReplyChars: -1 } }).join(), /最大字數/);

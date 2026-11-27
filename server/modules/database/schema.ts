@@ -217,6 +217,8 @@ CREATE TABLE IF NOT EXISTS multi_agent_messages (
     created_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_multi_agent_messages_seq ON multi_agent_messages(multi_agent_id, seq);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_messages_thread_seq ON multi_agent_messages(multi_agent_id, thread_id, seq);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_turns_thread ON multi_agent_turns(multi_agent_id, thread_id, status);
 
 -- 多 Agent 擁有的所有 provider 會話索引（工作流節點、建立器、聊天室成員）：供側邊欄／檢索排除與擁有者檢查
 CREATE TABLE IF NOT EXISTS multi_agent_sessions (

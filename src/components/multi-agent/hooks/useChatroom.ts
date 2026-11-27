@@ -58,16 +58,22 @@ export function useChatroom(multiAgentId: string) {
     }
   }, [multiAgentId]);
 
-  const reloadThreads = useCallback(async (preferThreadId?: string) => {
+  const reloadThreads = useCallback(async (preferThreadId?: string, ensureActive = false) => {
     const seq = ++requestSeqRef.current;
     try {
-      const data = await readData<{ threads: ChatThread[]; activeTurns: Record<string, string> }>(
+      let data = await readData<{ threads: ChatThread[]; activeTurns: Record<string, string> }>(
         api.multiAgent.listThreads(multiAgentId),
       );
       if (seq !== requestSeqRef.current) return;
+      let unarchived = data.threads.filter((t) => !t.isArchived);
+      if (ensureActive && unarchived.length === 0) {
+        const created = await readData<ChatThread>(api.multiAgent.createThread(multiAgentId));
+        if (seq !== requestSeqRef.current) return;
+        data = { ...data, threads: [created, ...data.threads.filter((t) => t.id !== created.id)] };
+        unarchived = [created];
+      }
       setThreads(data.threads);
       setActiveTurns(data.activeTurns ?? {});
-      const unarchived = data.threads.filter((t) => !t.isArchived);
       const targetId = preferThreadId && data.threads.some((t) => t.id === preferThreadId && !t.isArchived)
         ? preferThreadId
         : unarchived[0]?.id ?? data.threads[0]?.id ?? 'default';
@@ -133,21 +139,15 @@ export function useChatroom(multiAgentId: string) {
   const deleteThread = useCallback(async (threadId: string, options: { force?: boolean } = {}) => {
     setError(null);
     try {
-      const res = await readData<{ id: string; archived?: boolean; deleted?: boolean }>(
+      await readData<{ id: string; archived?: boolean; deleted?: boolean }>(
         api.multiAgent.deleteThread(multiAgentId, threadId, options),
       );
-      if (res.archived && !res.deleted) {
-        // 若所有未歸檔對話都被歸檔，自動建立一個新對話供當前頁面使用
-        const remainingActive = threads.filter((t) => t.id !== threadId && !t.isArchived);
-        if (remainingActive.length === 0) {
-          await readData<ChatThread>(api.multiAgent.createThread(multiAgentId));
-        }
-      }
-      await reloadThreads(selectedThreadRef.current === threadId ? undefined : selectedThreadRef.current);
+      // 無論歸檔或永久刪除，若刪除後已無任何未歸檔對話，由 reloadThreads 自動補建一個新對話避免誤跳入已歸檔對話
+      await reloadThreads(selectedThreadRef.current === threadId ? undefined : selectedThreadRef.current, true);
     } catch (err) {
       setError((err as Error).message);
     }
-  }, [multiAgentId, reloadThreads, threads]);
+  }, [multiAgentId, reloadThreads]);
 
   const restoreThread = useCallback(async (threadId: string) => {
     setError(null);

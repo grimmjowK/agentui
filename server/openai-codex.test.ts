@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { extractTitleFromCodexReply, steerRun } from './openai-codex.js';
+import { extractTitleFromCodexReply, mapPermissionModeToTurnPolicy, steerRun } from './openai-codex.js';
 
 function run(overrides: Record<string, unknown> = {}) {
   const calls: unknown[] = [];
@@ -71,4 +71,31 @@ test('extractTitleFromCodexReply 只接受 title 欄位：標準 JSON、markdown
   // 空文字或無效輸入
   assert.equal(extractTitleFromCodexReply(''), '');
   assert.equal(extractTitleFromCodexReply('   '), '');
+});
+
+test('mapPermissionModeToTurnPolicy 對所有模式顯式產出 sandboxPolicy 與 approvalPolicy，支援從 bypassPermissions 安全降權回 default/acceptEdits', () => {
+  assert.deepEqual(mapPermissionModeToTurnPolicy('bypassPermissions', '/proj'), {
+    sandboxPolicy: { type: 'dangerFullAccess' },
+    approvalPolicy: 'never',
+  });
+  assert.deepEqual(mapPermissionModeToTurnPolicy('acceptEdits', '/proj'), {
+    sandboxPolicy: {
+      type: 'workspaceWrite',
+      writableRoots: ['/proj'],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    },
+    approvalPolicy: 'never',
+  });
+  assert.deepEqual(mapPermissionModeToTurnPolicy('default', '/proj'), {
+    sandboxPolicy: {
+      type: 'workspaceWrite',
+      writableRoots: ['/proj'],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    },
+    approvalPolicy: 'on-request',
+  });
 });

@@ -233,7 +233,16 @@ export const multiAgentsDb = {
   setMemberSessions(id: string, sessions: Record<string, MemberSession>, threadId = 'default'): void {
     const db = getConnection();
     db.transaction(() => {
-      const row = db.prepare('SELECT user_id FROM multi_agents WHERE id = ?').get(id) as { user_id: number } | undefined;
+      const row = db.prepare('SELECT user_id, member_sessions_json FROM multi_agents WHERE id = ?')
+        .get(id) as { user_id: number; member_sessions_json: string } | undefined;
+      const tRow = threadId !== 'default'
+        ? db.prepare('SELECT member_sessions_json FROM multi_agent_threads WHERE multi_agent_id = ? AND id = ?')
+          .get(id, threadId) as { member_sessions_json: string } | undefined
+        : undefined;
+      const prevSessions = parse<Record<string, MemberSession>>(
+        threadId === 'default' ? (row?.member_sessions_json ?? null) : (tRow?.member_sessions_json ?? null),
+        {},
+      );
       if (threadId === 'default') {
         db.prepare('UPDATE multi_agents SET member_sessions_json = ? WHERE id = ?')
           .run(JSON.stringify(sessions), id);
@@ -242,8 +251,12 @@ export const multiAgentsDb = {
           .run(JSON.stringify(sessions), now(), id, threadId);
       }
       if (row) {
-        if (threadId === 'default') {
-          db.prepare("DELETE FROM multi_agent_sessions WHERE multi_agent_id = ? AND role = 'member'").run(id);
+        const nextIds = new Set(Object.values(sessions).map((s) => s?.sessionId).filter(Boolean));
+        const del = db.prepare("DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ? AND role = 'member'");
+        for (const old of Object.values(prevSessions)) {
+          if (old?.sessionId && !nextIds.has(old.sessionId)) {
+            del.run(old.sessionId, id);
+          }
         }
         const ts = now();
         const ins = db.prepare(`INSERT OR REPLACE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
@@ -334,6 +347,14 @@ export const multiAgentsDb = {
 
   touch(id: string): void {
     getConnection().prepare('UPDATE multi_agents SET updated_at = ? WHERE id = ?').run(now(), id);
+  },
+
+  /** 列出多 Agent 擁有的全部內部 provider sessionId（供刪除整個多 Agent 時一併清理 sessions 表與檔案） */
+  listSessionIdsByAgent(multiAgentId: string): string[] {
+    const rows = getConnection()
+      .prepare('SELECT session_id FROM multi_agent_sessions WHERE multi_agent_id = ?')
+      .all(multiAgentId) as Array<{ session_id: string }>;
+    return rows.map((r) => r.session_id);
   },
 
   /** 刪除多 Agent 及其執行、回合與訊息 */
@@ -433,18 +454,19 @@ export const multiAgentsDb = {
       .run(archived ? 1 : 0, runId, multiAgentId).changes > 0;
   },
 
-  deleteRun(multiAgentId: string, runId: string): boolean {
+  deleteRun(multiAgentId: string, runId: string): { deleted: boolean; sessionIds: string[] } {
     const db = getConnection();
     return db.transaction(() => {
       const changed = db.prepare('DELETE FROM multi_agent_runs WHERE id = ? AND multi_agent_id = ?').run(runId, multiAgentId).changes;
-      if (!changed) return false;
+      if (!changed) return { deleted: false, sessionIds: [] };
       const sessions = db.prepare('SELECT session_id FROM workflow_sessions WHERE multi_agent_id = ? AND run_id = ?')
         .all(multiAgentId, runId) as Array<{ session_id: string }>;
-      for (const s of sessions) {
-        db.prepare('DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ?').run(s.session_id, multiAgentId);
+      const sessionIds = sessions.map((s) => s.session_id);
+      for (const sid of sessionIds) {
+        db.prepare('DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ?').run(sid, multiAgentId);
       }
       db.prepare('DELETE FROM workflow_sessions WHERE multi_agent_id = ? AND run_id = ?').run(multiAgentId, runId);
-      return true;
+      return { deleted: true, sessionIds };
     })();
   },
 
@@ -493,21 +515,35 @@ export const multiAgentsDb = {
     );
   },
 
-  archiveThread(multiAgentId: string, threadId: string, archived: boolean): boolean {
-    return getConnection()
-      .prepare('UPDATE multi_agent_threads SET is_archived = ? WHERE multi_agent_id = ? AND id = ?')
-      .run(archived ? 1 : 0, multiAgentId, threadId).changes > 0;
+  getThread(multiAgentId: string, threadId: string): ChatThread | null {
+    const row = getConnection()
+      .prepare('SELECT * FROM multi_agent_threads WHERE multi_agent_id = ? AND id = ?')
+      .get(multiAgentId, threadId) as ThreadRow | undefined;
+    return row ? toThread(row) : null;
   },
 
-  deleteThread(multiAgentId: string, threadId: string): boolean {
+  archiveThread(multiAgentId: string, threadId: string, archived: boolean): boolean {
+    const db = getConnection();
+    return db.transaction(() => {
+      if (archived) {
+        db.prepare(
+          "DELETE FROM multi_agent_messages WHERE multi_agent_id = ? AND thread_id = ? AND status = 'queued' AND author_kind = 'user'",
+        ).run(multiAgentId, threadId);
+      }
+      return db
+        .prepare('UPDATE multi_agent_threads SET is_archived = ? WHERE multi_agent_id = ? AND id = ?')
+        .run(archived ? 1 : 0, multiAgentId, threadId).changes > 0;
+    })();
+  },
+
+  deleteThread(multiAgentId: string, threadId: string): { deleted: boolean; sessionIds: string[] } {
     const db = getConnection();
     return db.transaction(() => {
       const sessions = this.getMemberSessions(multiAgentId, threadId);
-      for (const s of Object.values(sessions)) {
-        if (s?.sessionId) {
-          db.prepare("DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ? AND role = 'member'")
-            .run(s.sessionId, multiAgentId);
-        }
+      const sessionIds = Object.values(sessions).map((s) => s?.sessionId).filter((s): s is string => Boolean(s));
+      for (const sid of sessionIds) {
+        db.prepare("DELETE FROM multi_agent_sessions WHERE session_id = ? AND multi_agent_id = ? AND role = 'member'")
+          .run(sid, multiAgentId);
       }
       if (threadId === 'default') {
         db.prepare("UPDATE multi_agents SET member_sessions_json = '{}' WHERE id = ?").run(multiAgentId);
@@ -518,7 +554,7 @@ export const multiAgentsDb = {
         .run(multiAgentId, threadId);
       const threadChanged = db.prepare('DELETE FROM multi_agent_threads WHERE multi_agent_id = ? AND id = ?')
         .run(multiAgentId, threadId).changes;
-      return threadChanged > 0 || msgChanged > 0;
+      return { deleted: threadChanged > 0 || msgChanged > 0, sessionIds };
     })();
   },
 

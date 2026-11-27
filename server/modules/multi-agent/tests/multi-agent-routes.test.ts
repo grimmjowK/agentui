@@ -242,3 +242,80 @@ test('工作流執行記錄與聊天室對話記錄支援「先歸檔、可還�
     assert.deepEqual(multiAgentsDb.listMessages(chat.id, { threadId: thread.id }), []);
   });
 });
+
+test('永久刪除綁定一般專案的 Run、Thread 或多 Agent 時，一併清除 sessions 表紀錄避免內部會話洩漏回專案側邊欄', async () => {
+  await withTestApp(async (baseUrl, tmpDir) => {
+    const projDir = path.join(tmpDir, 'real-project');
+    await mkdir(projDir, { recursive: true });
+    projectsDb.createProjectPath(projDir);
+    sessionsDb.createSession('normal-user-chat', 'claude', projDir, 'Normal');
+
+    // 1. 工作流節點會話
+    const wf = multiAgentsDb.setDefinition(
+      1,
+      multiAgentsDb.create(1, { kind: 'workflow', name: 'wf', workspacePath: projDir }).id,
+      { nodes: [{ id: 'n1', title: 'N1', instruction: 'go', provider: 'claude' as const, model: 'sonnet', dependsOn: [] }] },
+    )!;
+    const run = multiAgentsDb.createRun(wf, { n1: { state: 'succeeded', progress: 100, sessionId: 'wf-node-sid' } })!;
+    multiAgentsDb.addWorkflowSession({ sessionId: 'wf-node-sid', multiAgentId: wf.id, runId: run.id, nodeId: 'n1', userId: 1 });
+    sessionsDb.createSession('wf-node-sid', 'claude', projDir, 'WF Node');
+
+    const delRun = await fetch(`${baseUrl}/api/multi-agent/${wf.id}/runs/${run.id}?force=true`, { method: 'DELETE' });
+    assert.equal(delRun.status, 200);
+    assert.equal(sessionsDb.getSessionById('wf-node-sid'), null, '永久刪除 Run 後應一併刪除內部節點在 sessions 表的列');
+    assert.deepEqual(sessionsDb.getSessionsByProjectPath(projDir).map((s) => s.session_id), ['normal-user-chat']);
+
+    // 2. 聊天室子對話成員會話與整個多 Agent 刪除
+    const chat = multiAgentsDb.setDefinition(
+      1,
+      multiAgentsDb.create(1, { kind: 'chatroom', name: 'cr', workspacePath: projDir }).id,
+      { members: [{ id: 'pm', name: 'PM', persona: 'p', provider: 'claude' as const, model: 'sonnet' }], rules: { text: '', allowAiMentions: false, maxAiRepliesPerTurn: 1, unmentionedBehavior: 'all' as const } },
+    )!;
+    multiAgentsDb.setBuilderSession(1, chat.id, { provider: 'claude', sessionId: 'cr-builder-sid' });
+    sessionsDb.createSession('cr-builder-sid', 'claude', projDir, 'Builder');
+
+    const subThread = multiAgentsDb.createThread(chat.id, '子對話');
+    multiAgentsDb.upsertMemberSession(chat.id, 'pm', { provider: 'claude', model: 'sonnet', sessionId: 'sub-member-sid', lastDeliveredSeq: 1 }, subThread.id);
+    sessionsDb.createSession('sub-member-sid', 'claude', projDir, 'Sub Member');
+
+    const delThread = await fetch(`${baseUrl}/api/multi-agent/${chat.id}/threads/${subThread.id}?force=true`, { method: 'DELETE' });
+    assert.equal(delThread.status, 200);
+    assert.equal(sessionsDb.getSessionById('sub-member-sid'), null, '永久刪除 Thread 後應一併刪除成員在 sessions 表的列');
+
+    const delAgent = await fetch(`${baseUrl}/api/multi-agent/${chat.id}`, { method: 'DELETE' });
+    assert.equal(delAgent.status, 200);
+    assert.equal(sessionsDb.getSessionById('cr-builder-sid'), null, '刪除綁定專案的多 Agent 後應刪除建立器會話');
+    assert.deepEqual(sessionsDb.getSessionsByProjectPath(projDir).map((s) => s.session_id), ['normal-user-chat']);
+  });
+});
+
+test('已歸檔的聊天室對話拒絕發送新訊息，且歸檔對話時自動清除殘留的排隊訊息', async () => {
+  await withTestApp(async (baseUrl, tmpDir) => {
+    const chat = multiAgentsDb.setDefinition(
+      1,
+      multiAgentsDb.create(1, { kind: 'chatroom', name: 'cr', workspacePath: tmpDir }).id,
+      { members: [{ id: 'pm', name: 'PM', persona: 'p', provider: 'claude' as const, model: 'sonnet' }], rules: { text: '', allowAiMentions: false, maxAiRepliesPerTurn: 1, unmentionedBehavior: 'all' as const } },
+    )!;
+    const thread = multiAgentsDb.createThread(chat.id, '待歸檔對話');
+    multiAgentsDb.appendMessage({
+      multiAgentId: chat.id, threadId: thread.id, turnId: null, authorKind: 'user', memberId: null, author: null,
+      content: 'done msg', status: 'done', finishReason: null,
+    });
+    multiAgentsDb.appendMessage({
+      multiAgentId: chat.id, threadId: thread.id, turnId: null, authorKind: 'user', memberId: null, author: null,
+      content: 'queued msg', status: 'queued', finishReason: null,
+    });
+
+    const archRes = await fetch(`${baseUrl}/api/multi-agent/${chat.id}/threads/${thread.id}`, { method: 'DELETE' });
+    assert.equal(archRes.status, 200);
+    assert.equal(multiAgentsDb.nextQueuedMessage(chat.id, thread.id), null, '歸檔後殘留的 queued 訊息應被清除');
+    assert.equal(multiAgentsDb.listMessages(chat.id, { threadId: thread.id }).length, 1, '已完成訊息保留');
+
+    const postArchived = await fetch(`${baseUrl}/api/multi-agent/${chat.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content: '不該送進已歸檔對話', threadId: thread.id }),
+    });
+    assert.equal(postArchived.status, 409, '禁止向已歸檔對話發送新訊息');
+  });
+});

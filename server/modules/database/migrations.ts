@@ -491,6 +491,16 @@ export const runMigrations = (db: Database) => {
       SELECT json_extract(member.value, '$.sessionId'), multi_agents.id, multi_agents.user_id, 'member', multi_agents.updated_at
       FROM multi_agents, json_each(multi_agents.member_sessions_json) AS member
       WHERE json_extract(member.value, '$.sessionId') IS NOT NULL;
+
+      INSERT OR IGNORE INTO multi_agent_sessions (session_id, multi_agent_id, user_id, role, created_at)
+      SELECT json_extract(member.value, '$.sessionId'), t.multi_agent_id, ma.user_id, 'member', t.updated_at
+      FROM multi_agent_threads AS t
+      JOIN multi_agents AS ma ON ma.id = t.multi_agent_id,
+      json_each(t.member_sessions_json) AS member
+      WHERE json_extract(member.value, '$.sessionId') IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_multi_agent_messages_thread_seq ON multi_agent_messages(multi_agent_id, thread_id, seq);
+      CREATE INDEX IF NOT EXISTS idx_multi_agent_turns_thread ON multi_agent_turns(multi_agent_id, thread_id, status);
     `);
 
     migrateLegacyWorkspaceTableIntoProjects(db);
