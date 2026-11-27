@@ -30,6 +30,7 @@ import type {
   PermissionMode,
 } from '../types/types';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
+import type { ChatBuilderConfig } from '../utils/builderContext';
 import { getCommandUserText, splitCommandContext, wrapCommandContext } from '../utils/commandContext';
 import {
   resolveSessionMentionLabels,
@@ -77,6 +78,7 @@ interface UseChatComposerStateArgs {
   pendingPermissionRequests: PendingPermissionRequest[];
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
   onRunInShell?: (command: string) => void;
+  builder?: ChatBuilderConfig | null;
 }
 
 interface MentionableFile {
@@ -150,6 +152,7 @@ export function useChatComposerState({
   setPendingPermissionRequests,
   pendingPermissionRequests,
   onRunInShell,
+  builder = null,
 }: UseChatComposerStateArgs) {
   const [input, setInput] = useState(() => {
     if (typeof window !== 'undefined' && selectedProject) {
@@ -665,7 +668,14 @@ export function useChatComposerState({
         }
       }
 
-      const messageContent = mentionResolution.resolvedText;
+      const effectiveSessionIdForBuilder =
+        currentSessionId || selectedSession?.id || null;
+      // 建立器：新會話的第一則訊息附上建立器說明（之後在同一會話內 AI 已知道格式）
+      const attachBuilderPrompt = Boolean(builder && (!effectiveSessionIdForBuilder || builder.resendPrompt));
+      const messageContent = attachBuilderPrompt
+        ? wrapCommandContext('multi-agent-builder', builder!.promptPrefix, mentionResolution.resolvedText)
+        : mentionResolution.resolvedText;
+      if (attachBuilderPrompt) builder!.onPromptDelivered?.();
       const effort = resolveEffort(provider, thinkingMode);
       const effortOption = effort === 'default' ? {} : { effort };
 
@@ -859,6 +869,7 @@ export function useChatComposerState({
       queueKey,
       setStartingTurn,
       t,
+      builder,
     ],
   );
 
@@ -1075,6 +1086,13 @@ export function useChatComposerState({
             decision: decision.updatedInput || (decision.allow ? 'accept' : 'decline') });
           return;
         }
+        // 帶 context.decisions 的其他 provider（Antigravity）走通用 permission-decision
+        const decisions = (request?.context as { decisions?: string[] } | undefined)?.decisions;
+        if (request && Array.isArray(decisions)) {
+          sendMessage({ type: 'permission-decision', provider: request.provider, requestId, sessionId: request.sessionId,
+            decision: typeof decision.updatedInput === 'string' ? decision.updatedInput : decision.allow ? 'allow' : 'deny' });
+          return;
+        }
         sendMessage({
           type: 'claude-permission-response',
           requestId,
@@ -1086,7 +1104,10 @@ export function useChatComposerState({
       });
 
       setPendingPermissionRequests((previous) => {
-        const next = previous.filter((request) => request.provider === 'codex' || !validIds.includes(request.requestId));
+        // Codex 與帶 decisions 的請求由後端送 permission_cancelled／結束事件清除；Claude 立即移除
+        const next = previous.filter((request) => request.provider === 'codex'
+          || Array.isArray((request.context as { decisions?: string[] } | undefined)?.decisions)
+          || !validIds.includes(request.requestId));
         if (next.length === 0) {
           setClaudeStatus(null);
         }

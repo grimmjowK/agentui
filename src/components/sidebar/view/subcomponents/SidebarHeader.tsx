@@ -1,4 +1,4 @@
-import { Archive, Folder, FolderPlus, MessageSquare, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
+import { Archive, Bot, Folder, FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { Button, Input, Tooltip } from '../../../../shared/view/ui';
 import { IS_PLATFORM } from '../../../../constants/config';
@@ -13,9 +13,6 @@ type SidebarHeaderProps = {
   isPWA: boolean;
   isMobile: boolean;
   isLoading: boolean;
-  projectsCount: number;
-  archivedSessionsCount: number;
-  isArchivedSessionsLoading: boolean;
   searchFilter: string;
   onSearchFilterChange: (value: string) => void;
   onClearSearchFilter: () => void;
@@ -32,9 +29,6 @@ export default function SidebarHeader({
   isPWA,
   isMobile,
   isLoading,
-  projectsCount,
-  archivedSessionsCount,
-  isArchivedSessionsLoading,
   searchFilter,
   onSearchFilterChange,
   onClearSearchFilter,
@@ -46,9 +40,10 @@ export default function SidebarHeader({
   onCollapseSidebar,
   t,
 }: SidebarHeaderProps) {
-  const showSearchTools = (projectsCount > 0 || archivedSessionsCount > 0 || isArchivedSessionsLoading) && !isLoading;
-  const searchPlaceholder = searchMode === 'conversations'
-    ? t('search.conversationsPlaceholder')
+  // 多 Agent 不依賴專案，沒有專案時也要能切換過去
+  const showSearchTools = !isLoading;
+  const searchPlaceholder = searchMode === 'multiAgent'
+    ? t('search.multiAgentPlaceholder')
     : searchMode === 'archived'
       ? t('search.archivedPlaceholder', 'Search archived sessions...')
       : t('projects.searchPlaceholder');
@@ -137,17 +132,17 @@ export default function SidebarHeader({
                 {t('search.modeProjects')}
               </button>
               <button
-                onClick={() => onSearchModeChange('conversations')}
-                aria-pressed={searchMode === 'conversations'}
+                onClick={() => onSearchModeChange('multiAgent')}
+                aria-pressed={searchMode === 'multiAgent'}
                 className={cn(
                   "flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-all",
-                  searchMode === 'conversations'
+                  searchMode === 'multiAgent'
                     ? "bg-background shadow-sm text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                <MessageSquare className="h-3 w-3" />
-                {t('search.modeConversations')}
+                <Bot className="h-3 w-3" />
+                {t('search.modeMultiAgent')}
               </button>
               <Tooltip content={t('search.archiveOnlyTooltip', 'Archive only')} position="top">
                 <button
@@ -254,17 +249,17 @@ export default function SidebarHeader({
                 {t('search.modeProjects')}
               </button>
               <button
-                onClick={() => onSearchModeChange('conversations')}
-                aria-pressed={searchMode === 'conversations'}
+                onClick={() => onSearchModeChange('multiAgent')}
+                aria-pressed={searchMode === 'multiAgent'}
                 className={cn(
                   "flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-all",
-                  searchMode === 'conversations'
+                  searchMode === 'multiAgent'
                     ? "bg-background shadow-sm text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                <MessageSquare className="h-3 w-3" />
-                {t('search.modeConversations')}
+                <Bot className="h-3 w-3" />
+                {t('search.modeMultiAgent')}
               </button>
               <Tooltip content={t('search.archiveOnlyTooltip', 'Archive only')} position="top">
                 <button

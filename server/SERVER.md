@@ -14,7 +14,7 @@ Express + WebSocket 后端。根目录散落的 `.js` 文件是各 AI provider �
 | `claude-sdk.js` | 基于 @anthropic-ai/claude-agent-sdk 封装，提供 Claude SDK 集成、会话管理与工具审批（审批绑定 `userId`） |
 | `cursor-cli.js` | 子进程生成 Cursor CLI，处理工作空间信任验证与流式消息转发 |
 | `openai-codex.ts` | Codex app-server 聊天执行层（JSON-RPC，使用 `codex-runtime/protocol` 生成型别），支持执行中插话 `turn/steer` |
-| `antigravity-cli.js` | 子进程启动 Antigravity CLI（headless），`step_update` 经 `antigravity-tool-mapper` 映射为标准工具形状 |
+| `antigravity-cli.js` | 每轮启动 `agy acp`（ACP JSON-RPC over stdio）：互动审批（`antigravityApprovals`）、`session/resume` 续接、`session/cancel` 中断、执行中插话；`session/update` 经 `mapAcpUpdate` 映射为标准工具形状，结束后把即时 id 对上 transcript 历史 id |
 
 以上执行层都由 `modules/providers/list/<id>/<id>-runtime.provider.ts` 包装为 `IProviderRuntime`，
 聊天 WebSocket 与 `/api/agent` 只经 `providerRegistry` 分派，不直接 import 这些文件。

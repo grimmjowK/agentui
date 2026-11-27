@@ -1,6 +1,9 @@
-import { Star } from 'lucide-react';
+import { ExternalLink, Star } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { currentVersion } from '../../../../hooks/useVersionCheck';
+import SettingsCard from '../SettingsCard';
+import SettingsRow from '../SettingsRow';
+import SettingsSection from '../SettingsSection';
 
 const GITHUB_REPO_URL = 'https://github.com/grimmjowK/agentui';
 
@@ -17,53 +20,40 @@ export default function AboutTab() {
 
   return (
     <div className="space-y-6">
-      {/* Logo + name + version */}
-      <div className="flex items-center gap-3">
-        <img src="/logo-mark.svg" alt="" className="h-10 w-10 flex-shrink-0" />
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-base font-semibold text-foreground">EAO</span>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+      <SettingsSection title={t('mainTabs.about')}>
+        <SettingsCard divided>
+          <SettingsRow
+            label={
+              <span className="flex items-center gap-3">
+                <img src="/logo-mark.svg" alt="" className="h-8 w-8 flex-shrink-0" />
+                <span>EAO</span>
+              </span>
+            }
+            description={t('about.description', { defaultValue: 'Open-source AI coding assistant interface' })}
+          >
+            <span className="rounded-lg bg-muted/60 px-2.5 py-1 font-mono text-xs font-medium text-muted-foreground">
               v{currentVersion}
             </span>
-          </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Open-source AI coding assistant interface
-          </p>
-        </div>
-      </div>
+          </SettingsRow>
 
-      {/* Star on GitHub button */}
-      <a
-        href={GITHUB_REPO_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3.5 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-      >
-        <GitHubIcon className="h-4 w-4" />
-        <Star className="h-3.5 w-3.5" />
-        <span>Star on GitHub</span>
-      </a>
-
-      {/* Links */}
-      <div className="flex flex-wrap gap-4 text-sm">
-        <a
-          href={GITHUB_REPO_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <GitHubIcon className="h-4 w-4" />
-          GitHub
-        </a>
-      </div>
-
-      {/* License */}
-      <div className="border-t border-border/50 pt-4">
-        <p className="text-xs text-muted-foreground/60">
-          Licensed under AGPL-3.0
-        </p>
-      </div>
+          <SettingsRow
+            label="GitHub"
+            description={t('about.license', { defaultValue: 'Licensed under AGPL-3.0' })}
+          >
+            <a
+              href={GITHUB_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-muted/40 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              <GitHubIcon className="h-3.5 w-3.5" />
+              <Star className="h-3 w-3" />
+              <span>{t('about.starOnGithub', { defaultValue: 'Star on GitHub' })}</span>
+              <ExternalLink className="h-3 w-3 opacity-60" />
+            </a>
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
     </div>
   );
 }

@@ -183,3 +183,27 @@ test('Antigravity fixture 的即時與歷史 id 契約一致', async () => {
   assert.equal(report.userPairing.unpairedHistory.length, 0);
   assert.ok(report.byKind.tool_use.both.length > 0);
 });
+
+test('mapAcpUpdate：以 ACP fixture 映射 tool_call 與完成／失敗結果', async () => {
+  const { mapAcpUpdate } = await import('./antigravity-tool-mapper.js');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const load = (name: string) => fs.readFileSync(path.join(process.cwd(), 'docs/fixtures/antigravity', `acp-${name}.jsonl`), 'utf8')
+    .split('\n').filter(Boolean).map((line) => JSON.parse(line).msg)
+    .filter((m: any) => m.method === 'session/update').map((m: any) => m.params.update);
+
+  const allow = load('allow').map(mapAcpUpdate).filter(Boolean) as any[];
+  assert.equal(allow[0].kind, 'tool_use');
+  assert.equal(allow[0].toolName, 'Bash');
+  assert.equal(allow[0].toolInput.command, 'ls -la');
+  const result = allow.find((m) => m.kind === 'tool_result');
+  assert.equal(result.toolId, allow[0].toolId);
+  assert.equal(result.isError, false);
+  assert.match(result.content, /^Command exited with code 0/);
+
+  const deny = load('deny').map(mapAcpUpdate).filter(Boolean) as any[];
+  const denied = deny.find((m) => m.kind === 'tool_result');
+  assert.equal(denied.isError, true);
+  assert.match(denied.content, /denied or cancelled/);
+  assert.equal(mapAcpUpdate({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'x' } }), null);
+});

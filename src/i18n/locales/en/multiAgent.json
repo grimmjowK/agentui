@@ -1,0 +1,175 @@
+{
+  "list": {
+    "empty": "No multi-agents yet",
+    "emptyHint": "Create a chat room or workflow to let several agents work together.",
+    "create": "Create",
+    "noMatch": "No matching multi-agents",
+    "rename": "Rename",
+    "delete": "Delete",
+    "deleteConfirm": "Delete \"{{name}}\"? Its runs and chat history will be removed.",
+    "cancel": "Cancel",
+    "more": "More"
+  },
+  "kind": {
+    "chatroom": "Chat room",
+    "workflow": "Workflow",
+    "chatroomDesc": "Several roles discuss together; @ a role or everyone",
+    "workflowDesc": "Steps run in order as a flowchart"
+  },
+  "page": {
+    "loading": "Loading...",
+    "notFound": "This multi-agent no longer exists.",
+    "editWithAi": "Edit with AI",
+    "backToCanvas": "Back",
+    "draft": "Draft"
+  },
+  "builder": {
+    "emptyTitle": {
+      "workflow": "Describe the workflow you want",
+      "chatroom": "Describe the chat room you want"
+    },
+    "emptyHint": {
+      "workflow": "For example: \"Collect this week's issues, classify them, then write a summary.\" Pick a model below and start typing.",
+      "chatroom": "For example: \"A product manager, an engineer and a reviewer to discuss requirements.\" Pick a model below and start typing."
+    },
+    "preview": "Preview",
+    "create": "Create",
+    "apply": "Apply changes",
+    "fixWithAi": "Ask AI to fix",
+    "invalid": "This definition has problems",
+    "nodes_one": "{{count}} step",
+    "nodes_other": "{{count}} steps",
+    "members_one": "{{count}} member",
+    "members_other": "{{count}} members",
+    "saving": "Saving...",
+    "fixPrompt": "The definition you produced failed validation:\n{{errors}}\nPlease fix it and output the complete multi-agent-json block again."
+  },
+  "workflow": {
+    "start": "Start",
+    "startAnother": "New run",
+    "stop": "Stop",
+    "running": "Running",
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "stopped": "Stopped",
+    "interrupted": "Interrupted",
+    "idle": "Not run yet",
+    "confirmTitle": "Start this workflow?",
+    "confirmBody_one": "{{count}} step will call a model:",
+    "confirmBody_other": "{{count}} steps will call models:",
+    "parallelWarning": "Steps in the same column run in parallel and share the working directory.",
+    "confirm": "Start",
+    "history": "Run history",
+    "latest": "Latest",
+    "nodeState": {
+      "pending": "Waiting",
+      "running": "Running",
+      "waiting_approval": "Waiting for approval",
+      "succeeded": "Done",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "waiting_confirmation": "Waiting for confirmation",
+      "waiting_input": "Waiting for input"
+    },
+    "node": {
+      "instruction": "Instruction",
+      "model": "Model",
+      "permission": "Permission mode",
+      "output": "Output",
+      "noOutput": "No output yet",
+      "readonly": "Editing is disabled while running.",
+      "save": "Save",
+      "saved": "Saved",
+      "error": "Error",
+      "dependsOn": "Depends on",
+      "openChat": "Open chat",
+      "continueDownstream": "Continue downstream",
+      "continueHint": "Sync the latest AI reply from this node's chat and continue downstream steps"
+    },
+    "approvalNode": "Manual confirmation",
+    "approval": {
+      "waiting": "Waiting for your confirmation",
+      "notePlaceholder": "Optional note for next steps; or enter feedback here and click 'Send back for rework' to revise the previous step",
+      "approve": "Approve & continue",
+      "rework": "Send back for rework",
+      "reworkHint": "Send the note above back to the upstream step to revise in the same session, then return here",
+      "reject": "Reject",
+      "instruction": "What to confirm"
+    },
+    "tool": {
+      "title": "Tool approval: {{tool}}",
+      "planTitle": "The model finished planning and wants to proceed",
+      "allow": "Allow",
+      "deny": "Deny"
+    },
+    "startInput": "Input for this run (optional)",
+    "startInputPlaceholder": "Passed to the entry steps, e.g. only process ticket 18350",
+    "input": {
+      "waiting": "Interrupted in chat — waiting for your instruction",
+      "hint": "Sending a new message in the chat continues this node in the same session.",
+      "complete": "Complete with current output",
+      "fail": "Mark as failed"
+    }
+  },
+  "chatroom": {
+    "newChat": "New chat",
+    "history": "Chat history",
+    "placeholder": "Message the group, @ a role or @everyone",
+    "everyone": "Everyone",
+    "send": "Send",
+    "stop": "Stop",
+    "queued": "Queued",
+    "cancelQueued": "Cancel",
+    "members": "Members",
+    "settings": "Group settings",
+    "rules": "Group rules",
+    "rulesPlaceholder": "e.g. Stay on topic. Do not repeat what others have said.",
+    "maxReplyChars": "Max characters per reply",
+    "allowAiMentions": "Allow agents to @ each other",
+    "maxAiRepliesPerTurn": "Max agent replies per message",
+    "unmentioned": "When nobody is @-mentioned",
+    "unmentionedAll": "Everyone replies",
+    "unmentionedNone": "Nobody replies",
+    "limitsNote": "Limits are enforced by the server but are not exact cost caps.",
+    "persona": "Persona",
+    "save": "Save",
+    "saved": "Saved",
+    "truncated": "Truncated",
+    "timeout": "Timed out",
+    "stoppedReply": "Stopped",
+    "error": "Failed",
+    "empty": "Say hello to start the conversation.",
+    "collapse": "Hide sidebar",
+    "expand": "Show members",
+    "loadEarlier": "Load earlier messages"
+  },
+  "permission": {
+    "default": "Ask",
+    "plan": "Plan (read-only)",
+    "acceptEdits": "Accept edits",
+    "bypassPermissions": "Bypass permissions",
+    "auto": "Auto"
+  },
+  "errors": {
+    "loadFailed": "Failed to load",
+    "saveFailed": "Failed to save",
+    "busy": "It is running; try again when it finishes."
+  },
+  "workspace": {
+    "title": "Working directory",
+    "default": "Default directory (no project)"
+  },
+  "session": {
+    "badge": "Workflow node",
+    "back": "Back to workflow"
+  },
+  "historyMenu": {
+    "active": "Active",
+    "archived": "Archived",
+    "archive": "Archive",
+    "restore": "Restore",
+    "deletePermanent": "Delete permanently",
+    "emptyArchived": "No archived items",
+    "archivedReadonlyHint": "This chat is archived. Restore it to continue the conversation."
+  }
+}

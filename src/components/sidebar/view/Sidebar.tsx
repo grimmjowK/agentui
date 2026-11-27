@@ -1,5 +1,8 @@
 import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useMatch } from 'react-router-dom';
+
+import { MultiAgentList } from '../../multi-agent';
 
 import { useDeviceSettings } from '../../../hooks/useDeviceSettings';
 
@@ -30,6 +33,7 @@ function Sidebar({
   onProjectSelect,
   onSessionSelect,
   onNewSession,
+  onMultiAgentSelect,
   onSessionDelete,
   onLoadMoreSessions,
   onProjectDelete,
@@ -49,6 +53,8 @@ function Sidebar({
   const { setCurrentProject, mcpServerStatus } = useTaskMaster() as TaskMasterSidebarContext;
   const { tasksEnabled } = useTasksSettings();
   const paletteOps = usePaletteOps();
+  const multiAgentMatch = useMatch('/multi-agent/:id');
+  const activeMultiAgentId = multiAgentMatch?.params.id ?? null;
 
   const {
     isSidebarCollapsed,
@@ -64,10 +70,6 @@ function Sidebar({
     searchFilter,
     searchMode,
     setSearchMode,
-    conversationResults,
-    isSearching,
-    searchProgress,
-    clearConversationResults,
     deletingProjects,
     deleteConfirmation,
     sessionDeleteConfirmation,
@@ -217,6 +219,11 @@ function Sidebar({
     }
   };
 
+  // 直接打開 /multi-agent/:id 時側邊欄切到多 Agent
+  useEffect(() => {
+    if (activeMultiAgentId) setSearchMode('multiAgent');
+  }, [activeMultiAgentId, setSearchMode]);
+
   // 待審批收件匣（design D16）：依會話彙總全域池，順便找出所屬專案與會話名稱
   const { pendingApprovals } = usePendingApprovals();
   const inboxItems = useMemo(() => {
@@ -286,13 +293,15 @@ function Sidebar({
             onSearchFilterChange={setSearchFilter}
             onClearSearchFilter={() => setSearchFilter('')}
             searchMode={searchMode}
-            onSearchModeChange={(mode) => {
-              setSearchMode(mode);
-              if (mode === 'projects') clearConversationResults();
-            }}
-            conversationResults={conversationResults}
-            isSearching={isSearching}
-            searchProgress={searchProgress}
+            onSearchModeChange={setSearchMode}
+            multiAgentPanel={(
+              <MultiAgentList
+                searchFilter={searchFilter}
+                activeId={activeMultiAgentId}
+                projectId={selectedProject?.projectId ?? null}
+                onOpen={onMultiAgentSelect}
+              />
+            )}
             onRestoreArchivedProject={restoreArchivedProject}
             onArchivedSessionClick={openArchivedSession}
             onRestoreArchivedSession={restoreArchivedSession}
@@ -305,7 +314,6 @@ function Sidebar({
                 { isArchived: true },
               );
             }}
-            onConversationResultClick={openSessionFromResult}
             pendingApprovalsInbox={(
               <PendingApprovalsInbox
                 items={inboxItems}

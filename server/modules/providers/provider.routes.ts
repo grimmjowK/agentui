@@ -3,6 +3,7 @@ import express, { type Request, type Response } from 'express';
 import multer from 'multer';
 
 import { codexOwnership } from '@/modules/codex-runtime/index.js';
+import { multiAgentsDb, projectsDb } from '@/modules/database/index.js';
 import { sessionMessagesDb, sessionsDb } from '@/modules/database/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { getCodexRuntimeInfo } from '@/shared/codex-cli-path.js';
@@ -18,6 +19,16 @@ import type { LLMProvider, McpScope, McpTransport, UpsertProviderMcpServerInput 
 import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils.js';
 
 const router = express.Router();
+
+// 多 Agent 擁有的會話（節點／建立器／成員）：所有 /sessions/:sessionId 路由一律先驗擁有者
+router.param('sessionId', (req, _res, next, value) => {
+  try {
+    if (typeof value === 'string') assertMultiAgentSessionAccess(req, value);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get('/codex/runtime', asyncHandler(async (req: Request, res: Response) => {
   const runtime = getCodexRuntimeInfo();
@@ -423,6 +434,67 @@ router.put(
     const summary = parseSessionRenameSummary(req.body);
     const result = sessionsService.renameSessionById(sessionId, summary);
     res.json(createApiSuccessResponse(result));
+  }),
+);
+
+function reqUserId(req: Request): string | null {
+  const user = (req as Request & { user?: { id?: number | string; userId?: number | string } }).user;
+  const uid = user?.id ?? user?.userId;
+  return uid === undefined || uid === null ? null : String(uid);
+}
+
+/** 若該會話屬於多 Agent，檢查呼叫者是否為擁有者（非擁有者回傳 404 避免洩漏存在性） */
+function assertMultiAgentSessionAccess(req: Request, sessionId: string): void {
+  const owner = multiAgentsDb.getMultiAgentSessionOwner(sessionId);
+  if (!owner) return;
+  const uid = reqUserId(req);
+  if (!uid || uid !== String(owner.userId)) {
+    throw new AppError('Session not found.', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+  }
+}
+
+/** 工作流節點會話：回傳所屬工作流與節點標題（只給擁有者） */
+function workflowOf(req: Request, sessionId: string) {
+  const entry = multiAgentsDb.getWorkflowSession(sessionId);
+  const uid = reqUserId(req);
+  if (!entry || !uid || uid !== String(entry.userId)) return null;
+  const run = multiAgentsDb.getRun(entry.multiAgentId, entry.runId);
+  const agent = multiAgentsDb.getById(entry.multiAgentId);
+  const nodes = (run?.definition ?? (agent?.definition as { nodes?: Array<{ id: string; title: string; provider?: string }> } | null))?.nodes;
+  const node = nodes?.find((n) => n.id === entry.nodeId);
+  return {
+    multiAgentId: entry.multiAgentId,
+    runId: entry.runId,
+    nodeId: entry.nodeId,
+    nodeTitle: node?.title ?? null,
+    provider: node?.provider ?? 'claude',
+    workspacePath: agent?.workspacePath ?? null,
+  };
+}
+
+/**
+ * 按 id 取得會話的 provider 與專案（node-live-session D6）：工作流節點會話不在側邊欄，
+ * 聊天頁從 URL 打開時要靠它組出專案上下文；剛啟動尚未由檔案同步器寫入 sessions 表時，從 workflow_sessions 回退。
+ */
+router.get(
+  '/sessions/:sessionId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = parseSessionId(req.params.sessionId);
+    const row = sessionsDb.getSessionById(sessionId);
+    const wf = workflowOf(req, sessionId);
+    if (!row && !wf) throw new AppError('Session not found.', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
+    const projectPath = row?.project_path ?? wf?.workspacePath ?? null;
+    const project = projectPath
+      ? projectsDb.getProjectPath(projectPath) ?? projectsDb.createProjectPath(projectPath).project
+      : null;
+    res.json(createApiSuccessResponse({
+      sessionId,
+      provider: row?.provider ?? wf?.provider ?? 'claude',
+      projectPath,
+      projectId: project?.project_id ?? null,
+      summary: row?.custom_name ?? wf?.nodeTitle ?? '',
+      workflow: wf ? { multiAgentId: wf.multiAgentId, runId: wf.runId, nodeId: wf.nodeId, nodeTitle: wf.nodeTitle } : null,
+    }));
   }),
 );
 

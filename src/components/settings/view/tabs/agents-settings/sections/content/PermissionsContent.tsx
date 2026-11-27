@@ -1,8 +1,11 @@
 import { useState } from 'react';
-import { AlertTriangle, Plus, Shield, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Button, Input } from '../../../../../../../shared/view/ui';
-import type { CodexPermissionMode } from '../../../../../types/types';
+import { cn } from '../../../../../../../lib/utils';
+import SettingsCard from '../../../../SettingsCard';
+import SettingsRow from '../../../../SettingsRow';
+import SettingsSection from '../../../../SettingsSection';
+import type { AntigravityPermissionMode, CodexPermissionMode } from '../../../../../types/types';
 
 const COMMON_CLAUDE_TOOLS = [
   'Bash(git log:*)',
@@ -41,13 +44,131 @@ const addUnique = (items: string[], value: string): string[] => {
   if (!normalizedValue || items.includes(normalizedValue)) {
     return items;
   }
-
   return [...items, normalizedValue];
 };
 
 const removeValue = (items: string[], value: string): string[] => (
   items.filter((item) => item !== value)
 );
+
+type RuleListEditorProps = {
+  title: string;
+  description: string;
+  placeholder: string;
+  emptyText: string;
+  addLabel: string;
+  items: string[];
+  onChange: (items: string[]) => void;
+  quickAddTitle?: string;
+  quickAddItems?: string[];
+};
+
+function RuleListEditor({
+  title,
+  description,
+  placeholder,
+  emptyText,
+  addLabel,
+  items,
+  onChange,
+  quickAddTitle,
+  quickAddItems,
+}: RuleListEditorProps) {
+  const [draft, setDraft] = useState('');
+
+  const handleAdd = (value: string) => {
+    const updated = addUnique(items, value);
+    if (updated.length === items.length) return;
+    onChange(updated);
+    setDraft('');
+  };
+
+  return (
+    <SettingsSection title={title} description={description}>
+      <SettingsCard divided>
+        <div className="p-4">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder={placeholder}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  handleAdd(draft);
+                }
+              }}
+              className="h-9 flex-1 rounded-xl border border-border/70 bg-muted/30 px-3 text-xs font-mono text-foreground placeholder:font-sans placeholder:text-muted-foreground/70 focus:border-primary focus:bg-background focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => handleAdd(draft)}
+              disabled={!draft.trim()}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border/70 bg-muted/40 px-3.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-40"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>{addLabel}</span>
+            </button>
+          </div>
+
+          {quickAddItems && quickAddItems.length > 0 && (
+            <div className="mt-3">
+              {quickAddTitle && (
+                <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">
+                  {quickAddTitle}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {quickAddItems.map((item) => {
+                  const exists = items.includes(item);
+                  return (
+                    <button
+                      key={item}
+                      type="button"
+                      disabled={exists}
+                      onClick={() => handleAdd(item)}
+                      className="rounded-lg border border-border/60 bg-muted/25 px-2 py-1 font-mono text-[11px] text-foreground/80 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-35"
+                    >
+                      + {item}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-4 py-3.5">
+          {items.length === 0 ? (
+            <div className="py-2 text-center text-xs text-muted-foreground">
+              {emptyText}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {items.map((item) => (
+                <span
+                  key={item}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-muted/40 px-2.5 py-1 font-mono text-xs text-foreground"
+                >
+                  <span>{item}</span>
+                  <button
+                    type="button"
+                    onClick={() => onChange(removeValue(items, item))}
+                    className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                    aria-label={`Remove ${item}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </SettingsCard>
+    </SettingsSection>
+  );
+}
 
 type ClaudePermissionsProps = {
   agent: 'claude';
@@ -59,6 +180,22 @@ type ClaudePermissionsProps = {
   onDisallowedToolsChange: (value: string[]) => void;
 };
 
+function ModeRadioIndicator({ checked, label }: { checked: boolean; label: string }) {
+  return (
+    <span
+      role="radio"
+      aria-checked={checked}
+      aria-label={label}
+      className={cn(
+        'inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border transition-colors',
+        checked ? 'border-foreground bg-foreground' : 'border-border bg-background',
+      )}
+    >
+      {checked && <span className="h-2 w-2 rounded-full bg-background" />}
+    </span>
+  );
+}
+
 function ClaudePermissions({
   skipPermissions,
   onSkipPermissionsChange,
@@ -68,194 +205,58 @@ function ClaudePermissions({
   onDisallowedToolsChange,
 }: Omit<ClaudePermissionsProps, 'agent'>) {
   const { t } = useTranslation('settings');
-  const [newAllowedTool, setNewAllowedTool] = useState('');
-  const [newDisallowedTool, setNewDisallowedTool] = useState('');
-
-  const handleAddAllowedTool = (tool: string) => {
-    const updated = addUnique(allowedTools, tool);
-    if (updated.length === allowedTools.length) {
-      return;
-    }
-
-    onAllowedToolsChange(updated);
-    setNewAllowedTool('');
-  };
-
-  const handleAddDisallowedTool = (tool: string) => {
-    const updated = addUnique(disallowedTools, tool);
-    if (updated.length === disallowedTools.length) {
-      return;
-    }
-
-    onDisallowedToolsChange(updated);
-    setNewDisallowedTool('');
-  };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="h-5 w-5 text-orange-500" />
-          <h3 className="text-lg font-medium text-foreground">{t('permissions.title')}</h3>
-        </div>
-        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-800 dark:bg-orange-900/20">
-          <label className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              checked={skipPermissions}
-              onChange={(event) => onSkipPermissionsChange(event.target.checked)}
-              className="h-4 w-4 rounded border-input bg-card text-primary focus:ring-2 focus:ring-primary"
+    <div className="space-y-7">
+      <SettingsSection title={t('tabs.permissions')}>
+        <SettingsCard divided>
+          <SettingsRow
+            label={t('permissions.defaultMode.label', { defaultValue: 'Default permissions' })}
+            description={t('permissions.defaultMode.claudeDescription', {
+              defaultValue: 'By default, Claude can read workspace files and asks for approval before running commands or writing files.',
+            })}
+            onClick={() => onSkipPermissionsChange(false)}
+          >
+            <ModeRadioIndicator
+              checked={!skipPermissions}
+              label={t('permissions.defaultMode.label', { defaultValue: 'Default permissions' })}
             />
-            <div>
-              <div className="font-medium text-orange-900 dark:text-orange-100">
-                {t('permissions.skipPermissions.label')}
-              </div>
-              <div className="text-sm text-orange-700 dark:text-orange-300">
-                {t('permissions.skipPermissions.claudeDescription')}
-              </div>
-            </div>
-          </label>
-        </div>
-      </div>
+          </SettingsRow>
 
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Shield className="h-5 w-5 text-green-500" />
-          <h3 className="text-lg font-medium text-foreground">{t('permissions.allowedTools.title')}</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">{t('permissions.allowedTools.description')}</p>
-
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={newAllowedTool}
-            onChange={(event) => setNewAllowedTool(event.target.value)}
-            placeholder={t('permissions.allowedTools.placeholder')}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                handleAddAllowedTool(newAllowedTool);
-              }
-            }}
-            className="h-10 flex-1"
-          />
-          <Button
-            onClick={() => handleAddAllowedTool(newAllowedTool)}
-            disabled={!newAllowedTool.trim()}
-            size="sm"
-            className="h-10 px-4"
+          <SettingsRow
+            label={t('permissions.skipPermissions.label')}
+            description={t('permissions.skipPermissions.claudeDescription')}
+            onClick={() => onSkipPermissionsChange(true)}
           >
-            <Plus className="mr-2 h-4 w-4 sm:mr-0" />
-            <span className="sm:hidden">{t('permissions.actions.add')}</span>
-          </Button>
-        </div>
+            <ModeRadioIndicator
+              checked={skipPermissions}
+              label={t('permissions.skipPermissions.label')}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
 
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-muted-foreground">
-            {t('permissions.allowedTools.quickAdd')}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {COMMON_CLAUDE_TOOLS.map((tool) => (
-              <Button
-                key={tool}
-                variant="outline"
-                size="sm"
-                onClick={() => handleAddAllowedTool(tool)}
-                disabled={allowedTools.includes(tool)}
-                className="h-8 text-xs"
-              >
-                {tool}
-              </Button>
-            ))}
-          </div>
-        </div>
+      <RuleListEditor
+        title={t('permissions.allowedTools.title')}
+        description={t('permissions.allowedTools.description')}
+        placeholder={t('permissions.allowedTools.placeholder')}
+        emptyText={t('permissions.allowedTools.empty')}
+        addLabel={t('permissions.actions.add')}
+        items={allowedTools}
+        onChange={onAllowedToolsChange}
+        quickAddTitle={t('permissions.allowedTools.quickAdd')}
+        quickAddItems={COMMON_CLAUDE_TOOLS}
+      />
 
-        <div className="space-y-2">
-          {allowedTools.map((tool) => (
-            <div key={tool} className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-900/20">
-              <span className="font-mono text-sm text-green-800 dark:text-green-200">{tool}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onAllowedToolsChange(removeValue(allowedTools, tool))}
-                className="text-green-600 hover:text-green-700"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
-          {allowedTools.length === 0 && (
-            <div className="py-6 text-center text-muted-foreground">
-              {t('permissions.allowedTools.empty')}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="h-5 w-5 text-red-500" />
-          <h3 className="text-lg font-medium text-foreground">{t('permissions.blockedTools.title')}</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">{t('permissions.blockedTools.description')}</p>
-
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={newDisallowedTool}
-            onChange={(event) => setNewDisallowedTool(event.target.value)}
-            placeholder={t('permissions.blockedTools.placeholder')}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                handleAddDisallowedTool(newDisallowedTool);
-              }
-            }}
-            className="h-10 flex-1"
-          />
-          <Button
-            onClick={() => handleAddDisallowedTool(newDisallowedTool)}
-            disabled={!newDisallowedTool.trim()}
-            size="sm"
-            className="h-10 px-4"
-          >
-            <Plus className="mr-2 h-4 w-4 sm:mr-0" />
-            <span className="sm:hidden">{t('permissions.actions.add')}</span>
-          </Button>
-        </div>
-
-        <div className="space-y-2">
-          {disallowedTools.map((tool) => (
-            <div key={tool} className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
-              <span className="font-mono text-sm text-red-800 dark:text-red-200">{tool}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onDisallowedToolsChange(removeValue(disallowedTools, tool))}
-                className="text-red-600 hover:text-red-700"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
-          {disallowedTools.length === 0 && (
-            <div className="py-6 text-center text-muted-foreground">
-              {t('permissions.blockedTools.empty')}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
-        <h4 className="mb-2 font-medium text-blue-900 dark:text-blue-100">
-          {t('permissions.toolExamples.title')}
-        </h4>
-        <ul className="space-y-1 text-sm text-blue-800 dark:text-blue-200">
-          <li><code className="rounded bg-blue-100 px-1 dark:bg-blue-800">"Bash(git log:*)"</code> {t('permissions.toolExamples.bashGitLog')}</li>
-          <li><code className="rounded bg-blue-100 px-1 dark:bg-blue-800">"Bash(git diff:*)"</code> {t('permissions.toolExamples.bashGitDiff')}</li>
-          <li><code className="rounded bg-blue-100 px-1 dark:bg-blue-800">"Write"</code> {t('permissions.toolExamples.write')}</li>
-          <li><code className="rounded bg-blue-100 px-1 dark:bg-blue-800">"Bash(rm:*)"</code> {t('permissions.toolExamples.bashRm')}</li>
-        </ul>
-      </div>
-
+      <RuleListEditor
+        title={t('permissions.blockedTools.title')}
+        description={t('permissions.blockedTools.description')}
+        placeholder={t('permissions.blockedTools.placeholder')}
+        emptyText={t('permissions.blockedTools.empty')}
+        addLabel={t('permissions.actions.add')}
+        items={disallowedTools}
+        onChange={onDisallowedToolsChange}
+      />
     </div>
   );
 }
@@ -279,193 +280,58 @@ function CursorPermissions({
   onDisallowedCommandsChange,
 }: Omit<CursorPermissionsProps, 'agent'>) {
   const { t } = useTranslation('settings');
-  const [newAllowedCommand, setNewAllowedCommand] = useState('');
-  const [newDisallowedCommand, setNewDisallowedCommand] = useState('');
-
-  const handleAddAllowedCommand = (command: string) => {
-    const updated = addUnique(allowedCommands, command);
-    if (updated.length === allowedCommands.length) {
-      return;
-    }
-
-    onAllowedCommandsChange(updated);
-    setNewAllowedCommand('');
-  };
-
-  const handleAddDisallowedCommand = (command: string) => {
-    const updated = addUnique(disallowedCommands, command);
-    if (updated.length === disallowedCommands.length) {
-      return;
-    }
-
-    onDisallowedCommandsChange(updated);
-    setNewDisallowedCommand('');
-  };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="h-5 w-5 text-orange-500" />
-          <h3 className="text-lg font-medium text-foreground">{t('permissions.title')}</h3>
-        </div>
-        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-800 dark:bg-orange-900/20">
-          <label className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              checked={skipPermissions}
-              onChange={(event) => onSkipPermissionsChange(event.target.checked)}
-              className="h-4 w-4 rounded border-input bg-card text-primary focus:ring-2 focus:ring-primary"
+    <div className="space-y-7">
+      <SettingsSection title={t('tabs.permissions')}>
+        <SettingsCard divided>
+          <SettingsRow
+            label={t('permissions.defaultMode.label', { defaultValue: 'Default permissions' })}
+            description={t('permissions.defaultMode.cursorDescription', {
+              defaultValue: 'By default, Cursor asks for confirmation before running unapproved shell commands.',
+            })}
+            onClick={() => onSkipPermissionsChange(false)}
+          >
+            <ModeRadioIndicator
+              checked={!skipPermissions}
+              label={t('permissions.defaultMode.label', { defaultValue: 'Default permissions' })}
             />
-            <div>
-              <div className="font-medium text-orange-900 dark:text-orange-100">
-                {t('permissions.skipPermissions.label')}
-              </div>
-              <div className="text-sm text-orange-700 dark:text-orange-300">
-                {t('permissions.skipPermissions.cursorDescription')}
-              </div>
-            </div>
-          </label>
-        </div>
-      </div>
+          </SettingsRow>
 
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Shield className="h-5 w-5 text-green-500" />
-          <h3 className="text-lg font-medium text-foreground">{t('permissions.allowedCommands.title')}</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">{t('permissions.allowedCommands.description')}</p>
-
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={newAllowedCommand}
-            onChange={(event) => setNewAllowedCommand(event.target.value)}
-            placeholder={t('permissions.allowedCommands.placeholder')}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                handleAddAllowedCommand(newAllowedCommand);
-              }
-            }}
-            className="h-10 flex-1"
-          />
-          <Button
-            onClick={() => handleAddAllowedCommand(newAllowedCommand)}
-            disabled={!newAllowedCommand.trim()}
-            size="sm"
-            className="h-10 px-4"
+          <SettingsRow
+            label={t('permissions.skipPermissions.label')}
+            description={t('permissions.skipPermissions.cursorDescription')}
+            onClick={() => onSkipPermissionsChange(true)}
           >
-            <Plus className="mr-2 h-4 w-4 sm:mr-0" />
-            <span className="sm:hidden">{t('permissions.actions.add')}</span>
-          </Button>
-        </div>
+            <ModeRadioIndicator
+              checked={skipPermissions}
+              label={t('permissions.skipPermissions.label')}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
 
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-muted-foreground">
-            {t('permissions.allowedCommands.quickAdd')}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {COMMON_CURSOR_COMMANDS.map((command) => (
-              <Button
-                key={command}
-                variant="outline"
-                size="sm"
-                onClick={() => handleAddAllowedCommand(command)}
-                disabled={allowedCommands.includes(command)}
-                className="h-8 text-xs"
-              >
-                {command}
-              </Button>
-            ))}
-          </div>
-        </div>
+      <RuleListEditor
+        title={t('permissions.allowedCommands.title')}
+        description={t('permissions.allowedCommands.description')}
+        placeholder={t('permissions.allowedCommands.placeholder')}
+        emptyText={t('permissions.allowedCommands.empty')}
+        addLabel={t('permissions.actions.add')}
+        items={allowedCommands}
+        onChange={onAllowedCommandsChange}
+        quickAddTitle={t('permissions.allowedCommands.quickAdd')}
+        quickAddItems={COMMON_CURSOR_COMMANDS}
+      />
 
-        <div className="space-y-2">
-          {allowedCommands.map((command) => (
-            <div key={command} className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-900/20">
-              <span className="font-mono text-sm text-green-800 dark:text-green-200">{command}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onAllowedCommandsChange(removeValue(allowedCommands, command))}
-                className="text-green-600 hover:text-green-700"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
-          {allowedCommands.length === 0 && (
-            <div className="py-6 text-center text-muted-foreground">
-              {t('permissions.allowedCommands.empty')}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="h-5 w-5 text-red-500" />
-          <h3 className="text-lg font-medium text-foreground">{t('permissions.blockedCommands.title')}</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">{t('permissions.blockedCommands.description')}</p>
-
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={newDisallowedCommand}
-            onChange={(event) => setNewDisallowedCommand(event.target.value)}
-            placeholder={t('permissions.blockedCommands.placeholder')}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                handleAddDisallowedCommand(newDisallowedCommand);
-              }
-            }}
-            className="h-10 flex-1"
-          />
-          <Button
-            onClick={() => handleAddDisallowedCommand(newDisallowedCommand)}
-            disabled={!newDisallowedCommand.trim()}
-            size="sm"
-            className="h-10 px-4"
-          >
-            <Plus className="mr-2 h-4 w-4 sm:mr-0" />
-            <span className="sm:hidden">{t('permissions.actions.add')}</span>
-          </Button>
-        </div>
-
-        <div className="space-y-2">
-          {disallowedCommands.map((command) => (
-            <div key={command} className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
-              <span className="font-mono text-sm text-red-800 dark:text-red-200">{command}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onDisallowedCommandsChange(removeValue(disallowedCommands, command))}
-                className="text-red-600 hover:text-red-700"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
-          {disallowedCommands.length === 0 && (
-            <div className="py-6 text-center text-muted-foreground">
-              {t('permissions.blockedCommands.empty')}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 dark:border-purple-800 dark:bg-purple-900/20">
-        <h4 className="mb-2 font-medium text-purple-900 dark:text-purple-100">
-          {t('permissions.shellExamples.title')}
-        </h4>
-        <ul className="space-y-1 text-sm text-purple-800 dark:text-purple-200">
-          <li><code className="rounded bg-purple-100 px-1 dark:bg-purple-800">"Shell(ls)"</code> {t('permissions.shellExamples.ls')}</li>
-          <li><code className="rounded bg-purple-100 px-1 dark:bg-purple-800">"Shell(git status)"</code> {t('permissions.shellExamples.gitStatus')}</li>
-          <li><code className="rounded bg-purple-100 px-1 dark:bg-purple-800">"Shell(npm install)"</code> {t('permissions.shellExamples.npmInstall')}</li>
-          <li><code className="rounded bg-purple-100 px-1 dark:bg-purple-800">"Shell(rm -rf)"</code> {t('permissions.shellExamples.rmRf')}</li>
-        </ul>
-      </div>
+      <RuleListEditor
+        title={t('permissions.blockedCommands.title')}
+        description={t('permissions.blockedCommands.description')}
+        placeholder={t('permissions.blockedCommands.placeholder')}
+        emptyText={t('permissions.blockedCommands.empty')}
+        addLabel={t('permissions.actions.add')}
+        items={disallowedCommands}
+        onChange={onDisallowedCommandsChange}
+      />
     </div>
   );
 }
@@ -476,147 +342,112 @@ type CodexPermissionsProps = {
   onPermissionModeChange: (value: CodexPermissionMode) => void;
 };
 
-function CodexPermissions({ permissionMode, onPermissionModeChange }: Omit<CodexPermissionsProps, 'agent'>) {
+const CODEX_MODES: CodexPermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
+
+function CodexPermissions({
+  permissionMode,
+  onPermissionModeChange,
+}: Omit<CodexPermissionsProps, 'agent'>) {
   const { t } = useTranslation('settings');
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Shield className="h-5 w-5 text-green-500" />
-          <h3 className="text-lg font-medium text-foreground">{t('permissions.codex.permissionMode')}</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">{t('permissions.codex.description')}</p>
+    <div className="space-y-5">
+      <SettingsSection
+        title={t('permissions.codex.permissionMode')}
+        description={t('permissions.codex.description')}
+      >
+        <SettingsCard divided>
+          {CODEX_MODES.map((mode) => (
+            <SettingsRow
+              key={mode}
+              label={t(`permissions.codex.modes.${mode}.title`)}
+              description={t(`permissions.codex.modes.${mode}.description`)}
+              onClick={() => onPermissionModeChange(mode)}
+            >
+              <ModeRadioIndicator
+                checked={permissionMode === mode}
+                label={t(`permissions.codex.modes.${mode}.title`)}
+              />
+            </SettingsRow>
+          ))}
+        </SettingsCard>
+      </SettingsSection>
 
-        <div
-          className={`cursor-pointer rounded-lg border p-4 transition-all ${permissionMode === 'default'
-            ? 'border-border bg-accent'
-            : 'border-border bg-card/50 active:border-border active:bg-accent/50'
-            }`}
-          onClick={() => onPermissionModeChange('default')}
-        >
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="radio"
-              name="codexPermissionMode"
-              checked={permissionMode === 'default'}
-              onChange={() => onPermissionModeChange('default')}
-              className="mt-1 h-4 w-4 text-green-600"
-            />
-            <div>
-              <div className="font-medium text-foreground">{t('permissions.codex.modes.default.title')}</div>
-              <div className="text-sm text-muted-foreground">
-                {t('permissions.codex.modes.default.description')}
-              </div>
-            </div>
-          </label>
+      <details className="group rounded-xl border border-border/50 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+        <summary className="cursor-pointer font-medium text-foreground/80 hover:text-foreground">
+          {t('permissions.codex.technicalDetails')}
+        </summary>
+        <div className="mt-2.5 space-y-1.5 leading-relaxed">
+          {CODEX_MODES.map((mode) => (
+            <p key={mode}>
+              <strong className="text-foreground/90">{t(`permissions.codex.modes.${mode}.title`)}:</strong>{' '}
+              {t(`permissions.codex.technicalInfo.${mode}`)}
+            </p>
+          ))}
+          <p className="pt-1 opacity-75">{t('permissions.codex.technicalInfo.overrideNote')}</p>
         </div>
-
-        <div
-          className={`cursor-pointer rounded-lg border p-4 transition-all ${permissionMode === 'acceptEdits'
-            ? 'border-green-400 bg-green-50 dark:border-green-600 dark:bg-green-900/20'
-            : 'border-border bg-card/50 active:border-border active:bg-accent/50'
-            }`}
-          onClick={() => onPermissionModeChange('acceptEdits')}
-        >
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="radio"
-              name="codexPermissionMode"
-              checked={permissionMode === 'acceptEdits'}
-              onChange={() => onPermissionModeChange('acceptEdits')}
-              className="mt-1 h-4 w-4 text-green-600"
-            />
-            <div>
-              <div className="font-medium text-green-900 dark:text-green-100">{t('permissions.codex.modes.acceptEdits.title')}</div>
-              <div className="text-sm text-green-700 dark:text-green-300">
-                {t('permissions.codex.modes.acceptEdits.description')}
-              </div>
-            </div>
-          </label>
-        </div>
-
-        <div
-          className={`cursor-pointer rounded-lg border p-4 transition-all ${permissionMode === 'bypassPermissions'
-            ? 'border-orange-400 bg-orange-50 dark:border-orange-600 dark:bg-orange-900/20'
-            : 'border-border bg-card/50 active:border-border active:bg-accent/50'
-            }`}
-          onClick={() => onPermissionModeChange('bypassPermissions')}
-        >
-          <label className="flex cursor-pointer items-start gap-3">
-            <input
-              type="radio"
-              name="codexPermissionMode"
-              checked={permissionMode === 'bypassPermissions'}
-              onChange={() => onPermissionModeChange('bypassPermissions')}
-              className="mt-1 h-4 w-4 text-orange-600"
-            />
-            <div>
-              <div className="flex items-center gap-2 font-medium text-orange-900 dark:text-orange-100">
-                {t('permissions.codex.modes.bypassPermissions.title')}
-                <AlertTriangle className="h-4 w-4" />
-              </div>
-              <div className="text-sm text-orange-700 dark:text-orange-300">
-                {t('permissions.codex.modes.bypassPermissions.description')}
-              </div>
-            </div>
-          </label>
-        </div>
-
-        <details className="text-sm">
-          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-            {t('permissions.codex.technicalDetails')}
-          </summary>
-          <div className="mt-2 space-y-2 rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
-            <p><strong>{t('permissions.codex.modes.default.title')}:</strong> {t('permissions.codex.technicalInfo.default')}</p>
-            <p><strong>{t('permissions.codex.modes.acceptEdits.title')}:</strong> {t('permissions.codex.technicalInfo.acceptEdits')}</p>
-            <p><strong>{t('permissions.codex.modes.bypassPermissions.title')}:</strong> {t('permissions.codex.technicalInfo.bypassPermissions')}</p>
-            <p className="text-xs opacity-75">{t('permissions.codex.technicalInfo.overrideNote')}</p>
-          </div>
-        </details>
-      </div>
+      </details>
     </div>
   );
 }
 
 type AntigravityPermissionsProps = {
   agent: 'antigravity';
-  skipPermissions: boolean;
-  onSkipPermissionsChange: (value: boolean) => void;
+  permissionMode: AntigravityPermissionMode;
+  onPermissionModeChange: (value: AntigravityPermissionMode) => void;
 };
 
-// Antigravity (agy) headless 模式无法交互式审批工具权限，因此默认跳过权限。
-function AntigravityPermissions({ skipPermissions, onSkipPermissionsChange }: Omit<AntigravityPermissionsProps, 'agent'>) {
-  const { t } = useTranslation('settings');
-  return (
-    <div className="space-y-6">
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
-        <div className="flex items-start gap-3">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-          <div className="text-sm text-amber-800 dark:text-amber-200">
-            {t('permissions.antigravity.headlessNotice')}
-          </div>
-        </div>
-      </div>
+const ANTIGRAVITY_MODES: AntigravityPermissionMode[] = [
+  'default',
+  'acceptEdits',
+  'auto',
+  'plan',
+  'bypassPermissions',
+];
 
-      <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 dark:border-orange-800 dark:bg-orange-900/20">
-        <label className="flex cursor-pointer items-start gap-3">
-          <input
-            type="checkbox"
-            checked={skipPermissions}
-            onChange={(event) => onSkipPermissionsChange(event.target.checked)}
-            className="mt-1 h-4 w-4 rounded border-input bg-card text-primary focus:ring-2 focus:ring-primary"
-          />
-          <div>
-            <div className="font-medium text-orange-900 dark:text-orange-100">
-              {t('permissions.antigravity.skipPermissions.label')}
-            </div>
-            <div className="text-sm text-orange-700 dark:text-orange-300">
-              {t('permissions.antigravity.skipPermissions.description')}
-            </div>
-          </div>
-        </label>
-      </div>
+function AntigravityPermissions({
+  permissionMode,
+  onPermissionModeChange,
+}: Omit<AntigravityPermissionsProps, 'agent'>) {
+  const { t } = useTranslation('settings');
+
+  return (
+    <div className="space-y-5">
+      <SettingsSection
+        title={t('permissions.antigravity.permissionMode')}
+        description={t('permissions.antigravity.description')}
+      >
+        <SettingsCard divided>
+          {ANTIGRAVITY_MODES.map((mode) => (
+            <SettingsRow
+              key={mode}
+              label={t(`permissions.antigravity.modes.${mode}.title`)}
+              description={t(`permissions.antigravity.modes.${mode}.description`)}
+              onClick={() => onPermissionModeChange(mode)}
+            >
+              <ModeRadioIndicator
+                checked={permissionMode === mode}
+                label={t(`permissions.antigravity.modes.${mode}.title`)}
+              />
+            </SettingsRow>
+          ))}
+        </SettingsCard>
+      </SettingsSection>
+
+      <details className="group rounded-xl border border-border/50 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+        <summary className="cursor-pointer font-medium text-foreground/80 hover:text-foreground">
+          {t('permissions.antigravity.technicalDetails')}
+        </summary>
+        <div className="mt-2.5 space-y-1.5 leading-relaxed">
+          {ANTIGRAVITY_MODES.map((mode) => (
+            <p key={mode}>
+              <strong className="text-foreground/90">{t(`permissions.antigravity.modes.${mode}.title`)}:</strong>{' '}
+              {t(`permissions.antigravity.technicalInfo.${mode}`)}
+            </p>
+          ))}
+          <p className="pt-1 opacity-75">{t('permissions.antigravity.technicalInfo.overrideNote')}</p>
+        </div>
+      </details>
     </div>
   );
 }

@@ -179,6 +179,8 @@ export default tseslint.config(
             "server/shared/antigravity-session-store.ts",
             "server/shared/image-temp-files.ts",
             "server/shared/session-message-log-flags.ts",
+            "server/shared/multi-agent-workspace.ts",
+            "server/shared/workflow-session-registry.ts",
           ], // classify shared utility files so modules can depend on them explicitly
           mode: "file",
         },

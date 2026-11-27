@@ -20,6 +20,8 @@ export type ProviderCapabilities = {
   effort: boolean;
   /** 提供會話產物（Session Artifacts）側邊欄。 */
   artifacts: boolean;
+  /** 同一 session 換模型後可直接續接；否則多 Agent 成員換模型要重建 session。 */
+  resumeAcrossModels: boolean;
 };
 
 export type ProviderInfo = {
@@ -34,11 +36,17 @@ export type ProviderInfo = {
   settingsStorageKey: string;
 };
 
-/** Antigravity headless 模式無法互動審批：使用者明確同意跳過權限時預設 bypass。 */
+/** Antigravity（ACP）預設權限模式：由設定頁儲存於 localStorage 的 antigravity-settings 決定。 */
 function antigravityDefaultPermissionMode(): PermissionMode {
   try {
     const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem('antigravity-settings');
     const settings = JSON.parse(raw || '{}');
+    if (
+      typeof settings.permissionMode === 'string'
+      && ['default', 'acceptEdits', 'auto', 'plan', 'bypassPermissions'].includes(settings.permissionMode)
+    ) {
+      return settings.permissionMode as PermissionMode;
+    }
     return settings.explicitConsent === true && settings.skipPermissions === true ? 'bypassPermissions' : 'default';
   } catch {
     return 'default';
@@ -47,27 +55,27 @@ function antigravityDefaultPermissionMode(): PermissionMode {
 
 export const PROVIDER_INFO: Record<LLMProvider, ProviderInfo> = {
   claude: {
-    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false },
+    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false, resumeAcrossModels: true },
     permissionModes: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
     defaultPermissionMode: 'default',
     settingsStorageKey: 'claude-settings',
   },
   cursor: {
-    capabilities: { midTurnSteer: false, images: true, effort: false, artifacts: false },
+    capabilities: { midTurnSteer: false, images: true, effort: false, artifacts: false, resumeAcrossModels: false },
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
     defaultPermissionMode: 'default',
     settingsStorageKey: 'cursor-tools-settings',
   },
   codex: {
-    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false },
+    capabilities: { midTurnSteer: true, images: true, effort: true, artifacts: false, resumeAcrossModels: false },
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions'],
     defaultPermissionMode: 'default',
     mapPermissionMode: (mode) => (mode === 'plan' ? 'default' : mode),
     settingsStorageKey: 'codex-settings',
   },
   antigravity: {
-    capabilities: { midTurnSteer: false, images: true, effort: false, artifacts: true },
-    permissionModes: ['default', 'bypassPermissions'],
+    capabilities: { midTurnSteer: true, images: true, effort: false, artifacts: true, resumeAcrossModels: false },
+    permissionModes: ['default', 'acceptEdits', 'auto', 'plan', 'bypassPermissions'],
     defaultPermissionMode: antigravityDefaultPermissionMode,
     settingsStorageKey: 'antigravity-settings',
   },

@@ -336,5 +336,10 @@
     "remove": "Remove",
     "steering": "Steering…",
     "imageOnly": "(image)"
+  },
+  "approvals": {
+    "title": "Permission required",
+    "allow": "Allow",
+    "deny": "Deny"
   }
 }

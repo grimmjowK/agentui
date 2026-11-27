@@ -2,19 +2,27 @@ import type { ReactNode } from 'react';
 import { cn } from '../../../lib/utils';
 
 type SettingsRowProps = {
-  label: string;
-  description?: string;
+  label: ReactNode;
+  description?: ReactNode;
   children: ReactNode;
   className?: string;
+  onClick?: () => void;
 };
 
-export default function SettingsRow({ label, description, children, className }: SettingsRowProps) {
+export default function SettingsRow({ label, description, children, className, onClick }: SettingsRowProps) {
   return (
-    <div className={cn('flex items-center justify-between gap-4 px-4 py-4', className)}>
+    <div
+      onClick={onClick}
+      className={cn(
+        'flex items-center justify-between gap-6 px-5 py-4 transition-colors',
+        onClick && 'cursor-pointer hover:bg-muted/25',
+        className,
+      )}
+    >
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-foreground">{label}</div>
+        <div className="text-[14px] font-medium leading-snug text-foreground">{label}</div>
         {description && (
-          <div className="mt-0.5 text-sm text-muted-foreground">{description}</div>
+          <div className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{description}</div>
         )}
       </div>
       <div className="flex-shrink-0">{children}</div>

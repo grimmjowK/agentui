@@ -1,7 +1,11 @@
-import { Bell, BellOff, BellRing, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { IS_DESKTOP } from '../../../../constants/config';
 import type { NotificationPreferencesState } from '../../types/types';
+import SettingsCard from '../SettingsCard';
+import SettingsRow from '../SettingsRow';
+import SettingsSection from '../SettingsSection';
+import SettingsToggle from '../SettingsToggle';
 
 type NotificationsSettingsTabProps = {
   notificationPreferences: NotificationPreferencesState;
@@ -27,12 +31,14 @@ export default function NotificationsSettingsTab({
   // Electron 没有推送服务，Web Push 订阅必然失败；桌面端靠外壳的 Dock 角标 / 跳动提醒
   if (IS_DESKTOP) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Bell className="w-5 h-5 text-blue-600" />
-          <h3 className="text-lg font-medium text-foreground">{t('notifications.title')}</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">{t('notifications.desktopNote')}</p>
+      <div className="space-y-6">
+        <SettingsSection title={t('notifications.title')}>
+          <SettingsCard>
+            <div className="px-5 py-4 text-[13px] leading-relaxed text-muted-foreground">
+              {t('notifications.desktopNote')}
+            </div>
+          </SettingsCard>
+        </SettingsSection>
       </div>
     );
   }
@@ -40,120 +46,89 @@ export default function NotificationsSettingsTab({
   const pushSupported = pushPermission !== 'unsupported';
   const pushDenied = pushPermission === 'denied';
 
+  const setEventFlag = (key: keyof NotificationPreferencesState['events'], value: boolean) => {
+    onNotificationPreferencesChange({
+      ...notificationPreferences,
+      events: {
+        ...notificationPreferences.events,
+        [key]: value,
+      },
+    });
+  };
+
   return (
-    <div className="space-y-6 md:space-y-8">
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Bell className="w-5 h-5 text-blue-600" />
-          <h3 className="text-lg font-medium text-foreground">{t('notifications.title')}</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">{t('notifications.description')}</p>
-      </div>
-
-      <div className="space-y-4 bg-card border border-border rounded-lg p-4">
-        <h4 className="font-medium text-foreground">{t('notifications.webPush.title')}</h4>
-        {!pushSupported ? (
-          <p className="text-sm text-muted-foreground">{t('notifications.webPush.unsupported')}</p>
-        ) : pushDenied ? (
-          <p className="text-sm text-muted-foreground">{t('notifications.webPush.denied')}</p>
-        ) : (
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              disabled={isPushLoading}
-              onClick={() => {
-                if (isPushSubscribed) {
-                  onDisablePush();
-                } else {
-                  onEnablePush();
-                }
-              }}
-              className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                isPushSubscribed
-                  ? 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50'
-                  : 'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600'
-              }`}
-            >
-              {isPushLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : isPushSubscribed ? (
-                <BellOff className="w-4 h-4" />
-              ) : (
-                <BellRing className="w-4 h-4" />
-              )}
-              {isPushLoading
-                ? t('notifications.webPush.loading')
-                : isPushSubscribed
-                  ? t('notifications.webPush.disable')
-                  : t('notifications.webPush.enable')}
-            </button>
-            {isPushSubscribed && (
-              <span className="text-sm text-green-600 dark:text-green-400">
-                {t('notifications.webPush.enabled')}
-              </span>
+    <div className="space-y-7">
+      <SettingsSection
+        title={t('notifications.webPush.title')}
+        description={t('notifications.description')}
+      >
+        <SettingsCard>
+          <SettingsRow
+            label={t('notifications.webPush.title')}
+            description={
+              !pushSupported
+                ? t('notifications.webPush.unsupported')
+                : pushDenied
+                  ? t('notifications.webPush.denied')
+                  : isPushSubscribed
+                    ? t('notifications.webPush.enabled')
+                    : t('notifications.description')
+            }
+          >
+            {pushSupported && !pushDenied && (
+              <div className="flex items-center gap-2">
+                {isPushLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                <SettingsToggle
+                  checked={isPushSubscribed}
+                  disabled={isPushLoading}
+                  onChange={() => {
+                    if (isPushSubscribed) onDisablePush();
+                    else onEnablePush();
+                  }}
+                  ariaLabel={t('notifications.webPush.title')}
+                />
+              </div>
             )}
-          </div>
-        )}
-      </div>
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
 
-      <div className="space-y-4 bg-card border border-border rounded-lg p-4">
-        <h4 className="font-medium text-foreground">{t('notifications.events.title')}</h4>
-        <div className="space-y-3">
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <input
-              type="checkbox"
+      <SettingsSection title={t('notifications.events.title')}>
+        <SettingsCard divided>
+          <SettingsRow
+            label={t('notifications.events.actionRequired')}
+            onClick={() => setEventFlag('actionRequired', !notificationPreferences.events.actionRequired)}
+          >
+            <SettingsToggle
               checked={notificationPreferences.events.actionRequired}
-              onChange={(event) =>
-                onNotificationPreferencesChange({
-                  ...notificationPreferences,
-                  events: {
-                    ...notificationPreferences.events,
-                    actionRequired: event.target.checked,
-                  },
-                })
-              }
-              className="w-4 h-4"
+              onChange={(checked) => setEventFlag('actionRequired', checked)}
+              ariaLabel={t('notifications.events.actionRequired')}
             />
-            {t('notifications.events.actionRequired')}
-          </label>
+          </SettingsRow>
 
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <input
-              type="checkbox"
+          <SettingsRow
+            label={t('notifications.events.stop')}
+            onClick={() => setEventFlag('stop', !notificationPreferences.events.stop)}
+          >
+            <SettingsToggle
               checked={notificationPreferences.events.stop}
-              onChange={(event) =>
-                onNotificationPreferencesChange({
-                  ...notificationPreferences,
-                  events: {
-                    ...notificationPreferences.events,
-                    stop: event.target.checked,
-                  },
-                })
-              }
-              className="w-4 h-4"
+              onChange={(checked) => setEventFlag('stop', checked)}
+              ariaLabel={t('notifications.events.stop')}
             />
-            {t('notifications.events.stop')}
-          </label>
+          </SettingsRow>
 
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <input
-              type="checkbox"
+          <SettingsRow
+            label={t('notifications.events.error')}
+            onClick={() => setEventFlag('error', !notificationPreferences.events.error)}
+          >
+            <SettingsToggle
               checked={notificationPreferences.events.error}
-              onChange={(event) =>
-                onNotificationPreferencesChange({
-                  ...notificationPreferences,
-                  events: {
-                    ...notificationPreferences.events,
-                    error: event.target.checked,
-                  },
-                })
-              }
-              className="w-4 h-4"
+              onChange={(checked) => setEventFlag('error', checked)}
+              ariaLabel={t('notifications.events.error')}
             />
-            {t('notifications.events.error')}
-          </label>
-        </div>
-      </div>
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
     </div>
   );
 }

@@ -30,6 +30,9 @@ type AppearanceSettingsTabProps = {
 
 const FONT_OPTIONS: Record<FontSlot, FontOption[]> = { latin: LATIN_FONTS, cjk: CJK_FONTS };
 
+const PILL_SELECT_CLASS =
+  'h-8 rounded-lg border border-border/70 bg-muted/40 pl-3 pr-7 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus:border-primary focus:outline-none';
+
 function FontSelectRow({ slot }: { slot: FontSlot }) {
   const { t } = useTranslation('settings');
   const [value, setValue] = useState(() => getFontPreference(slot));
@@ -50,7 +53,7 @@ function FontSelectRow({ slot }: { slot: FontSlot }) {
           setValue(event.target.value);
           setFontPreference(slot, event.target.value);
         }}
-        className="w-full rounded-lg border border-input bg-card p-2.5 text-sm text-foreground touch-manipulation focus:border-primary focus:ring-1 focus:ring-primary sm:w-56"
+        className={PILL_SELECT_CLASS}
       >
         {options.map((option) => (
           <option key={option.id} value={option.id} style={{ fontFamily: option.stack }}>
@@ -75,28 +78,18 @@ export default function AppearanceSettingsTab({
   const { t } = useTranslation('settings');
 
   return (
-    <div className="space-y-8">
-      <SettingsSection title={t('appearanceSettings.darkMode.label')}>
-        <SettingsCard>
+    <div className="space-y-7">
+      <SettingsSection title={t('mainTabs.appearance')}>
+        <SettingsCard divided>
           <SettingsRow
             label={t('appearanceSettings.darkMode.label')}
             description={t('appearanceSettings.darkMode.description')}
           >
             <DarkModeToggle ariaLabel={t('appearanceSettings.darkMode.label')} />
           </SettingsRow>
-        </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection title={t('mainTabs.appearance')}>
-        <SettingsCard divided>
           <LanguageSelector />
           <FontSelectRow slot="cjk" />
           <FontSelectRow slot="latin" />
-        </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection title={t('appearanceSettings.projectSorting.label')}>
-        <SettingsCard>
           <SettingsRow
             label={t('appearanceSettings.projectSorting.label')}
             description={t('appearanceSettings.projectSorting.description')}
@@ -104,7 +97,7 @@ export default function AppearanceSettingsTab({
             <select
               value={projectSortOrder}
               onChange={(event) => onProjectSortOrderChange(event.target.value as ProjectSortOrder)}
-              className="w-full rounded-lg border border-input bg-card p-2.5 text-sm text-foreground touch-manipulation focus:border-primary focus:ring-1 focus:ring-primary sm:w-36"
+              className={PILL_SELECT_CLASS}
             >
               <option value="name">{t('appearanceSettings.projectSorting.alphabetical')}</option>
               <option value="date">{t('appearanceSettings.projectSorting.recentActivity')}</option>
@@ -166,7 +159,7 @@ export default function AppearanceSettingsTab({
             <select
               value={codeEditorSettings.fontSize}
               onChange={(event) => onCodeEditorFontSizeChange(event.target.value)}
-              className="w-full rounded-lg border border-input bg-card p-2.5 text-sm text-foreground touch-manipulation focus:border-primary focus:ring-1 focus:ring-primary sm:w-28"
+              className={PILL_SELECT_CLASS}
             >
               <option value="10">10px</option>
               <option value="11">11px</option>

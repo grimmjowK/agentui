@@ -112,16 +112,8 @@
   },
   "search": {
     "modeProjects": "Progetti",
-    "modeConversations": "Conversazioni",
-    "conversationsPlaceholder": "Cerca nelle conversazioni...",
-    "searching": "Ricerca in corso...",
-    "noResults": "Nessun risultato trovato",
-    "tryDifferentQuery": "Prova con una ricerca diversa",
-    "matches_one": "{{count}} corrispondenza",
-    "matches_other": "{{count}} corrispondenze",
-    "projectsScanned_one": "{{count}} progetto analizzato",
-    "projectsScanned_other": "{{count}} progetti analizzati",
-    "unsearchableProviders": "Non cercate: conversazioni {{providers}}"
+    "modeMultiAgent": "Multi-agente",
+    "multiAgentPlaceholder": "Cerca multi-agente..."
   },
   "deleteConfirmation": {
     "deleteProject": "Rimuovi progetto",

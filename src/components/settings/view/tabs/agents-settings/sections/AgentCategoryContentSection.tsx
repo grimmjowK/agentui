@@ -21,7 +21,7 @@ export default function AgentCategoryContentSection({
   projects,
 }: AgentCategoryContentSectionProps) {
   return (
-    <div className="flex-1 overflow-y-auto p-3 md:p-4">
+    <div className="pt-1">
       {selectedCategory === 'account' && (
         <AccountContent
           agent={selectedAgent}
@@ -78,16 +78,14 @@ export default function AgentCategoryContentSection({
       {selectedCategory === 'permissions' && selectedAgent === 'antigravity' && (
         <PermissionsContent
           agent="antigravity"
-          skipPermissions={antigravityPermissions.skipPermissions}
-          onSkipPermissionsChange={(value) => {
-            onAntigravityPermissionsChange({ ...antigravityPermissions, skipPermissions: value });
+          permissionMode={antigravityPermissions.permissionMode}
+          onPermissionModeChange={(value) => {
+            onAntigravityPermissionsChange({ ...antigravityPermissions, permissionMode: value });
           }}
         />
       )}
 
       {selectedCategory === 'mcp' && (
-        // SettingsProject.name is populated from the DB projectId by
-        // normalizeProjectForSettings, so we can map it straight through.
         <McpServers
           selectedProvider={selectedAgent}
           currentProjects={projects.map<McpProject>((project) => ({

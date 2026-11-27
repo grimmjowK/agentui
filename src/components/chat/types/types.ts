@@ -1,3 +1,5 @@
+import type { ChatBuilderConfig } from '../utils/builderContext';
+import type { CodeBlockRenderers } from '../view/subcomponents/Markdown';
 import type { Project, ProjectSession, LLMProvider } from '../../../types/app';
 
 export type Provider = LLMProvider;
@@ -117,6 +119,7 @@ export interface Question {
 
 export type SessionNavigationOptions = {
   replace?: boolean;
+  provider?: LLMProvider;
 };
 
 export interface ChatInterfaceProps {
@@ -144,4 +147,8 @@ export interface ChatInterfaceProps {
   onTaskClick?: (...args: unknown[]) => void;
   onShowAllTasks?: (() => void) | null;
   onRunInShell?: (command: string) => void;
+  /** 多 Agent 建立器模式；不傳時為一般聊天 */
+  builder?: ChatBuilderConfig | null;
+  /** 依語言覆寫訊息中程式碼區塊的渲染 */
+  codeBlockRenderers?: CodeBlockRenderers | null;
 }

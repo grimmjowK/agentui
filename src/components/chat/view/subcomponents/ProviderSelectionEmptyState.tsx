@@ -15,6 +15,7 @@ import {
 } from "../../../../../shared/modelConstants";
 import type { ProjectSession, LLMProvider } from "../../../../types/app";
 import { NextTaskBanner } from "../../../task-master";
+import { useChatBuilder } from "../../utils/builderContext";
 import {
   Dialog,
   DialogTrigger,
@@ -86,6 +87,7 @@ export default function ProviderSelectionEmptyState({
   setInput,
 }: ProviderSelectionEmptyStateProps) {
   const { t } = useTranslation("chat");
+  const builder = useChatBuilder();
   const { isWindowsServer } = useServerPlatform();
   const { enabledAgents, loaded: agentToggleLoaded } = useAgentToggle();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -177,10 +179,10 @@ export default function ProviderSelectionEmptyState({
         <div className="w-full max-w-md">
           <div className="mb-8 text-center">
             <h2 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
-              {t("providerSelection.title")}
+              {builder?.emptyTitle ?? t("providerSelection.title")}
             </h2>
             <p className="mt-1 text-[13px] text-muted-foreground">
-              {t("providerSelection.description")}
+              {builder?.emptyDescription ?? t("providerSelection.description")}
             </p>
           </div>
 
@@ -285,7 +287,7 @@ export default function ProviderSelectionEmptyState({
             />
           </p>
 
-          {provider && tasksEnabled && isTaskMasterInstalled && (
+          {!builder && provider && tasksEnabled && isTaskMasterInstalled && (
             <div className="mt-5">
               <NextTaskBanner
                 onStartTask={() => setInput(nextTaskPrompt)}

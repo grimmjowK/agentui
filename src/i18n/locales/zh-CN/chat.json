@@ -336,5 +336,10 @@
     "remove": "移除",
     "steering": "引导中…",
     "imageOnly": "（图片）"
+  },
+  "approvals": {
+    "title": "需要审批",
+    "allow": "允许",
+    "deny": "拒绝"
   }
 }

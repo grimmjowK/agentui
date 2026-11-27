@@ -1,9 +1,11 @@
 /** Codex chat runtime: app-server JSON-RPC, with explicit approval replies. */
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { CodexAppServer, codexApprovals, codexOwnership } from './modules/codex-runtime/index.js';
-import type { ThreadItem, ThreadStartParams, TurnCompletedNotification } from './modules/codex-runtime/index.js';
+import type { ThreadItem, ThreadStartParams, TurnCompletedNotification, TurnStartParams } from './modules/codex-runtime/index.js';
 import { sessionsDb } from './modules/database/index.js';
 import { mapPlanUpdate, mapThreadItem, notifySessionsChanged } from './modules/providers/index.js';
 import { terminateShellSessionsBySessionId } from './modules/websocket/index.js';
@@ -63,6 +65,38 @@ export function mapPermissionModeToCodexOptions(mode: unknown): Pick<ThreadStart
   if (mode === 'bypassPermissions') return { sandbox: 'danger-full-access', approvalPolicy: 'never' };
   if (mode === 'acceptEdits') return { sandbox: 'workspace-write', approvalPolicy: 'never' };
   return { sandbox: 'workspace-write', approvalPolicy: 'on-request' };
+}
+
+/**
+ * 從 config.toml 讀 `[sandbox_workspace_write] network_access`：turn/start 的沙箱必須帶完整 policy，
+ * 不讀的話會在降級時把使用者自己開的網路權限一併關掉。
+ */
+function readWorkspaceNetworkAccess(): boolean {
+  try {
+    const root = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+    const toml = fs.readFileSync(path.join(root, 'config.toml'), 'utf8');
+    const section = toml.match(/\[sandbox_workspace_write\]([^[]*)/)?.[1] ?? '';
+    return /^\s*network_access\s*=\s*true\s*$/m.test(section);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * turn/start 的沙箱與審批覆寫。續接既有執行緒時 thread/resume 的 `sandbox` 不一定生效，
+ * 所以每一輪都明確帶上目前模式的策略——升級與降級都要覆寫，否則切回受限模式後會沿用上一輪的 dangerFullAccess。
+ */
+export function mapPermissionModeToTurnPolicy(
+  mode: unknown,
+  cwd: string,
+  networkAccess = readWorkspaceNetworkAccess(),
+): Pick<TurnStartParams, 'sandboxPolicy' | 'approvalPolicy'> {
+  const { sandbox, approvalPolicy } = mapPermissionModeToCodexOptions(mode);
+  if (sandbox === 'danger-full-access') return { sandboxPolicy: { type: 'dangerFullAccess' }, approvalPolicy };
+  return {
+    sandboxPolicy: { type: 'workspaceWrite', writableRoots: [cwd], networkAccess, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+    approvalPolicy,
+  };
 }
 
 type TitleJob = {
@@ -309,8 +343,10 @@ export async function queryCodex(command: string, options: CodexRunOptions = {},
     ];
     const turn = await rpc.request('turn/start', {
       threadId, input: turnInput.length > 0 ? turnInput : [{ type: 'text', text: finalCommand, text_elements: [] }],
-      // 推理强度对本轮及之后的轮次生效；未指定则沿用线程 / config.toml 的设置
+      // 推理强度与沙箱／审批策略对本轮及之后的轮次生效：每轮都按当前模式覆写，支援双向升降权，
+      // 否则切回受限模式后线程会沿用上一轮的 dangerFullAccess
       ...(options.effort && CODEX_EFFORT_LEVELS.has(options.effort) ? { effort: options.effort } : {}),
+      ...mapPermissionModeToTurnPolicy(options.permissionMode, cwd),
     });
     state.turnId = turn.turn.id;
     clearTimeout(startupTimer);

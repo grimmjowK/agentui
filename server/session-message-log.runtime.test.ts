@@ -70,6 +70,7 @@ if (canMock) {
 const { queryClaudeSDK } = await import('./claude-sdk.js');
 const { queryCodex } = await import('./openai-codex.js');
 const { spawnAntigravity } = await import('./antigravity-cli.js');
+const { acpFakeAgent } = await import('./shared/antigravity-acp-fake.test-helper.js');
 const { closeConnection } = await import('./modules/database/connection.js');
 const { initializeDatabase } = await import('./modules/database/init-db.js');
 const { sessionMessagesDb } = await import('./modules/database/repositories/session-messages.db.js');
@@ -336,15 +337,13 @@ rl.on('line', (line) => {
 
 test('Antigravity runtime writes tool/text rows through LoggingWriter', async () => {
   const executable = path.join(root, 'agy');
-  await writeFile(executable, `#!${process.execPath}
-const out = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
-const id = 'antigravity-runtime-e2e';
-out({ event: 'init', conversation_id: id, init: { cwd: process.cwd() } });
-out({ event: 'step_update', step_update: { conversation_id: id, step_index: 0, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { parameters: { CommandLine: 'pwd' } } } });
-out({ event: 'step_update', step_update: { conversation_id: id, step_index: 0, state: 'DONE', step_type: 'tool', tool_name: 'run_command', tool_info: { parameters: { CommandLine: 'pwd' }, output: '/workspace' } } });
-out({ event: 'step_update', step_update: { conversation_id: id, step_index: 1, state: 'DONE', step_type: 'agent_response', text_delta: 'Antigravity answer' } });
-out({ event: 'result', result: { conversation_id: id, status: 'SUCCESS', response: 'Antigravity answer' } });
-`, 'utf8');
+  process.env.FAKE_AGY_SESSION = 'antigravity-runtime-e2e';
+  await writeFile(executable, `#!${process.execPath}\n${acpFakeAgent(`
+  ctx.update({ sessionUpdate: 'tool_call', toolCallId: 'c1', name: 'run_command', args: { CommandLine: 'pwd' }, status: 'in_progress' });
+  ctx.update({ sessionUpdate: 'tool_call_update', toolCallId: 'c1', name: 'run_command', args: { CommandLine: 'pwd' }, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: '/workspace' } }] });
+  ctx.text('Antigravity answer');
+  return {};
+`)}`, 'utf8');
   await chmod(executable, 0o755);
   process.env.ANTIGRAVITY_CLI_PATH = executable;
   process.env.ANTIGRAVITY_HOME = root;
@@ -403,13 +402,12 @@ rl.on('line', (line) => {
 
   // 2. Antigravity mid-stream reconnect + mid-run read + abort
   const agyAbortExec = path.join(root, 'agy-abort');
-  await writeFile(agyAbortExec, `#!${process.execPath}
-const out = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
-const id = 'antigravity-abort-e2e';
-out({ event: 'init', conversation_id: id, init: { cwd: process.cwd() } });
-out({ event: 'step_update', step_update: { conversation_id: id, step_index: 0, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'partial stream ' } });
-process.exit(130);
-`, 'utf8');
+  process.env.FAKE_AGY_SESSION = 'antigravity-abort-e2e';
+  await writeFile(agyAbortExec, `#!${process.execPath}\n${acpFakeAgent(`
+  ctx.text('partial stream ');
+  setTimeout(() => process.exit(130), 20);
+  return undefined;
+`)}`, 'utf8');
   await chmod(agyAbortExec, 0o755);
   process.env.ANTIGRAVITY_CLI_PATH = agyAbortExec;
   process.env.ANTIGRAVITY_HOME = root;

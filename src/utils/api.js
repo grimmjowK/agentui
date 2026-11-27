@@ -103,6 +103,88 @@ export const api = {
     authenticatedFetch(
       `/api/providers/${encodeURIComponent(provider)}/models${refresh ? '?refresh=true' : ''}`,
     ),
+  // 多 Agent（聊天室 / 工作流）
+  multiAgent: {
+    list: () => authenticatedFetch('/api/multi-agent'),
+    get: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}`),
+    create: (body) => authenticatedFetch('/api/multi-agent', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    saveDefinition: (id, definition) =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/definition`, {
+        method: 'PUT',
+        body: JSON.stringify({ definition }),
+      }),
+    startRun: (id, input = '') =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs`, { method: 'POST', body: JSON.stringify({ input }) }),
+    listRuns: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs`),
+    latestRun: (id) => authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs/latest`),
+    finishNode: (id, runId, nodeId, outcome) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/finish`,
+        { method: 'POST', body: JSON.stringify({ outcome }) },
+      ),
+    confirmNode: (id, runId, nodeId, approved, note, rework = false) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/confirm`,
+        { method: 'POST', body: JSON.stringify({ approved, note, rework }) },
+      ),
+    continueNode: (id, runId, nodeId) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/continue`,
+        { method: 'POST' },
+      ),
+    stopRun: (id, runId) =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/stop`, { method: 'POST' }),
+    deleteRun: (id, runId, { force = false } = {}) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}${force ? '?force=true' : ''}`,
+        { method: 'DELETE' },
+      ),
+    restoreRun: (id, runId) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/restore`,
+        { method: 'POST' },
+      ),
+    listThreads: (id) =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/threads`),
+    createThread: (id, title = '') =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/threads`, {
+        method: 'POST',
+        body: JSON.stringify(title ? { title } : {}),
+      }),
+    deleteThread: (id, threadId, { force = false } = {}) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/threads/${encodeURIComponent(threadId)}${force ? '?force=true' : ''}`,
+        { method: 'DELETE' },
+      ),
+    restoreThread: (id, threadId) =>
+      authenticatedFetch(
+        `/api/multi-agent/${encodeURIComponent(id)}/threads/${encodeURIComponent(threadId)}/restore`,
+        { method: 'POST' },
+      ),
+    messages: (id, { threadId, beforeSeq, limit } = {}) => {
+      const params = new URLSearchParams();
+      if (threadId !== undefined) params.set('threadId', String(threadId));
+      if (beforeSeq !== undefined) params.set('beforeSeq', String(beforeSeq));
+      if (limit !== undefined) params.set('limit', String(limit));
+      const qs = params.toString();
+      return authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/messages${qs ? `?${qs}` : ''}`);
+    },
+    sendMessage: (id, content, threadId = 'default') =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content, threadId }),
+      }),
+    cancelQueued: (id, messageId) =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' }),
+    stopTurn: (id, turnId) =>
+      authenticatedFetch(`/api/multi-agent/${encodeURIComponent(id)}/messages/stop`, {
+        method: 'POST',
+        body: JSON.stringify({ turnId }),
+      }),
+  },
   // 收藏：文件夹内置顶 + 转录另存一份，规避 CLI 全局保留期清理
   toggleSessionStar: (sessionId) =>
     authenticatedFetch(`/api/providers/sessions/${sessionId}/toggle-star`, {
@@ -112,6 +194,8 @@ export const api = {
     authenticatedFetch(`/api/providers/sessions/${sessionId}/restore`, {
       method: 'POST',
     }),
+  getSessionInfo: (sessionId) =>
+    authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}`),
   // session 最後使用的模型（存在後端資料庫）
   getSessionModel: (sessionId) =>
     authenticatedFetch(`/api/providers/sessions/${encodeURIComponent(sessionId)}/model`),

@@ -146,6 +146,102 @@ CREATE INDEX IF NOT EXISTS idx_session_messages_tool_id
     ON session_messages(session_id, json_extract(payload, '$.toolId'));
 `;
 
+// 多 Agent（聊天室 / 工作流）。definition_json 由 shared/multiAgent.ts 型別約束；
+// runs / turns 保存當時的定義快照，修改定義不影響歷史。
+export const MULTI_AGENT_TABLES_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS multi_agents (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('chatroom', 'workflow')),
+    name TEXT NOT NULL,
+    definition_json TEXT,
+    definition_version INTEGER NOT NULL DEFAULT 0,
+    builder_session_json TEXT,
+    member_sessions_json TEXT NOT NULL DEFAULT '{}',
+    workspace_path TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agents_user ON multi_agents(user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS multi_agent_runs (
+    id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    definition_version INTEGER NOT NULL,
+    definition_snapshot_json TEXT NOT NULL,
+    node_states_json TEXT NOT NULL DEFAULT '{}',
+    start_input TEXT,
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_runs_agent ON multi_agent_runs(multi_agent_id, started_at);
+
+CREATE TABLE IF NOT EXISTS multi_agent_threads (
+    id TEXT NOT NULL,
+    multi_agent_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    member_sessions_json TEXT NOT NULL DEFAULT '{}',
+    is_archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (multi_agent_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_threads_agent ON multi_agent_threads(multi_agent_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS multi_agent_turns (
+    id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT 'default',
+    trigger_message_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    definition_snapshot_json TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_turns_agent ON multi_agent_turns(multi_agent_id, started_at);
+
+CREATE TABLE IF NOT EXISTS multi_agent_messages (
+    id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT 'default',
+    turn_id TEXT,
+    seq INTEGER NOT NULL,
+    author_kind TEXT NOT NULL CHECK (author_kind IN ('user', 'member', 'system')),
+    member_id TEXT,
+    author_snapshot_json TEXT,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL,
+    finish_reason TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_multi_agent_messages_seq ON multi_agent_messages(multi_agent_id, seq);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_messages_thread_seq ON multi_agent_messages(multi_agent_id, thread_id, seq);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_turns_thread ON multi_agent_turns(multi_agent_id, thread_id, status);
+
+-- 多 Agent 擁有的所有 provider 會話索引（工作流節點、建立器、聊天室成員）：供側邊欄／檢索排除與擁有者檢查
+CREATE TABLE IF NOT EXISTS multi_agent_sessions (
+    session_id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('workflow', 'builder', 'member')),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_multi_agent_sessions_agent ON multi_agent_sessions(multi_agent_id);
+
+-- 工作流節點產生的 provider 會話：側邊欄與檢索排除、聊天頁顯示節點標記（node-live-session D2）
+CREATE TABLE IF NOT EXISTS workflow_sessions (
+    session_id TEXT PRIMARY KEY,
+    multi_agent_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_sessions_agent ON workflow_sessions(multi_agent_id);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -189,4 +285,6 @@ ${APP_CONFIG_TABLE_SCHEMA_SQL}
 ${SESSION_MODELS_TABLE_SCHEMA_SQL}
 
 ${SESSION_MESSAGES_TABLE_SCHEMA_SQL}
+
+${MULTI_AGENT_TABLES_SCHEMA_SQL}
 `;

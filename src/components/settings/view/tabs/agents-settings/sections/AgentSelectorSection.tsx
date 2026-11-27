@@ -1,4 +1,4 @@
-import { PillBar, Pill } from '../../../../../../shared/view/ui';
+import { cn } from '../../../../../../lib/utils';
 import SessionProviderLogo from '../../../../../llm-logo-provider/SessionProviderLogo';
 import type { AgentProvider } from '../../../../types/types';
 import type { AgentSelectorSectionProps } from '../types';
@@ -17,30 +17,34 @@ export default function AgentSelectorSection({
   agentContextById,
 }: AgentSelectorSectionProps) {
   return (
-    <div className="flex-shrink-0 border-b border-border px-3 py-2 md:px-4 md:py-3">
-      <PillBar className="w-full md:w-auto">
-        {agents.map((agent) => {
-          const dotColor =
-            agent === 'claude' ? 'bg-blue-500' :
-            agent === 'cursor' ? 'bg-purple-500' :
-            agent === 'antigravity' ? 'bg-indigo-500' : 'bg-foreground/60';
+    <div className="inline-flex w-full flex-wrap gap-1 rounded-2xl bg-foreground/[0.04] p-1 dark:bg-white/[0.05]">
+      {agents.map((agent) => {
+        const isActive = selectedAgent === agent;
+        const isAuth = agentContextById[agent].authStatus.authenticated;
 
-          return (
-            <Pill
-              key={agent}
-              isActive={selectedAgent === agent}
-              onClick={() => onSelectAgent(agent)}
-              className="min-w-0 flex-1 justify-center md:flex-initial"
-            >
-              <SessionProviderLogo provider={agent} className="h-4 w-4 flex-shrink-0" />
-              <span className="truncate">{AGENT_NAMES[agent]}</span>
-              {agentContextById[agent].authStatus.authenticated && (
-                <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${dotColor}`} />
+        return (
+          <button
+            key={agent}
+            type="button"
+            onClick={() => onSelectAgent(agent)}
+            className={cn(
+              'flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-[13px] font-medium transition-all duration-150',
+              isActive
+                ? 'bg-background text-foreground shadow-sm dark:bg-card'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <SessionProviderLogo provider={agent} className="h-4 w-4 flex-shrink-0" />
+            <span className="truncate">{AGENT_NAMES[agent]}</span>
+            <span
+              className={cn(
+                'h-1.5 w-1.5 flex-shrink-0 rounded-full',
+                isAuth ? 'bg-emerald-500' : 'bg-muted-foreground/30',
               )}
-            </Pill>
-          );
-        })}
-      </PillBar>
+            />
+          </button>
+        );
+      })}
     </div>
   );
 }

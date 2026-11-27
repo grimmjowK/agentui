@@ -86,7 +86,10 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   useEffect(() => {
     const onChange = (event: Event) => {
       if (provider !== 'antigravity' || selectedSession?.id) return;
-      const nextMode = (event as CustomEvent<boolean>).detail ? 'bypassPermissions' : 'default';
+      const detail = (event as CustomEvent<PermissionMode | boolean>).detail;
+      const nextMode: PermissionMode = typeof detail === 'string'
+        ? detail
+        : detail ? 'bypassPermissions' : 'default';
       setPermissionMode(nextMode);
     };
     window.addEventListener('antigravity-permissions-change', onChange);

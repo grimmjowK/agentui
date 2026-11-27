@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { createContext, useContext, useMemo, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -46,7 +46,25 @@ function markdownUrlTransform(url: string): string {
   return defaultUrlTransform(url);
 }
 
-const CodeBlock = ({ node, inline, className, children, ...props }: CodeBlockProps) => {
+/**
+ * 依語言覆寫程式碼區塊的渲染（例如多 Agent 建立器把 multi-agent-json 區塊渲染成預覽卡片）。
+ * 不提供時照常以語法高亮顯示。
+ */
+export type CodeBlockRenderers = Record<string, (code: string) => React.ReactNode>;
+export const CodeBlockRenderersContext = createContext<CodeBlockRenderers | null>(null);
+
+const CodeBlock = (props: CodeBlockProps) => {
+  const renderers = useContext(CodeBlockRenderersContext);
+  const language = /language-([\w-]+)/.exec(props.className || '')?.[1];
+  const renderer = language ? renderers?.[language] : undefined;
+  if (renderer && !props.inline) {
+    const raw = Array.isArray(props.children) ? props.children.join('') : String(props.children ?? '');
+    return <>{renderer(raw.replace(/\r?\n$/, ''))}</>;
+  }
+  return <DefaultCodeBlock {...props} />;
+};
+
+const DefaultCodeBlock = ({ node, inline, className, children, ...props }: CodeBlockProps) => {
   const { t } = useTranslation('chat');
   const [copied, setCopied] = useState(false);
   const raw = Array.isArray(children) ? children.join('') : String(children ?? '');
