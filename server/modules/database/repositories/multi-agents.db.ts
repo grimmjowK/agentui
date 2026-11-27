@@ -450,8 +450,8 @@ export const multiAgentsDb = {
 
   // ----------------- 聊天室 -----------------
 
-  /** 列出聊天室下的所有對話（若尚無記錄但有舊訊息，自動補建 default 對話） */
-  listThreads(multiAgentId: string, limit = 30): ChatThread[] {
+  /** 列出聊天室下的所有對話中繼資料（預設不限筆數，供活躍與歸檔記錄切換；舊訊息補建 default） */
+  listThreads(multiAgentId: string, limit = -1): ChatThread[] {
     const db = getConnection();
     return db.transaction(() => {
       const hasDefaultMsg = db.prepare(

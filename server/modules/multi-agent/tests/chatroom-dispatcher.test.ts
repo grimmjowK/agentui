@@ -260,3 +260,34 @@ test('同一聊天室配置下可開啟多個獨立對話，並行執行且訊�
     assert.equal(threads.length, 2);
   });
 });
+
+
+test('超長回覆仍傳遞本輪要求與截短的成員輸出，儲存內容維持完整', async () => {
+  await withDb(async () => {
+    const { dispatcher, agent, id, mock } = setup(twoMembers(), async (ctx) => {
+      await say(ctx.prompt.includes('以「產品經理」') ? 'REPORT-BEGIN' + 'x'.repeat(20001) : 'reviewed')(ctx);
+    });
+    dispatcher.send(agent(), '@所有人 REVIEW-REQUEST please review the report');
+    await dispatcher.idle(id);
+    assert.equal(mock.calls.length, 2);
+    assert.ok(mock.calls[1].prompt.includes('REVIEW-REQUEST') && mock.calls[1].prompt.includes('REPORT-BEGIN'),
+      '下一位成員必須收到使用者要求與前一位的報告');
+    assert.ok(mock.calls[1].prompt.length < 21000);
+    assert.equal(replies(id)[0].content.length, 20013);
+  });
+});
+
+test('超過三十筆歸檔對話後仍可列出所有活躍與歸檔對話', async () => {
+  await withDb(async () => {
+    const { id } = setup(twoMembers(), say('ok'));
+    const active = multiAgentsDb.createThread(id, 'active');
+    for (let i = 0; i < 30; i++) {
+      const thread = multiAgentsDb.createThread(id, 'archived-' + i);
+      multiAgentsDb.archiveThread(id, thread.id, true);
+    }
+    const threads = multiAgentsDb.listThreads(id);
+    assert.ok(threads.some((t) => t.id === active.id));
+    assert.equal(threads.length, 31);
+    assert.equal(threads.filter((t) => t.isArchived).length, 30);
+  });
+});

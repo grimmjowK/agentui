@@ -40,6 +40,7 @@ export function useChatroom(multiAgentId: string) {
   selectedThreadRef.current = selectedThreadId;
 
   const reloadMessages = useCallback(async (threadId: string) => {
+    loadingMore.current = false;
     const seq = ++requestSeqRef.current;
     try {
       const data = await readData<{ messages: ChatMessage[]; activeTurnId: string | null }>(
@@ -58,19 +59,23 @@ export function useChatroom(multiAgentId: string) {
   }, [multiAgentId]);
 
   const reloadThreads = useCallback(async (preferThreadId?: string) => {
+    const seq = ++requestSeqRef.current;
     try {
       const data = await readData<{ threads: ChatThread[]; activeTurns: Record<string, string> }>(
         api.multiAgent.listThreads(multiAgentId),
       );
+      if (seq !== requestSeqRef.current) return;
       setThreads(data.threads);
       setActiveTurns(data.activeTurns ?? {});
       const unarchived = data.threads.filter((t) => !t.isArchived);
       const targetId = preferThreadId && data.threads.some((t) => t.id === preferThreadId && !t.isArchived)
         ? preferThreadId
         : unarchived[0]?.id ?? data.threads[0]?.id ?? 'default';
+      selectedThreadRef.current = targetId;
       setSelectedThreadId(targetId);
       await reloadMessages(targetId);
     } catch (err) {
+      if (seq !== requestSeqRef.current) return;
       setError((err as Error).message);
       setLoading(false);
     }
@@ -80,6 +85,7 @@ export function useChatroom(multiAgentId: string) {
     requestSeqRef.current += 1;
     loadingMore.current = false;
     setThreads([]);
+    selectedThreadRef.current = 'default';
     setSelectedThreadId('default');
     setActiveTurns({});
     setMessages([]);
@@ -90,10 +96,13 @@ export function useChatroom(multiAgentId: string) {
 
   useEffect(() => {
     void reloadThreads(selectedThreadRef.current);
+    return () => { requestSeqRef.current += 1; };
   }, [reloadThreads, isConnected]);
 
   const selectThread = useCallback((threadId: string) => {
     if (threadId === selectedThreadRef.current) return;
+    selectedThreadRef.current = threadId;
+    loadingMore.current = false;
     setSelectedThreadId(threadId);
     setMessages([]);
     setHasMore(false);
@@ -102,18 +111,24 @@ export function useChatroom(multiAgentId: string) {
   }, [reloadMessages]);
 
   const createThread = useCallback(async () => {
+    const seq = ++requestSeqRef.current;
+    loadingMore.current = false;
     setError(null);
     try {
       const created = await readData<ChatThread>(api.multiAgent.createThread(multiAgentId));
+      if (seq !== requestSeqRef.current) return;
+      selectedThreadRef.current = created.id;
       setThreads((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
       setSelectedThreadId(created.id);
       setMessages([]);
       setHasMore(false);
       setLoading(false);
     } catch (err) {
+      if (seq !== requestSeqRef.current) return;
       setError((err as Error).message);
+      await reloadMessages(selectedThreadRef.current);
     }
-  }, [multiAgentId]);
+  }, [multiAgentId, reloadMessages]);
 
   const deleteThread = useCallback(async (threadId: string, options: { force?: boolean } = {}) => {
     setError(null);
@@ -149,14 +164,16 @@ export function useChatroom(multiAgentId: string) {
     const first = messages[0];
     if (!first || loadingMore.current) return;
     loadingMore.current = true;
+    const seq = requestSeqRef.current;
     try {
       const data = await readData<{ messages: ChatMessage[] }>(
         api.multiAgent.messages(multiAgentId, { threadId: selectedThreadId, beforeSeq: first.seq, limit: PAGE }),
       );
+      if (seq !== requestSeqRef.current) return;
       setMessages((current) => [...data.messages.filter((m) => !current.some((c) => c.id === m.id)), ...current]);
       setHasMore(data.messages.length === PAGE);
     } finally {
-      loadingMore.current = false;
+      if (seq === requestSeqRef.current) loadingMore.current = false;
     }
   }, [messages, multiAgentId, selectedThreadId]);
 

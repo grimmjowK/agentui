@@ -125,6 +125,25 @@ export function buildMemberPrompt(input: {
   return parts.filter(Boolean).join('\n\n');
 }
 
+/** 只截短傳給模型的副本；保留本輪最新使用者要求與最近成員輸出。 */
+function replayHistory(history: ChatMessage[]) {
+  const request = [...history].reverse().find((message) => message.authorKind === 'user');
+  const requestContent = request
+    ? truncateCodePoints(request.content, REPLAY_MAX_CHARS / 2) ?? request.content
+    : '';
+  let clipped = request ? requestContent !== request.content : false;
+  const candidates = history.filter((message) => message !== request).map((message) => {
+    const content = truncateCodePoints(message.content, 6000);
+    if (content === null) return message;
+    clipped = true;
+    return { ...message, content };
+  });
+  const recent = takeRecentWithin(candidates, (message) => codePoints(message.content),
+    REPLAY_MAX_MESSAGES - (request ? 1 : 0), REPLAY_MAX_CHARS - codePoints(requestContent));
+  const items = request ? [...recent.items, { ...request, content: requestContent }] : recent.items;
+  return { items: items.sort((a, b) => a.seq - b.seq), truncated: clipped || recent.truncated };
+}
+
 export class ChatroomDispatcher {
   private readonly active = new Map<string, ActiveTurn>();
   private readonly deleting = new Set<string>();
@@ -284,7 +303,7 @@ export class ChatroomDispatcher {
     const historyAll = session
       ? multiAgentsDb.listMessagesAfter(agent.id, session.lastDeliveredSeq, turn.threadId)
       : multiAgentsDb.listMessagesAfter(agent.id, 0, turn.threadId);
-    const replay = takeRecentWithin(historyAll, (m) => codePoints(m.content), REPLAY_MAX_MESSAGES, REPLAY_MAX_CHARS);
+    const replay = replayHistory(historyAll);
 
     const message = multiAgentsDb.appendMessage({
       multiAgentId: agent.id, threadId: turn.threadId, turnId: turn.turnId, authorKind: 'member', memberId: member.id,
@@ -324,7 +343,7 @@ export class ChatroomDispatcher {
     let { result, content, finishReason }: { result: Awaited<ReturnType<AgentCall['run']>>; content: string; finishReason: string | null } = await run(session?.sessionId ?? null, !session, replay.items, replay.truncated);
     // 續接失敗：清除 session 重建後重試一次
     if (session && result.status === 'failed' && !turn.stopping) {
-      const full = takeRecentWithin(multiAgentsDb.listMessagesAfter(agent.id, 0, turn.threadId), (m) => codePoints(m.content), REPLAY_MAX_MESSAGES, REPLAY_MAX_CHARS);
+      const full = replayHistory(multiAgentsDb.listMessagesAfter(agent.id, 0, turn.threadId));
       ({ result, content, finishReason } = await run(null, true, full.items, full.truncated));
     }
 
