@@ -15,6 +15,8 @@ export const MAX_PARALLEL_NODES = 3;
 export const MAX_CONCURRENT_RUNS = 5;
 /** 每個上游輸出併入下游提示的上限（code points） */
 export const UPSTREAM_OUTPUT_LIMIT = 6000;
+/** 刪除工作流時等待執行中 run 收尾的上限 */
+const STOP_WAIT_TIMEOUT_MS = 15_000;
 
 type Publish = (userId: string | number, event: unknown) => void;
 
@@ -138,6 +140,7 @@ function syncLatestAssistantOutput(state: NodeRunStatus): void {
   }
 }
 
+/** 對話頁續接帶來的附件與單輪覆寫；權限與模型的合法性由 sanitizeResumeOverrides 依 provider 校驗 */
 function unpackResumeMeta(raw: unknown): WorkflowResumeMeta {
   if (Array.isArray(raw)) return { images: raw };
   if (raw && typeof raw === 'object') return raw as WorkflowResumeMeta;
@@ -240,10 +243,17 @@ export class WorkflowRunner {
     await active.done;
   }
 
-  async stopByAgent(multiAgentId: string): Promise<void> {
+  /** 停止並等待該 agent 的所有 run 收尾；超過 timeoutMs 仍未結束就放棄等待（避免刪除請求永久卡住） */
+  async stopByAgent(multiAgentId: string, timeoutMs = STOP_WAIT_TIMEOUT_MS): Promise<void> {
     const targets = [...this.active.values()].filter((a) => a.agent.id === multiAgentId);
     await Promise.all(targets.map((a) => this.stop(a.run.id)));
-    await Promise.all(targets.map((a) => a.done));
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = await Promise.race([
+      Promise.all(targets.map((a) => a.done)).then(() => false),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(true), timeoutMs); }),
+    ]);
+    clearTimeout(timer);
+    if (timedOut) console.warn(`[workflow] stopByAgent(${multiAgentId}) 等待逾時 ${timeoutMs}ms，繼續刪除`);
   }
 
   private async execute(active: ActiveRun): Promise<void> {

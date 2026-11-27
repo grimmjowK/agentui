@@ -74,11 +74,11 @@ test('extractTitleFromCodexReply 只接受 title 欄位：標準 JSON、markdown
 });
 
 test('mapPermissionModeToTurnPolicy 對所有模式顯式產出 sandboxPolicy 與 approvalPolicy，支援從 bypassPermissions 安全降權回 default/acceptEdits', () => {
-  assert.deepEqual(mapPermissionModeToTurnPolicy('bypassPermissions', '/proj'), {
+  assert.deepEqual(mapPermissionModeToTurnPolicy('bypassPermissions', '/proj', false), {
     sandboxPolicy: { type: 'dangerFullAccess' },
     approvalPolicy: 'never',
   });
-  assert.deepEqual(mapPermissionModeToTurnPolicy('acceptEdits', '/proj'), {
+  assert.deepEqual(mapPermissionModeToTurnPolicy('acceptEdits', '/proj', false), {
     sandboxPolicy: {
       type: 'workspaceWrite',
       writableRoots: ['/proj'],
@@ -88,7 +88,7 @@ test('mapPermissionModeToTurnPolicy 對所有模式顯式產出 sandboxPolicy �
     },
     approvalPolicy: 'never',
   });
-  assert.deepEqual(mapPermissionModeToTurnPolicy('default', '/proj'), {
+  assert.deepEqual(mapPermissionModeToTurnPolicy('default', '/proj', false), {
     sandboxPolicy: {
       type: 'workspaceWrite',
       writableRoots: ['/proj'],
@@ -98,4 +98,9 @@ test('mapPermissionModeToTurnPolicy 對所有模式顯式產出 sandboxPolicy �
     },
     approvalPolicy: 'on-request',
   });
+  // workspaceWrite 沿用 config.toml 的 network_access，降權時不會把使用者開的網路權限關掉
+  assert.equal(
+    (mapPermissionModeToTurnPolicy('default', '/proj', true).sandboxPolicy as { networkAccess?: boolean }).networkAccess,
+    true,
+  );
 });

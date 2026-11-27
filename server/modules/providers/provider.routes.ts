@@ -20,6 +20,16 @@ import { AppError, asyncHandler, createApiSuccessResponse } from '@/shared/utils
 
 const router = express.Router();
 
+// 多 Agent 擁有的會話（節點／建立器／成員）：所有 /sessions/:sessionId 路由一律先驗擁有者
+router.param('sessionId', (req, _res, next, value) => {
+  try {
+    if (typeof value === 'string') assertMultiAgentSessionAccess(req, value);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/codex/runtime', asyncHandler(async (req: Request, res: Response) => {
   const runtime = getCodexRuntimeInfo();
   const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : null;
@@ -470,7 +480,6 @@ router.get(
   '/sessions/:sessionId',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
-    assertMultiAgentSessionAccess(req, sessionId);
     const row = sessionsDb.getSessionById(sessionId);
     const wf = workflowOf(req, sessionId);
     if (!row && !wf) throw new AppError('Session not found.', { code: 'SESSION_NOT_FOUND', statusCode: 404 });
@@ -625,7 +634,6 @@ router.get(
   '/sessions/:sessionId/messages',
   asyncHandler(async (req: Request, res: Response) => {
     const sessionId = parseSessionId(req.params.sessionId);
-    assertMultiAgentSessionAccess(req, sessionId);
     const limitRaw = readOptionalQueryString(req.query.limit);
     const offsetRaw = readOptionalQueryString(req.query.offset);
     const beforeSeqRaw = readOptionalQueryString(req.query.beforeSeq);
